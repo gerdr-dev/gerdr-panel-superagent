@@ -1,6 +1,10 @@
 /* Theme: the same tokens as gerdr's own UI, so the Work pages look like part of gerdr in light and dark. */
 @custom-variant dark (&:is(.dark *));
 
+/* tw-animate: what shadcn/ui's animate-in / slide-in-from-right / data-[state=closed]:animate-out compile to. The panel
+   brings its own copy rather than counting on the page it is mounted in to have one. */
+@import "./animate.css";
+
 /* 灰阶纯灰（不带色相），强调色只有一个 —— 和终端里那些彩色输出放一起不脏。 */
 :root {
   /* 圆角就这几档（sm 6 / md 8 / lg 10 / xl 14 px），按东西的大小挑，别写死像素：

@@ -1,11 +1,11 @@
 import { ScrollText, Timer, X } from "lucide-react";
 import clsx from "clsx";
-import { useEffect } from "react";
+import { Sheet, SheetContent, SheetTitle } from "./ui/sheet";
 import Flow from "../settings/Flow";
 import Schedules from "../settings/Schedules";
 import { Button } from "./Button";
 
-// The board's settings, over the board: how the user works (流程: their skill, with its variables) and what runs by
+// The board's settings, in a shadcn Sheet over the board: how the user works (流程: their skill, with its variables) and what runs by
 // itself (定时任务: mrwatch and the rest). Not pages of their own: the panel is the board, these are its settings.
 
 export type SettingsTab = "flow" | "schedules";
@@ -16,15 +16,10 @@ const TABS: { id: SettingsTab; label: string; icon: typeof Timer }[] = [
 ];
 
 export function SettingsSheet({ tab, onTab, onClose }: { tab: SettingsTab; onTab: (t: SettingsTab) => void; onClose: () => void }) {
-  useEffect(() => {
-    const f = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !e.defaultPrevented && !document.querySelector("[role=dialog]")) onClose();
-    };
-    window.addEventListener("keydown", f);
-    return () => window.removeEventListener("keydown", f);
-  }, [onClose]);
   return (
-    <div className="absolute inset-0 z-40 flex flex-col bg-background animate-in fade-in-0 slide-in-from-bottom-2 duration-200 ease-out">
+    <Sheet open onOpenChange={(o) => !o && onClose()}>
+      <SheetContent showCloseButton={false} aria-describedby={undefined} className="w-full gap-0 sm:max-w-5xl">
+        <SheetTitle className="sr-only">看板设置</SheetTitle>
       <header className="flex items-center gap-1 border-b px-3 py-2">
         <span className="mr-2 text-[14px] font-medium">看板设置</span>
         {TABS.map((t) => (
@@ -42,6 +37,7 @@ export function SettingsSheet({ tab, onTab, onClose }: { tab: SettingsTab; onTab
         </Button>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">{tab === "flow" ? <Flow /> : <Schedules />}</div>
-    </div>
+      </SheetContent>
+    </Sheet>
   );
 }

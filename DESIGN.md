@@ -131,6 +131,14 @@ worker 拿到一组 Work 工具（`local/board.ts`，经 Gerdr 的 `gerdr work m
 
 人工任务、已完成的任务、还没派出去的任务，才用看板自己的详情面板。
 
+## 界面：自己的组件，只有对话用 Gerdr 的
+
+面板的界面全是自己的：按钮、抽屉、弹窗用 shadcn/ui（`ui/src/components/ui/`，照 shadcn 的做法拷进来，依赖写在
+`ui/package.json`），动画是自带的 tw-animate（`ui/src/animate.css`）。从 Gerdr 拿的只有对话本身：`@gerdr/core` 的
+`SessionChat`、`useSession`、`onShowSession`、卡片注册。
+**被否掉的做法：用 Gerdr 内部的组件**（`@gerdr/core/ui`）。面板就跟着 Gerdr 的组件走了，Gerdr 改一次面板变一次，
+想按自己的意思改也改不了。面板是能单独发布、给别人装的东西，界面得自己说了算。
+
 ## 文件
 
 | 文件 | 内容 |

@@ -1,14 +1,17 @@
 {
-  "name": "gerdr-work",
+  "name": "gerdr-panel-taskboard",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "gerdr's Work view: your own pages and menu. No build step: gerdr reads this folder's source, saving takes effect.",
+  "description": "A Gerdr panel: hand work to coding agents and follow it on a task board.",
   "dependencies": {
+    "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "lucide-react": "0.525.0",
+    "radix-ui": "1.8.1",
     "react": "19.3.1",
     "react-dom": "19.3.1",
-    "react-router": "7.18.5"
+    "react-router": "7.18.5",
+    "tailwind-merge": "3.7.0"
   }
 }

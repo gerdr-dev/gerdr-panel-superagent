@@ -2,6 +2,8 @@ import { AlertTriangle, Bot, Check, CheckCircle2, Circle, CircleDashed, CircleDo
 import clsx from "clsx";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "../components/Button";
+import { Dialog, DialogContent, DialogTitle } from "../components/ui/dialog";
+import { Sheet, SheetContent, SheetTitle } from "../components/ui/sheet";
 import { AttachmentBar, useAttach, type Attachment } from "../components/Attachments";
 import { askSecret, secretNames } from "../lib/bridge";
 import { ChatDrawer, type ChatAction, type ChatItem } from "../components/ChatDrawer";
@@ -256,15 +258,11 @@ function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, T
 
 /** Everything about one task and what you can do with it, in a panel on the right (full screen on a phone). */
 function Drawer({ t, byId, act, onClose, onGo }: { t: Task; byId: Record<string, Task>; act: Act; onClose: () => void; onGo: (id: string) => void }) {
-  useEffect(() => {
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", esc);
-    return () => window.removeEventListener("keydown", esc);
-  }, [onClose]);
   const done = t.status === "done" || t.status === "dropped";
   return (
-    <div className="fixed inset-0 z-40" onClick={onClose}>
-      <aside role="dialog" aria-label={t.title} className="absolute inset-y-0 right-0 flex w-[min(520px,100%)] flex-col border-l bg-background shadow-xl animate-in slide-in-from-right duration-200 ease-out" onClick={(e) => e.stopPropagation()}>
+    <Sheet open onOpenChange={(o) => !o && onClose()}>
+      <SheetContent showCloseButton={false} aria-describedby={undefined} className="w-full gap-0 sm:max-w-[520px]">
+        <SheetTitle className="sr-only">{t.title}</SheetTitle>
         <div className="flex items-center gap-2 border-b px-4 py-2.5 text-[12px] text-muted-foreground">
           {t.owner === "human" ? <Hand className="size-3.5" /> : <Bot className="size-3.5" />}
           <span className="font-mono">{t.id}</span>
@@ -274,8 +272,8 @@ function Drawer({ t, byId, act, onClose, onGo }: { t: Task; byId: Record<string,
           </Button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-4">{done ? <DoneDetail t={t} /> : t.owner === "human" ? <HumanCard key={t.id} t={t} byId={byId} act={act} onGo={onGo} /> : <AgentCard key={t.id} t={t} byId={byId} act={act} />}</div>
-      </aside>
-    </div>
+      </SheetContent>
+    </Sheet>
   );
 }
 
@@ -685,10 +683,10 @@ function NewTask({ onClose, act }: { onClose: () => void; act: Act }) {
   };
   const ok = !attach.uploading && (owner === "human" ? f.title.trim() : f.prompt.trim() || files.length) && (f.kind !== "secret" || /^[\w.-]+$/.test(f.name));
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 animate-in fade-in-0 duration-150 max-md:items-end max-md:p-0" onClick={() => !busy && onClose()}>
-      <div role="dialog" aria-modal="true" aria-label="新任务" className="flex max-h-[90dvh] w-full max-w-xl flex-col gap-3 overflow-y-auto rounded-xl border bg-background p-4 shadow-lg animate-in fade-in-0 zoom-in-95 duration-150 ease-out max-md:rounded-b-none max-md:zoom-in-100 max-md:slide-in-from-bottom" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === "Escape" && !busy && onClose()}>
+    <Dialog open onOpenChange={(o) => !o && !busy && onClose()}>
+      <DialogContent showCloseButton={false} aria-describedby={undefined} className="flex max-h-[90dvh] w-full flex-col gap-3 overflow-y-auto p-4 sm:max-w-xl">
         <div className="flex items-center justify-between">
-          <h2 className="font-medium">新任务</h2>
+          <DialogTitle className="text-[15px] font-medium">新任务</DialogTitle>
           <Button variant="ghost" size="icon" aria-label="关闭" onClick={onClose}>
             <X className="size-4" />
           </Button>
@@ -771,7 +769,7 @@ function NewTask({ onClose, act }: { onClose: () => void; act: Act }) {
             {owner === "agent" ? "创建并派出" : "创建"}
           </Button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

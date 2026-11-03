@@ -1,12 +1,15 @@
 import { ArrowDownRight, X } from "lucide-react";
 import clsx from "clsx";
 import { useEffect, useState } from "react";
+import { Sheet, SheetContent, SheetTitle } from "./ui/sheet";
 import { SessionChat, useSession } from "@gerdr/core";
 import { Button } from "./Button";
 
-// A worker's conversation over the right of the board: Gerdr's own chat (SessionChat from @gerdr/core, the same one as
-// a pane in Code: images, files, approvals, cards), with the board's line, things waiting on the user and buttons above
-// it. A drawer: Esc or a click outside closes it.
+// A worker's conversation over the right of the board: Gerdr's own chat (SessionChat from @gerdr/core: images, files,
+// approvals, cards), with the board's line, things waiting on the user and buttons above it. A shadcn Sheet, not
+// modal: the chat opens things of its own outside the sheet (a picture's lightbox, menus), which a modal sheet would
+// make unclickable and count as a click outside. Esc or a click on the board closes it; an Esc the chat's input box
+// is using (stopping the agent) doesn't.
 
 /** A button above the chat. confirm: the first click asks (the label becomes this), the second does it. */
 export type ChatAction = { id: string; label: string; kind?: "primary" | "danger"; confirm?: string };
@@ -32,19 +35,22 @@ export function ChatDrawer({
   const [armed, setArmed] = useState("");
   const [jump, setJump] = useState<{ ref: string; seq: number }>();
   useEffect(() => setArmed(""), [session]);
-  useEffect(() => {
-    const f = (e: KeyboardEvent) => {
-      // The chat uses Esc itself (stopping the agent, closing its menus): only one nobody took closes the drawer
-      if (e.key === "Escape" && !e.defaultPrevented && !document.querySelector("[role=dialog][data-state=open]")) onClose();
-    };
-    window.addEventListener("keydown", f);
-    return () => window.removeEventListener("keydown", f);
-  }, [onClose]);
   const go = (ref: string) => setJump((j) => ({ ref, seq: (j?.seq ?? 0) + 1 }));
   return (
-    <>
-      <div className="absolute inset-0 z-20 bg-black/20 animate-in fade-in-0 duration-150" onClick={onClose} aria-hidden />
-      <aside className="absolute inset-y-0 right-0 z-30 flex w-[min(640px,100%)] flex-col border-l bg-background shadow-xl animate-in slide-in-from-right duration-200 ease-out" aria-label={s?.title || session}>
+    <Sheet open modal={false} onOpenChange={(o) => !o && onClose()}>
+      <SheetContent
+        showCloseButton={false}
+        aria-describedby={undefined}
+        className="w-full gap-0 sm:max-w-[640px]"
+        onEscapeKeyDown={(e) => {
+          if ((document.activeElement as Element | null)?.closest?.("textarea, input, [contenteditable=true]")) e.preventDefault();
+        }}
+        onInteractOutside={(e) => {
+          // Only a click on the board itself: not the chat's own lightbox, menus or Gerdr's toasts
+          if (!(e.target as Element | null)?.closest?.("[data-gerdr-mount]")) e.preventDefault();
+        }}
+      >
+        <SheetTitle className="sr-only">{s?.title || session}</SheetTitle>
         <div className="flex h-10 shrink-0 items-center gap-2 border-b px-3">
           <span className={clsx("size-2 shrink-0 rounded-full", s?.status === "running" ? "bg-ok" : s?.status === "waiting" || s?.status === "error" ? "bg-warn" : "bg-muted-foreground/40")} />
           <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{s?.title || session}</span>
@@ -94,7 +100,7 @@ export function ChatDrawer({
         <div className="min-h-0 flex-1">
           <SessionChat id={session} focused jump={jump} />
         </div>
-      </aside>
-    </>
+      </SheetContent>
+    </Sheet>
   );
 }
