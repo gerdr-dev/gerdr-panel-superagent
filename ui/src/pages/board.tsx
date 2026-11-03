@@ -50,7 +50,11 @@ export default function BoardPage() {
   const panel = sel && inChat ? chatPanel(sel, byId) : null;
   // A conversation opened from a panel ("回到 tN 的对话", a finished task's chat): the chat alone, over the panel
   const [peek, setPeek] = useState("");
-  openChat = setPeek;
+  // Opening a conversation from a task's panel closes the panel: it sat on top and hid the chat (on a phone, all of it)
+  openChat = (session: string) => {
+    setOpen("");
+    setPeek(session);
+  };
   // A worker's conversation brought up from elsewhere in Gerdr (a notification, the inbox): it's this board's, so it
   // opens here, as its task's drawer (or just the chat when no task has it)
   const tasksRef = useRef(tasks);
