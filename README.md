@@ -7,7 +7,7 @@
 - MR 有人盯：新的 review 意见、挂掉的流水线交回给 worker，按你的规则变基、合并。
 - 你的做事方式写在 `skills/my-workflow/`（看板右上角的齿轮 → 流程）：仓库列表、MR 合不合、怎么合……默认都是手动的，按需改。
 
-**安装**：Gerdr 设置 → 面板 → 从 GitHub 安装面板，填 `https://github.com/<owner>/gerdr-panel-taskboard`。
+**安装**：Gerdr 设置 → 面板 → 从 GitHub 安装面板，填 `https://github.com/gerdr-dev/gerdr-panel-taskboard`。
 
 ---
 
