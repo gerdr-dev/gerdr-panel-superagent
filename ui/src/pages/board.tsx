@@ -211,7 +211,7 @@ function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, T
   const blockers = (t.blockedBy ?? []).filter((b) => byId[b] && byId[b].status !== "done" && byId[b].status !== "dropped");
   const live = t.owner === "agent" ? liveText(t) : "";
   return (
-    <button onClick={onOpen} className={clsx("block w-full space-y-1.5 rounded-lg border bg-card p-3 text-left shadow-xs hover:border-ring/50", active && "border-ring")}>
+    <button onClick={onOpen} className={clsx("block w-full space-y-1.5 rounded-lg border bg-card p-3 text-left shadow-xs transition-[border-color,box-shadow,transform] duration-150 hover:border-ring/50 hover:shadow-sm active:scale-[0.99]", active && "border-ring")}>
       <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
         {t.owner === "human" ? t.handBack?.kind === "choice" ? <CircleHelp className="size-3" /> : <Hand className="size-3" /> : <Bot className="size-3" />}
         <span className="font-mono">{t.id}</span>
@@ -264,7 +264,7 @@ function Drawer({ t, byId, act, onClose, onGo }: { t: Task; byId: Record<string,
   const done = t.status === "done" || t.status === "dropped";
   return (
     <div className="fixed inset-0 z-40" onClick={onClose}>
-      <aside role="dialog" aria-label={t.title} className="absolute inset-y-0 right-0 flex w-[min(520px,100%)] flex-col border-l bg-background shadow-xl" onClick={(e) => e.stopPropagation()}>
+      <aside role="dialog" aria-label={t.title} className="absolute inset-y-0 right-0 flex w-[min(520px,100%)] flex-col border-l bg-background shadow-xl animate-in slide-in-from-right duration-200 ease-out" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2 border-b px-4 py-2.5 text-[12px] text-muted-foreground">
           {t.owner === "human" ? <Hand className="size-3.5" /> : <Bot className="size-3.5" />}
           <span className="font-mono">{t.id}</span>
@@ -685,8 +685,8 @@ function NewTask({ onClose, act }: { onClose: () => void; act: Act }) {
   };
   const ok = !attach.uploading && (owner === "human" ? f.title.trim() : f.prompt.trim() || files.length) && (f.kind !== "secret" || /^[\w.-]+$/.test(f.name));
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 max-md:items-end max-md:p-0" onClick={() => !busy && onClose()}>
-      <div role="dialog" aria-modal="true" aria-label="新任务" className="flex max-h-[90dvh] w-full max-w-xl flex-col gap-3 overflow-y-auto rounded-xl border bg-background p-4 shadow-lg max-md:rounded-b-none" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === "Escape" && !busy && onClose()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 animate-in fade-in-0 duration-150 max-md:items-end max-md:p-0" onClick={() => !busy && onClose()}>
+      <div role="dialog" aria-modal="true" aria-label="新任务" className="flex max-h-[90dvh] w-full max-w-xl flex-col gap-3 overflow-y-auto rounded-xl border bg-background p-4 shadow-lg animate-in fade-in-0 zoom-in-95 duration-150 ease-out max-md:rounded-b-none max-md:zoom-in-100 max-md:slide-in-from-bottom" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === "Escape" && !busy && onClose()}>
         <div className="flex items-center justify-between">
           <h2 className="font-medium">新任务</h2>
           <Button variant="ghost" size="icon" aria-label="关闭" onClick={onClose}>

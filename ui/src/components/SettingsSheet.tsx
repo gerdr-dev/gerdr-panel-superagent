@@ -24,7 +24,7 @@ export function SettingsSheet({ tab, onTab, onClose }: { tab: SettingsTab; onTab
     return () => window.removeEventListener("keydown", f);
   }, [onClose]);
   return (
-    <div className="absolute inset-0 z-40 flex flex-col bg-background">
+    <div className="absolute inset-0 z-40 flex flex-col bg-background animate-in fade-in-0 slide-in-from-bottom-2 duration-200 ease-out">
       <header className="flex items-center gap-1 border-b px-3 py-2">
         <span className="mr-2 text-[14px] font-medium">看板设置</span>
         {TABS.map((t) => (

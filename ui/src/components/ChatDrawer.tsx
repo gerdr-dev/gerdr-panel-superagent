@@ -43,8 +43,8 @@ export function ChatDrawer({
   const go = (ref: string) => setJump((j) => ({ ref, seq: (j?.seq ?? 0) + 1 }));
   return (
     <>
-      <div className="absolute inset-0 z-20 bg-black/20" onClick={onClose} aria-hidden />
-      <aside className="absolute inset-y-0 right-0 z-30 flex w-[min(640px,100%)] flex-col border-l bg-background shadow-xl" aria-label={s?.title || session}>
+      <div className="absolute inset-0 z-20 bg-black/20 animate-in fade-in-0 duration-150" onClick={onClose} aria-hidden />
+      <aside className="absolute inset-y-0 right-0 z-30 flex w-[min(640px,100%)] flex-col border-l bg-background shadow-xl animate-in slide-in-from-right duration-200 ease-out" aria-label={s?.title || session}>
         <div className="flex h-10 shrink-0 items-center gap-2 border-b px-3">
           <span className={clsx("size-2 shrink-0 rounded-full", s?.status === "running" ? "bg-ok" : s?.status === "waiting" || s?.status === "error" ? "bg-warn" : "bg-muted-foreground/40")} />
           <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{s?.title || session}</span>
