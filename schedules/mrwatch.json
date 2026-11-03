@@ -1,0 +1,1 @@
+{ "fn": "mrwatch.tick", "every": "5m", "name": "盯 MR：review 意见、流水线交给 worker，能合就合" }
