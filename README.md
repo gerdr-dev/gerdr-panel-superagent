@@ -8,6 +8,7 @@
 - 你的做事方式写在 `skills/my-workflow/`（看板右上角的齿轮 → 流程）：仓库列表、MR 合不合、怎么合……默认都是手动的，按需改。
 
 **安装**：Gerdr 设置 → 面板 → 从 GitHub 安装面板，填 `https://github.com/gerdr-dev/gerdr-panel-taskboard`。
+更多面板：GitHub 上带 `gerdr-panel` 标签的仓库，见 https://github.com/topics/gerdr-panel 。
 
 ---
 
