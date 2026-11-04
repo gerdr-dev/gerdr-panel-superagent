@@ -1,10 +1,11 @@
 import { CirclePause, CirclePlay, Clock, Loader2, Play, RotateCw } from "lucide-react";
 import clsx from "clsx";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Button } from "../components/Button";
 import { project, run } from "../lib/gerdr";
 import { since } from "../lib/tasks";
 import { isSubmitEnter } from "../lib/utils";
+import { usePoll } from "../lib/visible";
 
 // 定时任务: schedules/<id>.json, what this panel does by itself on time (Gerdr runs them with the App closed too).
 // The list and its runs come from Gerdr's /api/work/schedules; changing when one runs rewrites its file
@@ -28,11 +29,7 @@ export default function SchedulesPage() {
       (r) => (setList(r.list), setErr("")),
       (e) => setErr(String(e.message || e)),
     );
-  useEffect(() => {
-    void load();
-    const t = setInterval(() => document.visibilityState === "visible" && void load(), 10_000);
-    return () => clearInterval(t);
-  }, []);
+  usePoll(load, 10_000);
   const op = async (id: string, what: "run" | "pause" | "resume") => {
     try {
       await api("POST", `/api/work/schedules/${encodeURIComponent(id)}/${what}?project=${encodeURIComponent(project)}`);

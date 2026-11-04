@@ -1,9 +1,10 @@
 import { Loader2, Zap } from "lucide-react";
 import clsx from "clsx";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Button } from "../components/Button";
 import { project, run } from "../lib/gerdr";
 import { since } from "../lib/tasks";
+import { usePoll } from "../lib/visible";
 
 // 触发器: which events come in to the Superagent, and who may ask through each (the gate). The choices are whatever Gerdr can deliver now (ctx.events.catalog: what the
 // installed add-ons emit, what came lately) — nothing here names Slack or Feishu, so someone without them sees
@@ -26,11 +27,7 @@ export default function TriggersPage() {
       .then((r) => (r.ok ? r.json() : { list: [] }))
       .then((d: { list: TriggerInfo[] }) => setRuns(Object.fromEntries((d.list ?? []).map((t) => [t.on, t]))), () => {});
   };
-  useEffect(() => {
-    load();
-    const t = setInterval(() => document.visibilityState === "visible" && load(), 15_000);
-    return () => clearInterval(t);
-  }, []);
+  usePoll(load, 15_000);
 
   return (
     <div className="mx-auto max-w-4xl space-y-4 p-6 max-md:p-3">

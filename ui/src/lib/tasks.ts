@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { run } from "./gerdr";
 import * as core from "@gerdr/core";
+import { usePoll } from "./visible";
 
 // Gerdr's toast (sonner), through the namespace so an older Gerdr without it still runs the board
 const toast = (core as unknown as { toast?: ((m: string, o?: Record<string, unknown>) => unknown) & { error?: (m: string) => unknown } }).toast;
@@ -60,7 +61,7 @@ export type Task = {
 
 const POLL = 5000;
 
-/** The board, refreshed every few seconds while the page is visible (the run is a file read plus session lookups). */
+/** The board, refreshed every few seconds while the panel is on screen (the run is a file read plus session lookups). */
 export function useTasks() {
   const [tasks, setTasks] = useState<Task[] | null>(null);
   const [error, setError] = useState("");
@@ -78,16 +79,8 @@ export function useTasks() {
       busy.current = false;
     }
   }, []);
-  useEffect(() => {
-    void reload();
-    const t = setInterval(() => document.visibilityState === "visible" && void reload(), POLL);
-    const vis = () => document.visibilityState === "visible" && void reload();
-    document.addEventListener("visibilitychange", vis);
-    return () => {
-      clearInterval(t);
-      document.removeEventListener("visibilitychange", vis);
-    };
-  }, [reload]);
+  // Only while the panel is on screen, and at once when it comes back (lib/visible.ts)
+  usePoll(reload, POLL);
   /** Runs a tasks.<fn> and refreshes the board after. 放弃 gets an undo in a toast: it's easy to click by mistake. */
   const act = useCallback(
     async (fn: string, input: unknown) => {

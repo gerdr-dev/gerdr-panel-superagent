@@ -14,6 +14,7 @@ import { project, run } from "../lib/gerdr";
 import { onShowSession } from "@gerdr/core";
 import { isSubmitEnter } from "../lib/utils";
 import { Md } from "../lib/markdown";
+import { usePoll } from "../lib/visible";
 
 // The task board: columns left to right (to do, running, needs you, to review, done), small cards, details in a side
 // panel. Columns are worked out from facts (task status, the worker session's state, blockers), never dragged: a
@@ -38,7 +39,7 @@ const PHONE_ORDER: Col[] = ["you", "review", "active", "todo", "done"];
  */
 function PhoneTabs({ cols, count, current, onPick }: { cols: typeof COLS; count: (c: Col) => number; current: Col; onPick: (c: Col) => void }) {
   return (
-    <div role="tablist" className="sticky top-0 z-10 flex gap-1 overflow-x-auto border-b bg-background px-2 py-1.5 md:hidden">
+    <div role="tablist" className="sticky top-0 z-10 flex gap-1 overflow-x-auto border-b bg-background px-2 py-1.5 [scrollbar-width:none] md:hidden [&::-webkit-scrollbar]:hidden">
       {cols.map((c) => {
         const n = count(c.id);
         const on = c.id === current;
@@ -149,27 +150,30 @@ export default function BoardPage() {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col [overflow-wrap:anywhere] max-md:h-auto md:relative">
-      <header className="flex items-center justify-between gap-3 border-b px-4 py-2.5">
-        <div className="flex items-center gap-3">
-          <h1 className="flex items-center gap-2 text-[14px] font-medium">
+    // clip, not hidden: nothing may widen the page sideways on a phone, and hidden would break the sticky tabs
+    <div className="flex h-full min-h-0 flex-col [overflow-wrap:anywhere] max-md:h-auto max-md:overflow-x-clip md:relative">
+      {/* On a phone the buttons are icons only (their words would push the header wider than the screen and squeeze
+          the title into a column of letters); the counts stay */}
+      <header className="flex min-w-0 items-center justify-between gap-3 border-b px-4 py-2.5 max-md:gap-1 max-md:px-3">
+        <div className="flex shrink-0 items-center gap-3">
+          <h1 className="flex items-center gap-2 text-[14px] font-medium whitespace-nowrap">
             <ListTodo className="size-4 text-muted-foreground" />
             Superagent
           </h1>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex min-w-0 items-center gap-1 max-md:gap-0">
           <WaitsButton tasks={tasks ?? []} onTask={(id) => (setPeek(null), setOpen(id))} onSession={(session, task) => (setOpen(""), setPeek({ session, task }))} />
           <MainButton onOpen={(id) => (setOpen(""), setPeek({ session: id }))} />
           <Button variant="ghost" size="sm" title="外面来的每条消息去了哪：交给了哪个任务、为什么没接" onClick={() => setSettings("log")}>
             <Inbox className="size-4" />
-            去向
+            <span className="max-md:hidden">去向</span>
           </Button>
           <Button variant="ghost" size="icon" aria-label="设置" title="设置、流程、触发器、定时任务" onClick={() => setSettings("settings")}>
             <Settings className="size-4" />
           </Button>
-          <Button onClick={() => setCreating(true)}>
+          <Button onClick={() => setCreating(true)} aria-label="新任务">
             <Plus className="size-3.5" />
-            新任务
+            <span className="max-md:hidden">新任务</span>
           </Button>
         </div>
       </header>
@@ -274,12 +278,7 @@ type LogSummary = {
  */
 function Alerts({ onLog }: { onLog: () => void }) {
   const [log, setLog] = useState<LogSummary | null>(null);
-  useEffect(() => {
-    const load = () => run<LogSummary>("superagent.log", { limit: 300 }).then(setLog, () => {});
-    load();
-    const t = setInterval(() => document.visibilityState === "visible" && load(), 10_000);
-    return () => clearInterval(t);
-  }, []);
+  usePoll(() => run<LogSummary>("superagent.log", { limit: 300 }).then(setLog, () => {}), 10_000);
   const day = Date.now() - 24 * 3600_000;
   const items = log?.items ?? [];
   const unavailable = items.filter((x) => x.state === "unavailable").length;
@@ -322,8 +321,8 @@ function WaitsButton({ tasks, onTask, onSession }: { tasks: Task[]; onTask: (id:
     <>
       <Button variant="ghost" size="sm" title="每个任务在等什么、什么会叫醒它" onClick={() => setShown(true)}>
         <Hourglass className="size-4" />
-        在等 {rows.length}
-        {mine > 0 && <span className="rounded-full bg-warn/15 px-1.5 text-[11px] text-warn">{mine} 个等你</span>}
+        <span className="max-md:hidden">在等</span> {rows.length}
+        {mine > 0 && <span className="rounded-full bg-warn/15 px-1.5 text-[11px] text-warn max-md:hidden">{mine} 个等你</span>}
       </Button>
       <Sheet open={shown} onOpenChange={setShown}>
         <SheetContent side="right" className="w-[440px] max-w-[95vw] overflow-y-auto p-0">
@@ -374,19 +373,14 @@ function WaitsButton({ tasks, onTask, onSession }: { tasks: Task[]; onTask: (id:
  */
 function MainButton({ onOpen }: { onOpen: (id: string) => void }) {
   const [m, setM] = useState<{ id: string; status: string; waiting?: string } | null>(null);
-  useEffect(() => {
-    const load = () => run<{ main: { id: string; status: string; waiting?: string } | null }>("superagent.log", { limit: 1 }).then((r) => setM(r.main), () => {});
-    load();
-    const t = setInterval(() => document.visibilityState === "visible" && load(), 10_000);
-    return () => clearInterval(t);
-  }, []);
+  usePoll(() => run<{ main: { id: string; status: string; waiting?: string } | null }>("superagent.log", { limit: 1 }).then((r) => setM(r.main), () => {}), 10_000);
   if (!m || m.status === "gone") return null;
   const label = m.status === "running" ? "在判断" : m.status === "waiting" ? "等你回答" : m.status === "error" ? "出错了" : "空闲";
   return (
     <Button variant="ghost" size="sm" title={`Superagent 的调度会话（${label}）：它怎么判断、派给谁，都在这里`} onClick={() => onOpen(m.id)}>
       <span className={clsx("size-1.5 rounded-full", m.status === "running" ? "bg-ok" : m.status === "waiting" || m.status === "error" ? "bg-warn" : "bg-muted-foreground/40")} />
-      调度
-      {m.status !== "idle" && <span className="text-[11px] text-muted-foreground">{label}</span>}
+      <span className="max-md:hidden">调度</span>
+      {m.status !== "idle" && <span className="text-[11px] text-muted-foreground max-md:hidden">{label}</span>}
     </Button>
   );
 }
