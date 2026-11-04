@@ -187,25 +187,28 @@ function Repos({ repos, onChange }: { repos: Repo[]; onChange: (r: Repo[]) => vo
     <div className="space-y-2">
       {!repos.length && <p className="text-[12px] text-muted-foreground">还没有仓库。</p>}
       {repos.map((r, i) => (
+        // The folder's name leads (the full paths mostly share their start, so a cut-off path showed the same few words
+        // on every row); the full path sits under it, wrapped rather than cut
         <div key={r.path} className="space-y-1.5 rounded-lg border bg-background p-2.5">
           <div className="flex items-center gap-2">
-            <span className="min-w-0 flex-1 truncate font-mono text-[12px]" title={r.path}>
-              {r.path}
+            <span className="min-w-0 flex-1 truncate text-[13px] font-medium" title={r.path}>
+              {r.path.replace(/\/+$/, "").split("/").pop() || r.path}
             </span>
             <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-[12px]" title="小改动不走 MR，直接推到目标分支；改动大、拿不准的 worker 还是开 MR（「流程 → deliver」）">
               <input type="checkbox" checked={!!r.direct} onChange={(e) => at(i, { direct: e.target.checked || undefined })} />
               小改动可直推
             </label>
-            <Button variant="ghost" size="icon" aria-label={`去掉 ${r.path}`} onClick={() => onChange(repos.filter((_, j) => j !== i))}>
+            <Button variant="ghost" size="icon" className="-my-1 shrink-0" aria-label={`去掉 ${r.path}`} onClick={() => onChange(repos.filter((_, j) => j !== i))}>
               <X className="size-3.5" />
             </Button>
           </div>
-          <input className={input} value={r.note ?? ""} placeholder="说明（给调度会话看）：比如「行情服务的后端」" onChange={(e) => at(i, { note: e.target.value })} />
+          <p className="-mt-1 break-all font-mono text-[11px] text-muted-foreground">{r.path}</p>
+          <input className={input} value={r.note ?? ""} placeholder="说明：比如「行情服务的后端」" onChange={(e) => at(i, { note: e.target.value })} />
         </div>
       ))}
       <div className="flex items-start gap-1.5">
         <div className="min-w-0 flex-1">
-          <PathPick value={add} onChange={setAdd} placeholder="加一个仓库：绝对路径，或点右边选" />
+          <PathPick value={add} onChange={setAdd} placeholder="加一个仓库的绝对路径" />
         </div>
         <Button variant="outline" disabled={!add.trim()} onClick={push}>
           <Plus className="size-3.5" />
