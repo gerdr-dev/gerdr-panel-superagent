@@ -4,22 +4,26 @@
 
 import { parse } from "../ui/src/lib/vars";
 import { DIR } from "./_vars";
+import { effective, mine, overlay } from "./_user";
 import { allAgents } from "./_agents";
 
 // Paths inside skills/: a skill's SKILL.md or one of its references (my-workflow/references/mr.md). No "..".
 const PATH = /^[\w\u4e00-\u9fff-]+(\/[\w\u4e00-\u9fff.-]+)*\.md$/;
 const ok = (p: string) => PATH.test(p) && !p.split("/").includes("..");
 
-/** The skills' files: each skill's SKILL.md (its index) first, then its references, with variable counts. */
+/**
+ * The skills' files as this person has them (their edits in user/skills/ over the panel's skills/): each skill's
+ * SKILL.md (its index) first, then its references, with variable counts. `changed`: they edited the panel's file
+ * (reset brings the default back); `own`: a file only they have.
+ */
 export function list(input: unknown, ctx: Ctx) {
-  return ctx.fs
-    .list(DIR)
-    .filter((f) => f.path.endsWith(".md"))
+  return overlay(ctx, DIR)
+    .filter((f) => f.rel.endsWith(".md"))
     .map((f) => {
-      const name = f.path.slice(DIR.length + 1);
+      const name = f.rel;
       const vars = parse(ctx.fs.read(f.path));
       const [skill, ...rest] = name.split("/");
-      return { name, skill, index: rest.join("/") === "SKILL.md", vars: vars.length, errors: vars.filter((v) => v.error).length };
+      return { name, skill, index: rest.join("/") === "SKILL.md", vars: vars.length, errors: vars.filter((v) => v.error).length, changed: f.mine && f.shared, own: f.mine && !f.shared };
     })
     .sort((a, b) => a.skill.localeCompare(b.skill) || Number(b.index) - Number(a.index) || a.name.localeCompare(b.name));
 }
@@ -27,21 +31,36 @@ export function list(input: unknown, ctx: Ctx) {
 /** { name } → its text and etag (pass the etag back to save, so two editors don't overwrite each other). */
 export function read(input: { name: string }, ctx: Ctx) {
   if (!ok(input.name)) throw new Error("路径不对");
-  const p = `${DIR}/${input.name}`;
-  const st = ctx.fs.stat(p);
-  if (!st) throw new Error(`没有 ${p}`);
-  return { name: input.name, text: ctx.fs.read(p), etag: st.etag };
+  const p = effective(ctx, `${DIR}/${input.name}`);
+  const st = p && ctx.fs.stat(p);
+  if (!p || !st) throw new Error(`没有 ${DIR}/${input.name}`);
+  return { name: input.name, text: ctx.fs.read(p), etag: st.etag, changed: p.startsWith("user/") && !!ctx.fs.stat(`${DIR}/${input.name}`) };
 }
 
-/** { name, text, etag? } → the new etag. */
+/**
+ * { name, text, etag? } → the new etag. Always into this person's copy (user/skills/…): the panel's file stays the
+ * shared default. The first save makes the copy; the etag read was the default's then, checked against it.
+ */
 export function save(input: { name: string; text: string; etag?: string }, ctx: Ctx) {
   if (!ok(input.name)) throw new Error("路径不对");
+  const shared = `${DIR}/${input.name}`;
+  const own = mine(shared);
   try {
-    return ctx.fs.write(`${DIR}/${input.name}`, input.text, input.etag ? { etag: input.etag } : undefined);
+    if (!ctx.fs.stat(own) && input.etag && ctx.fs.stat(shared) && ctx.fs.stat(shared)!.etag !== input.etag) throw new Error("etag changed");
+    return ctx.fs.write(own, input.text, input.etag && ctx.fs.stat(own) ? { etag: input.etag } : undefined);
   } catch (e: any) {
     if (/etag|changed|modified/i.test(String(e.message))) throw new Error("文件在别处被改过了：重新打开再改");
     throw e;
   }
+}
+
+/** Back to the panel's default: { name } — this person's copy goes to the Trash. */
+export function reset(input: { name: string }, ctx: Ctx) {
+  if (!ok(input.name)) throw new Error("路径不对");
+  const own = mine(`${DIR}/${input.name}`);
+  if (!ctx.fs.stat(`${DIR}/${input.name}`)) throw new Error("这个文件只有你有，没有默认的可以恢复");
+  if (ctx.fs.stat(own)) ctx.fs.trash(own);
+  return read({ name: input.name }, ctx);
 }
 
 /**
@@ -51,11 +70,14 @@ export function save(input: { name: string; text: string; etag?: string }, ctx: 
 export function addReference(input: { skill: string; name: string; when: string }, ctx: Ctx) {
   const name = input.name.trim().replace(/\.md$/, "");
   if (!/^[\w\u4e00-\u9fff-]+$/.test(input.skill) || !/^[\w\u4e00-\u9fff-]+$/.test(name)) throw new Error("名字只能有字母、数字、中文、- _");
-  const index = `${DIR}/${input.skill}/SKILL.md`;
+  // Written as this person's (user/skills/): a reference they add is theirs, like an edit
+  const index = mine(`${DIR}/${input.skill}/SKILL.md`);
+  const shownIndex = effective(ctx, `${DIR}/${input.skill}/SKILL.md`);
+  if (shownIndex && shownIndex !== index) ctx.fs.write(index, ctx.fs.read(shownIndex));
   if (!ctx.fs.stat(index))
     ctx.fs.write(index, `---\nname: ${input.skill}\ndescription: （写清楚什么时候该读这个 skill）\n---\n\n# ${input.skill}\n\n| 参考 | 什么时候看 |\n|---|---|\n`);
-  const ref = `${DIR}/${input.skill}/references/${name}.md`;
-  if (ctx.fs.stat(ref)) throw new Error(`已经有 ${name} 了`);
+  const ref = mine(`${DIR}/${input.skill}/references/${name}.md`);
+  if (effective(ctx, `${DIR}/${input.skill}/references/${name}.md`)) throw new Error(`已经有 ${name} 了`);
   ctx.fs.write(ref, `# ${name}\n\n`);
   const st = ctx.fs.stat(index)!;
   const text = ctx.fs.read(index).replace(/\n*$/, "\n");

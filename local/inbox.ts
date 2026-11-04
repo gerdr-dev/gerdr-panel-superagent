@@ -7,10 +7,13 @@
 // trigger's `allow`), a task following its conversation, or the main session's judgement.
 
 import { load } from "./_store";
+import { migrate } from "./_user";
 import { workflow } from "./_config";
 import { compact, evaluate, followUp, record, state, subscribers } from "./_main";
 
-const DIR = "triggers";
+// Which events this person takes in is theirs: their trigger files live in user/triggers/ (Gerdr reads them beside the
+// panel's own triggers/, like triggers/mr.json)
+const DIR = "user/triggers";
 const PREFIX = "inbox-";
 const FN = "inbox.onEvent";
 
@@ -30,6 +33,7 @@ function fileOf(on: string) {
 type Ours = { path: string; key?: string; allow?: string[]; inferred?: boolean };
 
 function ours(ctx: Ctx): Record<string, Ours> {
+  migrate(ctx);
   const out: Record<string, Ours> = {};
   if (!ctx.fs.stat(DIR)) return out;
   for (const f of ctx.fs.list(DIR)) {

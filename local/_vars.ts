@@ -5,18 +5,21 @@
 // is missing or its value doesn't fit.
 
 import { parse, render, typed, type Var } from "../ui/src/lib/vars";
+import { overlay } from "./_user";
 
 export const DIR = "skills";
 
-function textOf(ctx: Ctx, file: string) {
-  const p = `${DIR}/${file}`;
-  return ctx.fs.stat(p) ? ctx.fs.read(p) : "";
+/** The skill files as this person has them: their edits (user/skills/) over the panel's (skills/), by path. */
+function files(ctx: Ctx) {
+  return overlay(ctx, DIR)
+    .filter((f) => f.rel.endsWith(".md"))
+    .sort((a, b) => a.rel.localeCompare(b.rel));
 }
 
 /** Every variable in every skill file (all levels), the first of each name winning (names are meant to be unique). */
 function allVars(ctx: Ctx): Var[] {
   const out: Var[] = [];
-  for (const f of ctx.fs.list(DIR)) if (f.path.endsWith(".md")) out.push(...parse(textOf(ctx, f.path.slice(DIR.length + 1))));
+  for (const f of files(ctx)) out.push(...parse(ctx.fs.read(f.path)));
   return out;
 }
 
@@ -51,9 +54,8 @@ export function list(ctx: Ctx, names: string[]): string[] {
 
 /** The text of the skill file that holds one of these variables, as an agent reads it (values filled in); "" if none. */
 export function fileWith(ctx: Ctx, names: string[]): string {
-  for (const f of ctx.fs.list(DIR)) {
-    if (!f.path.endsWith(".md")) continue;
-    const text = textOf(ctx, f.path.slice(DIR.length + 1));
+  for (const f of files(ctx)) {
+    const text = ctx.fs.read(f.path);
     if (parse(text).some((v) => names.includes(v.name))) return render(text).trim();
   }
   return "";

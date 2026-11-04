@@ -8,14 +8,15 @@
 // The main session is one long-lived conversation that only routes: it never waits, never does the work, and gets
 // everything as messages (a batch arriving while it decides waits for its next pause). It replaced a one-off router
 // per task: no conversation to start per task, and one place that has seen every decision. Every event is logged
-// with where it went (data/superagent.json items), so "what happened to that message" always has an answer.
+// with where it went (user/data/superagent.json items), so "what happened to that message" always has an answer.
 
 import { workflow } from "./_config";
 import { allAgents } from "./_agents";
 import { fileWith } from "./_vars";
+import { DATA, migrate } from "./_user";
 import { find, load as loadTasks, note, update as updateTasks, type Task } from "./_store";
 
-const STATE = "data/superagent.json";
+const STATE = `${DATA}/superagent.json`;
 /** A fresh main session after this many items: its context stays small, so it stays fast. */
 const ROTATE = 30;
 /** Items kept in the log. */
@@ -65,6 +66,7 @@ export type Item = {
 type State = { main?: string; mains: string[]; brief?: string; handled: number; next: number; items: Item[] };
 
 function load(ctx: Ctx): { s: State; etag?: string } {
+  migrate(ctx);
   const st = ctx.fs.stat(STATE);
   if (!st) return { s: { mains: [], handled: 0, next: 1, items: [] } };
   return { s: JSON.parse(ctx.fs.read(STATE)), etag: st.etag };

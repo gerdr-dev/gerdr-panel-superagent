@@ -1,4 +1,6 @@
-// The 定时任务 page's edits: schedules/<id>.json is the user's file (when things run is their choice), this only
+import { effective, mine } from "./_user";
+
+// The 定时任务 page's edits: schedules/<id>.json (with this person's copy in user/schedules/) is the user's file (when things run is their choice), this only
 // rewrites its timing, keeping everything else in it. How the runs went comes from Gerdr (/api/work/schedules).
 
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -6,9 +8,12 @@ const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 /** { id, every? , at? } — exactly one of every ("30s", "5m", "6h", "1d"; at least 10s) and at ("09:00,16:00"). */
 export function setTiming(input: { id: string; every?: string; at?: string }, ctx: Ctx) {
   if (!NAME.test(input.id)) throw new Error("定时任务的 id 不对");
-  const p = `schedules/${input.id}.json`;
-  const st = ctx.fs.stat(p);
-  if (!st) throw new Error(`没有 ${p}`);
+  // Timing is this person's choice: written to their copy (user/schedules/), which Gerdr reads over the panel's
+  const shared = `schedules/${input.id}.json`;
+  const own = mine(shared);
+  const p = effective(ctx, shared);
+  if (!p) throw new Error(`没有 ${shared}`);
+  const st = ctx.fs.stat(p)!;
   const s = JSON.parse(ctx.fs.read(p));
   delete s.every;
   delete s.at;
@@ -20,5 +25,5 @@ export function setTiming(input: { id: string; every?: string; at?: string }, ct
   if (s.every && /^\d+s$/.test(s.every) && Number(s.every.slice(0, -1)) < 10) throw new Error("最短 10s");
   if (s.every && /^0+[mhd]$/.test(s.every)) throw new Error("间隔不能是 0");
   if (s.at && !s.at.split(",").every((x: string) => /^([01]?\d|2[0-3]):[0-5]\d$/.test(x.trim()))) throw new Error("时间写成 09:00，几个用逗号隔开");
-  return ctx.fs.write(p, JSON.stringify(s, null, 2) + "\n", { etag: st.etag });
+  return ctx.fs.write(own, JSON.stringify(s, null, 2) + "\n", p === own ? { etag: st.etag } : undefined);
 }

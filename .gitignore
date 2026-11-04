@@ -1,6 +1,9 @@
-# Runtime state, not code: the task board's data, caches, generated files
+# Runtime state, not code: generated files. This person's data and settings are in user/, which ignores itself
+# (Gerdr writes user/.gitignore); data/ is where they were before
 data/
 output/
+# A Gerdr from before user/ wrote its own .gitignore doesn't write it: ignored here too
+user/
 .playwright-cli/
 node_modules/
 

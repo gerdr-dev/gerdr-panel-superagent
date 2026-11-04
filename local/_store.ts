@@ -1,7 +1,9 @@
-// The task board's data (data/tasks.json), shared by tasks.ts (the board, the Work agent) and the watchers
+// The task board's data (user/data/tasks.json: this person's, never shared — _user.ts), shared by tasks.ts (the board, the Work agent) and the watchers
 // (mrwatch.ts). A helper file (leading _): nothing here is callable from a page.
 
-export const FILE = "data/tasks.json";
+import { DATA, migrate } from "./_user";
+
+export const FILE = `${DATA}/tasks.json`;
 
 /** An artifact (产物): something a step produced, kept with when it came. */
 export type Link = { label: string; url: string; at?: number };
@@ -109,6 +111,7 @@ export type Delivery = {
 export type Store = { next: number; tasks: Task[] };
 
 export function load(ctx: Ctx): { store: Store; etag?: string } {
+  migrate(ctx);
   const st = ctx.fs.stat(FILE);
   if (!st) return { store: { next: 1, tasks: [] } };
   return { store: JSON.parse(ctx.fs.read(FILE)), etag: st.etag };

@@ -10,8 +10,10 @@ import { format, joinList, parse, setValue, specFor, splitList, TYPES, type Var,
 // agent and every session the Work starts as a skill (they read what they need), with {{name: value ; type}}
 // variables where the code needs a value (lib/vars.ts). The text area highlights the variables; the panel beside it
 // gives each one a control of its type, and inserts new ones. Saved as plain text: editing the file by hand works too.
+// Saved as this person's copy (user/skills/, never shared): the panel's own file stays the default, 恢复默认 brings it
+// back (local/playbooks.ts).
 
-type Entry = { name: string; skill: string; index: boolean; vars: number; errors: number };
+type Entry = { name: string; skill: string; index: boolean; vars: number; errors: number; changed?: boolean; own?: boolean };
 
 export default function FlowPage() {
   const [files, setFiles] = useState<Entry[] | null>(null);
@@ -64,6 +66,22 @@ export default function FlowPage() {
     }
   }
 
+  async function reset() {
+    setBusy(true);
+    setErr("");
+    try {
+      const r = await run<{ text: string; etag: string }>("playbooks.reset", { name });
+      setText(r.text);
+      setSaved(r.text);
+      setEtag(r.etag);
+      void loadList();
+    } catch (e: any) {
+      setErr(String(e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "s") {
@@ -93,12 +111,17 @@ export default function FlowPage() {
         <div>
           <h1 className="text-[22px] font-semibold tracking-tight">流程</h1>
           <p className="mt-1 text-[13px] text-muted-foreground">
-            你的做事方式，用自己的话写。它是一个 skill：右边的助手和它派出去的 worker 都有，需要时自己翻到对应的参考；
+            你的做事方式，用自己的话写。它是一个 skill：右边的助手和它派出去的 worker 都有，需要时自己翻到对应的参考。改动只存在你这里，不会随面板分享出去（带点的是你改过的）；
             <span className="rounded-sm bg-brand/15 px-1 text-brand">高亮的变量</span>是代码要用的值，在右边改。
           </p>
         </div>
         <div className="flex items-center gap-2">
           {dirty && <span className="text-[12px] text-warn">没保存</span>}
+          {!dirty && files?.find((f) => f.name === name)?.changed && (
+            <Button variant="outline" disabled={busy} title="这份你改过：去掉你的修改，用面板自带的默认内容" onClick={reset}>
+              恢复默认
+            </Button>
+          )}
           <Button disabled={!dirty || busy} onClick={save}>
             {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
             保存
@@ -118,6 +141,7 @@ export default function FlowPage() {
                   <button key={f.name} onClick={() => open(f.name)} className={clsx("flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] hover:bg-accent", f.name === name && "bg-accent font-medium")}>
                     <FileText className="size-3.5 shrink-0 text-muted-foreground" />
                     <span className="min-w-0 flex-1 truncate">{f.index ? "索引（SKILL.md）" : f.name.split("/").pop()!.replace(/\.md$/, "")}</span>
+                    {f.changed && <span className="size-1.5 shrink-0 rounded-full bg-brand" title="你改过（只在你这里）" />}
                     {f.errors > 0 ? <AlertTriangle className="size-3 text-bad" /> : f.vars > 0 && <span className="text-[11px] text-muted-foreground">{f.vars}</span>}
                   </button>
                 ))}
