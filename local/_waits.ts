@@ -114,24 +114,28 @@ export function follow(t: Task, on: { source: string; key: string }) {
   if (!cur.some((x) => x.source === on.source && x.key === on.key)) t.threads = [...cur, { source: on.source, key: on.key }];
 }
 
+/** One thing that wakes a worker waiting on outside: news in a conversation, a check it wrote coming true, a time. */
+export type WakeOn =
+  | { type: "message"; conv: { source: string; key: string; where?: string; url?: string } }
+  | { type: "check"; command: string; cwd: string; every: number }
+  | { type: "time"; at: number };
+
 /**
- * The worker waits on outside (wait_for): news in a conversation (the task follows it from now on) and / or a time.
- * Replaces what it waited on outside before: this says what it waits on now. Returns the new waits.
+ * The worker waits on outside (wait_for): whichever of `on` comes first wakes it — a wait each, all sharing `what`. The
+ * task follows each conversation from now on. Replaces what it waited on outside before: this says what it waits on
+ * now. Returns the new waits.
  */
-export function waitOn(
-  t: Task,
-  w: { what: string; conv?: { source: string; key: string; where?: string; url?: string }; check?: { command: string; cwd: string; every: number }; at?: number },
-): Wait[] {
+export function waitOn(t: Task, what: string, on: WakeOn[]): Wait[] {
   const now = Date.now();
   endWaits(t, isOutside, "换成了新的等待");
-  const out: Wait[] = [];
-  if (w.conv) {
-    follow(t, w.conv);
-    out.push(addWait(t, { kind: "reply", what: w.what, since: now, on: { source: w.conv.source, key: w.conv.key }, where: w.conv.where, url: w.conv.url }));
-  }
-  if (w.check) out.push(addWait(t, { kind: "check", what: w.what, since: now, check: { ...w.check, next: now } }));
-  if (w.at) out.push(addWait(t, { kind: "time", what: w.what, since: now, at: w.at }));
-  return out;
+  return on.map((c) => {
+    if (c.type === "message") {
+      follow(t, c.conv);
+      return addWait(t, { kind: "reply", what, since: now, on: { source: c.conv.source, key: c.conv.key }, where: c.conv.where, url: c.conv.url });
+    }
+    if (c.type === "check") return addWait(t, { kind: "check", what, since: now, check: { command: c.command, cwd: c.cwd, every: c.every, next: now } });
+    return addWait(t, { kind: "time", what, since: now, at: c.at });
+  });
 }
 
 /** The conversation an MR is, as the MR watcher (mrwatch.ts) emits its events: gitlab, group/repo!34. */

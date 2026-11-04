@@ -34,7 +34,7 @@ export function applyBlock(s: Store, t: Task, b: any): Task | null {
         break;
       }
       if (!(t.links ?? []).some((l) => l.url === conv.url)) t.links = [...(t.links ?? []), { label: conv.where, url: conv.url, at: Date.now() }];
-      waitOn(t, { what: `${conv.where}：review、流水线、合并`, conv });
+      waitOn(t, `${conv.where}：review、流水线、合并`, [{ type: "message", conv }]);
       endQuestions(t, "提了 MR，在等它");
       break;
     }

@@ -5,7 +5,7 @@
 
 ## 开完 MR：盯着它
 
-- 开完 MR 用 `wait_for` 盯着它：`conversation` 填 MR 地址，`what` 写现在在等什么（等 review、等流水线、等谁合）。
+- 开完 MR 用 `wait_for` 盯着它：`wake` 里加一项 `message`，`conversation` 填 MR 地址，`what` 写现在在等什么（等 review、等流水线、等谁合）。
   然后结束这一轮。
 - MR 上有新情况会作为消息发给你，每种发一次：
   - `mr.review`：有新的 review 意见；

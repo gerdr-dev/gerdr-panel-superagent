@@ -17,7 +17,7 @@
 // the user writing to it) ends the wait — it calls wait_for again if it still waits.
 
 import { load, note, update, type Task } from "./_store";
-import { isOutside, mrConversation, open, waitOn, wakeText, type Wait } from "./_waits";
+import { isOutside, mrConversation, open, waitOn, wakeText, type Wait, type WakeOn } from "./_waits";
 import { wake } from "./_wake";
 import { followUp, record, subscribers, compact } from "./_main";
 import { mine } from "./board";
@@ -32,30 +32,35 @@ export const tools = {
   wait_for: {
     description:
       "End your turn waiting on someone or something outside, instead of only saying you'll wait (once your turn ends nothing wakes you otherwise). " +
-      "Give what wakes you — any of these, whichever comes first wakes you: " +
-      "conversation: where a person will answer — the Slack channel / DM id you wrote to (D09…, C0…), a Slack message link, or an MR URL (its reviews, pipelines, merge come too); " +
-      "check: a command that tells whether what you wait for has happened (a publish approved, a job finished, a page live) — the board runs it every `every` minutes, exit 0 = it has (you're woken with its output), any other exit = not yet; print one line saying where things stand, it shows on your card; " +
-      "recheck: minutes after which you're woken anyway, as a backstop. " +
-      "Waiting on a person to do something you can see (approve, merge, deploy)? Give both the conversation and a check. " +
-      "Your card stays in progress meanwhile, showing `what`. Then end your turn; when woken and still waiting, call it again. When to use: the my-workflow skill, references/board.md.",
+      "wake: what wakes you, a list — whichever comes first wakes you, and ends this wait. Each item is one of: " +
+      "{type: message, conversation}: news where a person will answer — the Slack channel / DM id you wrote to (D09…, C0…), a Slack message link, or an MR URL (its reviews, pipelines, merge come too); " +
+      "{type: check, command, every?, cwd?}: a command that tells whether what you wait for has happened (a publish approved, a job finished, a page live) — the board runs it every `every` minutes, exit 0 = it has (you're woken with its output), any other exit = not yet; print one line saying where things stand, it shows on your card; " +
+      "{type: time, minutes}: woken anyway after that long, as a backstop. " +
+      "Waiting on a person to do something you can see (approve, merge, deploy)? Give both a message and a check. " +
+      "Your card stays in progress meanwhile, showing `what`. Then end your turn; when woken and still waiting, call it again (it replaces the last one). When to use: the my-workflow skill, references/board.md.",
     input: {
       type: "object",
       properties: {
         what: { type: "string", description: "What you wait for, for the card: 程志鹏审批香港生产发布单 publish-03d1…" },
-        conversation: { type: "string", description: "Where a person will answer: a Slack channel / DM id, a Slack message link, or an MR URL" },
-        check: {
-          type: "object",
-          description: "A command run on a timer: exit 0 when what you wait for has happened, else non-zero; print one line of where it stands",
-          properties: {
-            command: { type: "string", description: "Run with sh -c; 60 s at most per run. Use the tools you already use for this work" },
-            every: { type: "number", description: "Minutes between runs (1 – 60, default 2)" },
-            cwd: { type: "string", description: "Absolute directory to run it in (default: the task's repository)" },
+        wake: {
+          type: "array",
+          minItems: 1,
+          description: "What wakes you; whichever comes first",
+          items: {
+            type: "object",
+            properties: {
+              type: { type: "string", enum: ["message", "check", "time"] },
+              conversation: { type: "string", description: "message: a Slack channel / DM id, a Slack message link, or an MR URL" },
+              command: { type: "string", description: "check: run with sh -c, 60 s at most; exit 0 = it has happened. Use the tools you already use for this work" },
+              every: { type: "number", description: "check: minutes between runs (1 – 60, default 2)" },
+              cwd: { type: "string", description: "check: absolute directory to run it in (default: the task's repository)" },
+              minutes: { type: "number", description: "time: woken after this many minutes (1 – 1440)" },
+            },
+            required: ["type"],
           },
-          required: ["command"],
         },
-        recheck: { type: "number", description: "Minutes until you're woken anyway (1 – 1440)" },
       },
-      required: ["what"],
+      required: ["what", "wake"],
     },
   },
 };
@@ -86,39 +91,66 @@ function resolve(ctx: Ctx, conv: string): { source: string; key: string; where: 
   );
 }
 
+type WakeIn = { type?: string; conversation?: string; command?: string; every?: number; cwd?: string; minutes?: number };
+
+/**
+ * { what, wake: [{ type: message | check | time, … }] }. Workers given the tool before the list (2026-11-04) send
+ * conversation / check / recheck instead: read as the same list.
+ */
 export function wait_for(
-  input: { what: string; conversation?: string; check?: { command: string; every?: number; cwd?: string }; recheck?: number },
+  input: { what: string; wake?: WakeIn[]; conversation?: string; check?: { command: string; every?: number; cwd?: string }; recheck?: number },
   ctx: Ctx,
 ) {
   const what = (input?.what ?? "").trim();
   if (!what) throw new Error("what 写清在等什么");
-  const recheck = input.recheck == null ? undefined : Number(input.recheck);
-  if (recheck != null && !(recheck >= 1 && recheck <= 1440)) throw new Error("recheck 是 1 到 1440 分钟");
-  const cmd = input.check?.command?.trim();
-  if (input.check && !cmd) throw new Error("check 要给 command");
-  const every = input.check?.every == null ? 2 : Number(input.check.every);
-  if (cmd && !(every >= 1 && every <= 60)) throw new Error("check.every 是 1 到 60 分钟");
-  if (!input.conversation?.trim() && !cmd && recheck == null) throw new Error("conversation、check、recheck 至少给一个：不然没有什么会叫醒你");
-  const th = input.conversation?.trim() ? resolve(ctx, input.conversation) : undefined;
+  const items: WakeIn[] = Array.isArray(input.wake) ? [...input.wake] : [];
+  if (input.conversation?.trim()) items.push({ type: "message", conversation: input.conversation });
+  if (input.check?.command) items.push({ type: "check", ...input.check });
+  if (input.recheck != null) items.push({ type: "time", minutes: input.recheck });
+  if (!items.length) throw new Error(`wake 至少给一项：不然没有什么会叫醒你。例：[{"type":"message","conversation":"D0…"},{"type":"time","minutes":60}]`);
+  // Checked before anything is written; the conversation looked up (it may not exist)
+  const parsed = items.map((x, i) => {
+    const at = `wake[${i}]`;
+    if (x.type === "message") {
+      if (!x.conversation?.trim()) throw new Error(`${at}：message 要给 conversation`);
+      return { type: "message" as const, conv: resolve(ctx, x.conversation) };
+    }
+    if (x.type === "check") {
+      const command = x.command?.trim();
+      if (!command) throw new Error(`${at}：check 要给 command`);
+      const every = x.every == null ? 2 : Number(x.every);
+      if (!(every >= 1 && every <= 60)) throw new Error(`${at}：every 是 1 到 60 分钟`);
+      return { type: "check" as const, command, every, cwd: x.cwd?.trim() };
+    }
+    if (x.type === "time") {
+      const m = Number(x.minutes);
+      if (!(m >= 1 && m <= 1440)) throw new Error(`${at}：time 的 minutes 是 1 到 1440`);
+      return { type: "time" as const, minutes: m };
+    }
+    throw new Error(`${at}：type 是 message / check / time 之一，不是「${x.type ?? ""}」`);
+  });
   const { t, ws } = update(ctx, (s) => {
     const t = mine(s, ctx);
     if (t.status !== "running") throw new Error(`${t.id} 现在不是进行中（${t.status}），不用等`);
-    const cwd = input.check?.cwd?.trim() || t.repo || "";
-    if (cmd && !cwd.startsWith("/")) throw new Error("check.cwd 要是绝对路径（任务没有仓库时必须给）");
     const now = Date.now();
-    const ws = waitOn(t, { what, conv: th, check: cmd ? { command: cmd, cwd, every } : undefined, at: recheck != null ? now + recheck * 60_000 : undefined });
-    note(t, `等：${what}${th ? `（${th.where} 上的回复）` : ""}${cmd ? `，每 ${every} 分钟检查：${cmd}` : ""}${recheck != null ? `，${recheck} 分钟后回来看` : ""}`);
+    const on: WakeOn[] = parsed.map((p) => {
+      if (p.type === "message") return { type: "message", conv: p.conv };
+      if (p.type === "time") return { type: "time", at: now + p.minutes * 60_000 };
+      const cwd = p.cwd || t.repo || "";
+      if (!cwd.startsWith("/")) throw new Error("check 的 cwd 要是绝对路径（任务没有仓库时必须给）");
+      return { type: "check", command: p.command, every: p.every, cwd };
+    });
+    const ws = waitOn(t, what, on);
+    note(t, `等：${what}（${ws.map((w) => wakeText(w)).join("；")}）`);
     Object.assign(t, { viaTools: true, reportedAt: now, nudges: 0, updatedAt: now });
     return { t, ws };
   });
   // The MR watcher's events come in through triggers/mr.json; anything else may need a trigger of its own
-  if (th && th.source !== "gitlab") ensureTrigger(ctx, th);
+  for (const p of parsed) if (p.type === "message" && p.conv.source !== "gitlab") ensureTrigger(ctx, p.conv);
   return {
     id: t.id,
     gerdrCard: waitCard(ctx, t, ws),
-    note:
-      [th && `${th.where} 上来的消息会发给你`, cmd && `检查命令每 ${every} 分钟跑一次（一分钟内先跑第一次），exit 0 时叫醒你`, recheck != null && `${recheck} 分钟后会叫你回来看`].filter(Boolean).join("；") +
-      "。现在结束这一轮，不用再等。",
+    note: `${ws.map((w) => wakeText(w).replace("叫醒它", "叫醒你").replace("它写的", "你写的")).join("；")}。哪个先到都会叫醒你；现在结束这一轮，不用再等。`,
   };
 }
 
