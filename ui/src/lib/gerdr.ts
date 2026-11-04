@@ -14,6 +14,11 @@ export type RunOptions = {
   onLog?: (line: { level: string; message: string }) => void;
   onStart?: (id: string) => void;
   signal?: AbortSignal;
+  /**
+   * The panel to run it in (its project key: "lb", "default/lb看板"). Default: this page's. Code that runs outside
+   * this panel's page (cards.tsx, loaded into Gerdr's own page) must say which panel it belongs to.
+   */
+  project?: string;
 };
 
 export class RunError extends Error {
@@ -75,7 +80,7 @@ export async function run<T = any>(fn: string, input?: unknown, options: RunOpti
     method: "POST",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json", Accept: "text/event-stream", "X-Gerdr": "1" },
-    body: JSON.stringify({ project, fn, input }),
+    body: JSON.stringify({ project: options.project ?? project, fn, input }),
   });
   return stream<T>(res, options);
 }

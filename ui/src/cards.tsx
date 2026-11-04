@@ -15,18 +15,23 @@ type Step = { status: string; handedBack?: string; title?: string };
  */
 function TaskStep({ card }: CardProps) {
   const id = String(card.ref ?? "");
+  // Which board it belongs to: one person can have this panel in several projects, each with its own t4. Not the page's
+  // project — this runs in Gerdr's own page. Older cards only carried it in their answer button (choose.project);
+  // one with neither isn't asked about at all rather than asked of the wrong board.
+  const c = card as { project?: string; choose?: { project?: string } };
+  const board = c.project ?? c.choose?.project;
   const [st, setSt] = useState<Step>();
   useEffect(() => {
-    if (!id) return;
+    if (!id || !board) return;
     let dead = false;
-    const get = () => run<Step>("tasks.status", { id }).then((v) => !dead && setSt(v), () => {});
+    const get = () => run<Step>("tasks.status", { id }, { project: board }).then((v) => !dead && setSt(v), () => {});
     void get();
     const timer = setInterval(get, 30000);
     return () => {
       dead = true;
       clearInterval(timer);
     };
-  }, [id]);
+  }, [id, board]);
   if (st?.status === "done" || st?.status === "dropped") {
     const done = st.status === "done";
     return (

@@ -109,6 +109,7 @@ export function ask_human(input: any, ctx: Ctx) {
         ? {
             type: "task-step",
             ref: h.id,
+            project: ctx.workspace.project,
             kicker: `等你决定 · ${h.id} · 不急，在这里选或之后在看板上选`,
             title: h.title,
             body: h.steps || undefined,
@@ -118,6 +119,7 @@ export function ask_human(input: any, ctx: Ctx) {
         : {
             type: "task-step",
             ref: h.id,
+            project: ctx.workspace.project,
             kicker: `要你做 · ${h.id}${left}`,
             title: h.title,
             body: `${h.steps ?? ""}${back}${h.handBack?.kind === "secret" ? `\n\n做完在看板「等你」里的 ${h.id} 上存密钥。` : ""}`,
