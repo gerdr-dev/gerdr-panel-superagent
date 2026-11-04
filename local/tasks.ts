@@ -177,7 +177,7 @@ function dropOrphans(s: Store) {
 
 /**
  * Where the board shows a task. For an agent task it follows from its waits (_waits.ts), nothing else: one waiting
- * on the user → 等你; the worker running, or anything still awaited → 进行中; neither → it stopped with nothing
+ * on the user here (not through a board item of its own) → 等你; the worker running, or anything still awaited → 进行中; neither → it stopped with nothing
  * going on, and that's the user's to look at (等你) — never a card in 进行中 with nothing going on.
  */
 function column(s: Store, t: Task, sess: any): "you" | "review" | "active" | "done" {
@@ -185,7 +185,9 @@ function column(s: Store, t: Task, sess: any): "you" | "review" | "active" | "do
   if (t.status === "review") return "review";
   if (t.owner === "human") return blockersDone(s, t) ? "you" : "active";
   if (sess?.status === "waiting" || sess?.status === "error") return "you";
-  if (open(t).some((w) => w.user)) return "you";
+  // Waiting on the user right here (a question, a helper's approval): its card is what they act on. A step / question
+  // of theirs that's a board item of its own is that item's card under 等你; this task stays in 进行中, "等 tN"
+  if (open(t).some((w) => w.user && !w.item)) return "you";
   if (stopped(t, sess)) return "you";
   return "active";
 }

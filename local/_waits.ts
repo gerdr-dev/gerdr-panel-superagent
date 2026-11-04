@@ -11,7 +11,7 @@
 // step with what they mirror on every write (sync): the MR it delivers in, the user's board items it's blocked by, the
 // sessions it handed work to. The board reads only this:
 //
-//   未完成的等待里有等你的   → 等你
+//   有直接等你的（问题、批准）→ 等你（等你在看板上做的那一项，是那一项的卡片在等你）
 //   worker 在跑，或者还有等待 → 进行中
 //   都没有、worker 也停了     → 停下了（等你，要你看一眼）
 //
