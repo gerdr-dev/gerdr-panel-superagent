@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils"
 import { XIcon } from "lucide-react"
 import { Dialog as SheetPrimitive } from "radix-ui"
 import { keepLayer } from "@/components/ui/dialog"
+import { usePortalContainer } from "../../lib/portal"
 
 // shadcn/ui's Sheet (a Radix Dialog sliding in from an edge). The animate-in / slide-in-from-* classes come from
 // src/animate.css (tw-animate-css); index.css precompiles them so the first frame is already off-screen.
@@ -20,7 +21,8 @@ function SheetClose({ ...props }: React.ComponentProps<typeof SheetPrimitive.Clo
 }
 
 function SheetPortal({ ...props }: React.ComponentProps<typeof SheetPrimitive.Portal>) {
-  return <SheetPrimitive.Portal data-slot="sheet-portal" {...props} />
+  const container = usePortalContainer()
+  return <SheetPrimitive.Portal data-slot="sheet-portal" container={container ?? undefined} {...props} />
 }
 
 function SheetOverlay({ className, style, ...props }: React.ComponentProps<typeof SheetPrimitive.Overlay>) {

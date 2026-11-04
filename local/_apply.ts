@@ -1,7 +1,7 @@
 // A worker's report applied to its task: from a ```gerdr-task``` block at the end of a reply (older workers, tasks.ts
 // list) or from its panel tools (board.ts task_update / ask_human). One set of rules for both.
 
-import { newTask, note, type Store, type Task } from "./_store";
+import { newTask, note, type Question, type Store, type Task } from "./_store";
 
 /** The conversation an MR is, as mrwatch.ts emits its events: gitlab, group/repo!34. */
 export function mrThread(project: string, iid: number) {
@@ -53,6 +53,36 @@ export function applyBlock(s: Store, t: Task, b: any): Task | null {
       break;
     case "blocked": {
       const h = b.human ?? {};
+      // A decision or a value asked through the tools is a question: the ones a worker asks while earlier ones are still
+      // open go in the same board item, since it can't go on until the user answered them all (the user's ask:
+      // "反正都要我一次性做完了才继续"). Steps to do (sign in, a secret) stay items of their own.
+      const asks = b.replace === false && (h.handBack?.kind === "choice" || h.handBack?.kind === "value");
+      if (asks) {
+        const q: Omit<Question, "id"> = {
+          title: String(h.title || "要你决定"),
+          kind: h.handBack.kind,
+          options: h.handBack.kind === "choice" ? h.handBack.options : undefined,
+          label: h.handBack.kind === "value" ? h.handBack.label : undefined,
+          steps: h.steps ? String(h.steps) : undefined,
+        };
+        const open = s.tasks.find((x) => x.owner === "human" && x.askedBy === t.id && x.status === "todo" && x.handBack?.kind === "questions");
+        if (open) {
+          const qs = open.questions ?? [];
+          qs.push({ ...q, id: String(qs.length + 1) });
+          Object.assign(open, { questions: qs, title: `${t.title}：${qs.filter((x) => !x.dropped).length} 个问题要你定`, updatedAt: Date.now() });
+          return open;
+        }
+        const group = newTask(s, {
+          askedBy: t.id,
+          title: q.title,
+          owner: "human",
+          handBack: { kind: "questions" },
+          questions: [{ ...q, id: "1" }],
+          urgent: false, // a decision can wait: it sits under 等你 without a warning mark
+        } as any);
+        t.blockedBy = [...(t.blockedBy ?? []), group.id];
+        return group;
+      }
       // A block's latest ask is what counts: earlier steps it asked for and the user hasn't done are replaced. A tool call
       // (replace: false) leaves them: the worker takes back what's moot itself (cancel_human).
       const old = b.replace === false ? [] : s.tasks.filter((x) => x.owner === "human" && x.askedBy === t.id && x.status !== "done" && x.status !== "dropped");

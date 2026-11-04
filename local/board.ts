@@ -46,7 +46,7 @@ export const tools = {
   },
   ask_human: {
     description:
-      "Put something on the user's board that needs them: a step only they can do (sign in, approve, an account, a secret: give steps), or a decision (give options). They work from the board and may come back to it days later, so after asking, finish your turn with what you could do; don't wait in the chat. You get their answer / 'done' as a message. Several can be open at once; take back ones that became moot with cancel_human. (Only when the user is talking with you in this chat right now, a quick question can use your own ask-question tool instead.)",
+      "Put something on the user's board that needs them: a step only they can do (sign in, approve, an account, a secret: give steps), or a decision (give options). They work from the board and may come back to it days later, so after asking, finish your turn with what you could do; don't wait in the chat. You get their answer / 'done' as a message. Decisions and values you ask while earlier ones are still unanswered go in one board item (the user answers them in one sitting): ask each as you find it, and you get all the answers together in one message once every one is answered. Take back ones that became moot with cancel_human. (Only when the user is talking with you in this chat right now, a quick question can use your own ask-question tool instead.)",
     input: STEP,
   },
   cancel_human: {
@@ -93,8 +93,9 @@ export function ask_human(input: any, ctx: Ctx) {
     const decision = Array.isArray(input.options) && input.options.length > 0;
     const human = decision ? { ...input, steps: input.steps ?? "", handBack: { kind: "choice", options: input.options.map(String), label: "你的决定" } } : input;
     const h = applyBlock(s, t, { state: "blocked", human, replace: false })!;
-    if (decision) h.urgent = false; // a decision can wait: no warning mark, it just sits under 等你
     Object.assign(t, { viaTools: true, updatedAt: Date.now() });
+    if (h.handBack?.kind === "questions") return questionCard(h, ctx);
+    if (decision) h.urgent = false; // a decision can wait: no warning mark, it just sits under 等你
     // gerdrCard: Gerdr draws this result as a card in the chat, so the user sees the step where they are too
     const back = h.handBack?.kind === "secret" ? `\n\n做完要交回：密钥「${h.handBack.label || h.handBack.name}」（在看板上存，不经过对话）` : h.handBack?.kind === "value" ? `\n\n做完要交回：${h.handBack.label || "一个值"}` : "";
     const left = h.expiresAt ? `（${Math.round((h.expiresAt - Date.now()) / 60000)} 分钟内有效）` : "";
@@ -138,7 +139,21 @@ export function ask_human(input: any, ctx: Ctx) {
 export function cancel_human(input: { id: string; reason: string }, ctx: Ctx) {
   return update(ctx, (s) => {
     const t = mine(s, ctx);
-    const h = find(s, input.id);
+    const [hid, qid] = String(input.id).split("#");
+    const h = find(s, hid);
+    // One question of several (t5#2): only it goes; the item stays for the rest (or goes when nothing is left)
+    if (qid && h.questions) {
+      if (h.askedBy !== t.id) throw new Error(`${hid} 不是你这个任务要的`);
+      const q = h.questions.find((x) => x.id === qid);
+      if (!q) throw new Error(`${hid} 没有第 ${qid} 个问题`);
+      q.dropped = input.reason || "撤回";
+      note(h, `worker 撤回了「${q.title}」：${input.reason}`);
+      const left = h.questions.filter((x) => !x.dropped);
+      if (!left.length) Object.assign(h, { status: "dropped", doneAt: Date.now() });
+      if (!left.length) t.blockedBy = (t.blockedBy ?? []).filter((id) => id !== h.id);
+      h.updatedAt = Date.now();
+      return { id: input.id, status: "dropped", left: left.filter((x) => !x.answer).map((x) => `${hid}#${x.id}`), gerdrCard: { title: `不用答了：${q.title}`, body: input.reason, tone: "info" } };
+    }
     if (h.owner !== "human" || (h.askedBy !== t.id && !t.blockedBy?.includes(h.id))) throw new Error(`${h.id} 不是你这个任务要的人工步骤`);
     if (h.status === "done") throw new Error(`${h.id} 用户已经做完了${h.handedBack ? `（交回：${h.handedBack}）` : ""}`);
     if (h.status !== "dropped") {
@@ -171,4 +186,30 @@ export async function hand_back(input: { event: string; reason: string }, ctx: C
   const t = mine(store, ctx);
   if (!input?.reason?.trim()) throw new Error("写一句为什么不是这个任务的事");
   return handBack(ctx, t.id, input.event, input.reason.trim(), store.tasks);
+}
+
+/**
+ * The chat card for the question just asked (one of an item's several, "t5#2"): answered in place through
+ * tasks.answerQuestion, like the board. ref is the question, so the drawer's jump and the card's state are per question.
+ */
+function questionCard(h: Task, ctx: Ctx) {
+  const qs = (h.questions ?? []).filter((x) => !x.dropped);
+  const q = qs[qs.length - 1];
+  const ref = `${h.id}#${q.id}`;
+  const of = qs.length > 1 ? ` · 第 ${qs.length} 个问题` : "";
+  const choice = q.kind === "choice";
+  return {
+    id: ref,
+    note: qs.length > 1 ? `和你前面问的 ${qs.length - 1} 个放在同一个看板事项 ${h.id} 里；用户都答完，你会一次收到全部答案` : `已放到用户看板的「等你」里（${h.id}）；再问的会并进同一项，都答完你一次收到全部答案`,
+    gerdrCard: {
+      type: "task-step",
+      ref,
+      project: ctx.workspace.project,
+      kicker: `${choice ? "等你决定" : "要你给"} · ${h.id}${of} · 不急，在这里答或之后在看板上答`,
+      title: q.title,
+      body: [q.steps, !choice && q.label ? `要交回：${q.label}` : ""].filter(Boolean).join("\n\n") || undefined,
+      tone: "info",
+      choose: { project: ctx.workspace.project, fn: "tasks.answerQuestion", input: { id: h.id, q: q.id }, field: "value", options: q.options ?? [], other: true },
+    },
+  };
 }

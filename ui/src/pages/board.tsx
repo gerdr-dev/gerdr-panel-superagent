@@ -300,11 +300,13 @@ function chatPanel(t: Task, byId: Record<string, Task>): { label: string; action
     return {
       // A short line, then one row per thing (Gerdr draws them with a yellow edge and a jump icon): the run-on text and
       // a row of buttons left nothing readable on a phone. Each row jumps to its card in this chat.
-      label: `${t.id} 在等你处理 ${mine.length} 件`,
+      label: `${t.id} 在等你处理 ${mine.reduce((n, h) => n + (h.questions ? unanswered(h).length : 1), 0)} 件`,
       actions: [drop, done],
-      items: mine.map((h) => {
+      items: mine.flatMap((h) => {
+        // Several questions in one item: a row each (each has its card in the chat), still one thing on the board
+        if (h.questions) return unanswered(h).map((q) => ({ text: `${h.id} 待你答：${q.title}`, jump: `${h.id}#${q.id}` }));
         const left = h.expiresAt ? (h.expiresAt > Date.now() ? `（还剩 ${Math.round((h.expiresAt - Date.now()) / 60000)} 分钟）` : "（已过期）") : "";
-        return { text: `${h.id} ${h.handBack?.kind === "choice" ? "待决定" : "要你做"}：${h.title}${left}`, jump: h.id };
+        return [{ text: `${h.id} ${h.handBack?.kind === "choice" ? "待决定" : "要你做"}：${h.title}${left}`, jump: h.id }];
       }),
     };
   if (c === "review") {
@@ -363,6 +365,12 @@ function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, T
       </div>
       <p className={clsx("line-clamp-2 text-[13px] font-medium", t.status === "dropped" && "text-muted-foreground line-through")}>{t.title}</p>
       {t.question && colOf(t) === "you" && <p className="line-clamp-2 text-[12px] text-warn">{t.question}</p>}
+      {t.questions && t.status === "todo" && (
+        <p className="text-[12px] text-warn">
+          {unanswered(t).length ? `${unanswered(t).length} 个问题要你答` : "都答了"}
+          {(t.questions ?? []).filter((q) => !q.dropped).length > 1 && ` · 共 ${(t.questions ?? []).filter((q) => !q.dropped).length} 个`}
+        </p>
+      )}
       {(t.repo || live || blockers.length > 0) && (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
           {t.repo && <span>{t.repo.split("/").pop()}</span>}
@@ -410,7 +418,7 @@ function Drawer({ t, byId, act, onClose, onGo }: { t: Task; byId: Record<string,
           </Button>
         </div>
         {t.owner === "agent" && <Trail task={t.id} version={t.updatedAt} onSession={(id) => openChat(id, t.id)} onTask={onGo} />}
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">{done ? <DoneDetail t={t} /> : t.owner === "human" ? <HumanCard key={t.id} t={t} byId={byId} act={act} onGo={onGo} /> : <AgentCard key={t.id} t={t} byId={byId} act={act} />}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">{done && !(t.questions && t.status === "done") ? <DoneDetail t={t} /> : t.owner === "human" ? <HumanCard key={t.id} t={t} byId={byId} act={act} onGo={onGo} /> : <AgentCard key={t.id} t={t} byId={byId} act={act} />}</div>
       </SheetContent>
     </Sheet>
   );
@@ -605,6 +613,7 @@ function HumanCard({ t, byId, act, onGo }: { t: Task; byId: Record<string, Task>
   }, [kind, t.handBack?.name, secretAsked]);
   const blocks = Object.values(byId).filter((x) => x.blockedBy?.includes(t.id) && x.status !== "done" && x.status !== "dropped");
   const complete = (v?: string) => go("complete", "complete", { id: t.id, value: v ?? (kind === "value" || kind === "choice" ? value : undefined) });
+  if (kind === "questions") return <Questions t={t} byId={byId} act={act} onGo={onGo} />;
   if (kind === "choice") return <Decision t={t} byId={byId} busy={busy} err={err} onPick={complete} onDrop={() => go("drop", "drop", { id: t.id })} onGo={onGo} />;
   return (
     <Card t={t} icon={<Hand className="size-4" />}>
@@ -671,6 +680,95 @@ function HumanCard({ t, byId, act, onGo }: { t: Task; byId: Record<string, Task>
       ) : (
         <p className="text-[12px] text-muted-foreground">前置任务还没完成，先不用动。</p>
       )}
+    </Card>
+  );
+}
+
+/** A task's questions still waiting for an answer. */
+function unanswered(t: Task) {
+  return (t.questions ?? []).filter((q) => !q.dropped && !q.answer);
+}
+
+/**
+ * Several things one worker needs decided or given, as one item: it can't go on until all are answered, so they're
+ * answered here together; each answer is kept as it's given, and the worker hears them all once the last is in. An
+ * answer can be changed (before the last one nobody has acted on it; after, the worker is told what changed).
+ */
+function Questions({ t, byId, act, onGo }: { t: Task; byId: Record<string, Task>; act: Act; onGo: (id: string) => void }) {
+  const { busy, err, go } = useAction(act);
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [editing, setEditing] = useState<Record<string, boolean>>({});
+  const qs = (t.questions ?? []).filter((q) => !q.dropped);
+  const left = qs.filter((q) => !q.answer).length;
+  const answer = async (q: { id: string }, v: string) => {
+    if (await go(`q${q.id}`, "answerQuestion", { id: t.id, q: q.id, value: v })) {
+      setDraft((d) => ({ ...d, [q.id]: "" }));
+      setEditing((e) => ({ ...e, [q.id]: false }));
+    }
+  };
+  return (
+    <Card t={t} icon={<CircleHelp className="size-4" />}>
+      <BackToChat t={t} byId={byId} onGo={onGo} />
+      <h3 className="text-[14px] font-medium">{t.title}</h3>
+      <p className="text-[12px] text-muted-foreground">{left ? `还有 ${left} 个要你答；都答完 worker 一次收到全部答案` : "都答了"}</p>
+      <ol className="space-y-3">
+        {qs.map((q, i) => {
+          const open = !q.answer || editing[q.id];
+          return (
+            <li key={q.id} className={clsx("space-y-2 rounded-lg border p-3", !q.answer && "border-warn/50")}>
+              <p className="text-[13px] font-medium">
+                {i + 1}. {q.title}
+              </p>
+              {q.steps && <Steps text={q.steps} />}
+              {!open ? (
+                <div className="flex items-center gap-2 text-[12px]">
+                  <Check className="size-3.5 shrink-0 text-ok" />
+                  <span className="min-w-0 flex-1">{q.answer}</span>
+                  <button className="shrink-0 text-muted-foreground hover:text-foreground" onClick={() => setEditing((e) => ({ ...e, [q.id]: true }))}>
+                    改答案
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {q.kind === "choice" &&
+                    (q.options ?? []).map((o) => (
+                      <button
+                        key={o}
+                        disabled={!!busy}
+                        className={clsx("block w-full rounded-md border px-3 py-2 text-left text-[13px] hover:bg-accent", q.answer === o && "border-ok")}
+                        onClick={() => answer(q, o)}
+                      >
+                        {o}
+                      </button>
+                    ))}
+                  <div className="flex gap-2">
+                    <input
+                      value={draft[q.id] ?? ""}
+                      onChange={(e) => setDraft((d) => ({ ...d, [q.id]: e.target.value }))}
+                      placeholder={q.kind === "choice" ? "其他，自己写…" : `交回：${q.label || "一个值"}（不要填密码）`}
+                      className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]"
+                      onKeyDown={(e) => e.key === "Enter" && draft[q.id]?.trim() && answer(q, draft[q.id])}
+                    />
+                    <Button disabled={!!busy || !draft[q.id]?.trim()} onClick={() => answer(q, draft[q.id])}>
+                      {busy === `q${q.id}` ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+                      {q.answer ? "改成这个" : "答"}
+                    </Button>
+                    {q.answer && (
+                      <Button variant="ghost" onClick={() => setEditing((e) => ({ ...e, [q.id]: false }))}>
+                        不改
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+      {err && <p role="alert" className="text-[12px] text-bad">{err}</p>}
+      <div className="flex justify-end">
+        <DropButton busy={!!busy} onDrop={() => go("drop", "drop", { id: t.id })} />
+      </div>
     </Card>
   );
 }

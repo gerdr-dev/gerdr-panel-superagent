@@ -1,5 +1,5 @@
 import { workflow } from "./_config";
-import { blockersDone, find, load, newTask, note, update, type Store, type Task } from "./_store";
+import { blockersDone, find, load, newTask, note, update, type Question, type Store, type Task } from "./_store";
 import { applyBlock } from "./_apply";
 import { allAgents, mentionsIn } from "./_agents";
 import { isMain, routeTask, sweep } from "./_main";
@@ -502,10 +502,100 @@ async function closeRouters(ctx: Ctx, live: Record<string, any>) {
 /** Where one task stands, cheaply (the chat's task-step card asks for it): status, and what the user handed back. */
 export function status(input: { id: string }, ctx: Ctx) {
   const { store } = load(ctx);
-  const t = store.tasks.find((x) => x.id === input.id);
+  // "t5#2": one question of a task asking several (the chat has a card per question)
+  const [tid, qid] = String(input?.id ?? "").split("#");
+  const t = store.tasks.find((x) => x.id === tid);
   if (!t) return { status: "missing" };
+  if (qid) {
+    const q = t.questions?.find((x) => x.id === qid);
+    if (!q) return { status: "missing" };
+    const status = q.dropped || t.status === "dropped" ? "dropped" : q.answer ? "done" : "todo";
+    return { status, title: q.title, handedBack: q.answer, kind: q.kind };
+  }
   const back = t.handBack?.kind === "secret" ? undefined : t.handedBack;
-  return { status: t.status, title: t.title, handedBack: back };
+  return { status: t.status, title: t.title, handedBack: back, kind: t.handBack?.kind };
+}
+
+/**
+ * Answers one question of a task asking several: { id, q, value }. The answers wait on the task until every question
+ * has one; then the task is done and the worker hears them all in one message. Answering one again changes it: before
+ * the rest are answered nobody has acted on it yet; after, the worker is told what changed.
+ */
+export async function answerQuestion(input: { id: string; q: string; value: string }, ctx: Ctx) {
+  const value = input?.value?.trim();
+  if (!value) throw new Error("选一个，或者写下你的答案");
+  let changed: { q: Question; old: string } | null = null;
+  let finished = false;
+  const h = update(ctx, (s) => {
+    const h = find(s, input.id);
+    const q = h.questions?.find((x) => x.id === String(input.q));
+    if (!q) throw new Error(`${h.id} 没有第 ${input.q} 个问题`);
+    if (h.status === "dropped" || q.dropped) throw new Error(`${h.id} 的这个问题已经不需要了`);
+    const old = q.answer;
+    if (old === value) return h;
+    q.answer = value;
+    if (h.status === "done" && old) {
+      changed = { q, old };
+      note(h, `改了「${q.title}」的答案：${old} → ${value}`);
+    } else if (open(h).every((x) => x.answer)) {
+      finished = true;
+      Object.assign(h, { status: "done", handedBack: summary(h), doneAt: Date.now() });
+    }
+    if (h.status === "done") h.handedBack = summary(h);
+    h.updatedAt = Date.now();
+    return h;
+  });
+  const { store } = load(ctx);
+  const workers = store.tasks.filter((t) => t.owner === "agent" && t.session && t.status !== "dropped" && t.status !== "done" && (t.id === h.askedBy || t.blockedBy?.includes(h.id)));
+  if (finished) {
+    for (const t of workers.filter((t) => blockersDone(store, t) || t.id === h.askedBy))
+      await tell(ctx, t, `你问的 ${open(h).length} 个问题（${h.id}），用户都答了：\n${open(h).map((q, i) => `${i + 1}. ${q.title}\n   → ${q.answer}`).join("\n")}\n照这些接着做。`).catch(() => {});
+  } else if (changed) {
+    const c = changed as { q: Question; old: string };
+    for (const t of workers) await tell(ctx, t, `用户改了「${c.q.title}」（${h.id}）的答案：原来是「${c.old}」，现在是「${value}」。\n按新的来；已经照旧答案做了的，改过来。`).catch(() => {});
+  }
+  return { task: h, done: h.status === "done" };
+}
+
+/** The questions still asked (not taken back). */
+function open(h: Task) {
+  return (h.questions ?? []).filter((q) => !q.dropped);
+}
+
+function summary(h: Task) {
+  return open(h)
+    .map((q) => `${q.title}：${q.answer ?? "（没答）"}`)
+    .join("；");
+}
+
+/**
+ * Changes an answer already given: { id, value } — a decision picked or a value handed back by mistake. The card's
+ * own undo only lasts the seconds before it's sent; after that the worker is already acting on it, so it's told
+ * what changed (old → new) right away, and is expected to redo what depended on the old one. Not a secret: those are
+ * set again in Gerdr's dialog on the board.
+ */
+export async function reanswer(input: { id: string; value: string }, ctx: Ctx) {
+  const value = input?.value?.trim();
+  if (!value) throw new Error("写下新的答案");
+  let old = "";
+  const h = update(ctx, (s) => {
+    const h = find(s, input.id);
+    if (h.owner !== "human" || h.status !== "done") throw new Error(`${h.id} 还没答，直接答就行`);
+    if (h.handBack?.kind !== "choice" && h.handBack?.kind !== "value") throw new Error(`${h.id} 没有可以改的答案`);
+    old = h.handedBack ?? "";
+    if (old === value) return h;
+    note(h, `改了答案：${old} → ${value}`);
+    Object.assign(h, { handedBack: value, updatedAt: Date.now() });
+    return h;
+  });
+  if (old === value) return { task: h, changed: false };
+  const { store } = load(ctx);
+  // Who acted on the old answer: the worker that asked, and any task it was holding up
+  const told = store.tasks.filter((t) => t.owner === "agent" && t.session && t.status !== "dropped" && (t.id === h.askedBy || t.blockedBy?.includes(h.id)));
+  const what = h.handBack?.kind === "choice" ? "决定" : h.handBack?.label || "交回的值";
+  for (const t of told)
+    await tell(ctx, t, `用户改了「${h.title}」（${h.id}）的${what}：原来是「${old}」，现在是「${value}」。\n按新的来；已经照旧答案做了的，改过来（改不了的用 ask_human 说明）。`).catch(() => {});
+  return { task: h, changed: true, told: told.map((t) => t.id) };
 }
 
 /**

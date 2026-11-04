@@ -30,7 +30,9 @@ export type Task = {
   summary?: string;
   links?: Link[];
   steps?: string;
-  handBack?: { kind: "none" | "value" | "secret" | "choice"; name?: string; label?: string; options?: string[] };
+  handBack?: { kind: "none" | "value" | "secret" | "choice" | "questions"; name?: string; label?: string; options?: string[] };
+  /** handBack "questions": several decisions / values asked at once, each answered on its own (local/_store.ts). */
+  questions?: { id: string; title: string; kind: "choice" | "value"; options?: string[]; label?: string; steps?: string; answer?: string; dropped?: string }[];
   handedBack?: string;
   verify?: string;
   minutes?: number;

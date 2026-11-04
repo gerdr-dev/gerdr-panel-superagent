@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-import { Check, Undo2 } from "lucide-react";
+import { Check, Pencil, Undo2 } from "lucide-react";
 import { DefaultCard, registerCard, type CardProps } from "@gerdr/core";
 import { run } from "./lib/gerdr";
 
 // Cards the board's panel tools put in a worker's chat (local/board.ts). Gerdr loads this file at start, so they're drawn
 // this way wherever the chat is shown: the board's drawer, or the worker's tab in Code.
 
-type Step = { status: string; handedBack?: string; title?: string };
+type Step = { status: string; handedBack?: string; title?: string; kind?: string };
 
 /**
  * A step or decision the worker put on the board (ask_human): the built-in card while it waits, so it can be answered
@@ -21,6 +21,13 @@ function TaskStep({ card }: CardProps) {
   const c = card as { project?: string; choose?: { project?: string } };
   const board = c.project ?? c.choose?.project;
   const [st, setSt] = useState<Step>();
+  // Changing an answer already sent: the built-in card again, its pick going to tasks.reanswer (with its few seconds
+  // of undo too). The card's own undo only covers the seconds before a pick is sent.
+  const [changing, setChanging] = useState<string | false>(false); // the answer it had when the change was opened
+  // The new answer arrived (a poll after tasks.reanswer): back to the one-line record, showing it
+  useEffect(() => {
+    if (changing !== false && st?.handedBack !== changing) setChanging(false);
+  }, [st?.handedBack]);
   useEffect(() => {
     if (!id || !board) return;
     let dead = false;
@@ -32,6 +39,20 @@ function TaskStep({ card }: CardProps) {
       clearInterval(timer);
     };
   }, [id, board]);
+  const changeable = st?.status === "done" && (st.kind === "choice" || st.kind === "value") && !!card.choose && !!board;
+  if (changing && changeable) {
+    // A question of several is changed the way it's answered; an older single ask through tasks.reanswer
+    const choose = { ...card.choose!, fn: card.choose!.fn === "tasks.answerQuestion" ? card.choose!.fn : "tasks.reanswer", project: board! };
+    return (
+      <div>
+        {/* Its own ref: the first answer's pick (sent) is kept under the card's ref, and would show here as already made */}
+        <DefaultCard card={{ ...card, ref: `${id}:change:${changing}`, kicker: `改答案 · ${id} · 现在是「${changing}」`, choose }} />
+        <button className="mb-1.5 text-[12px] text-muted-foreground hover:text-foreground" onClick={() => setChanging(false)}>
+          不改了
+        </button>
+      </div>
+    );
+  }
   if (st?.status === "done" || st?.status === "dropped") {
     const done = st.status === "done";
     return (
@@ -40,7 +61,13 @@ function TaskStep({ card }: CardProps) {
         <span className="min-w-0 flex-1 truncate">
           {id} {card.title}
         </span>
-        <span className="shrink-0">{done ? (st.handedBack ? `已处理：${st.handedBack}` : "已处理") : "已撤回"}</span>
+        <span className="min-w-0 shrink truncate">{done ? (st.handedBack ? `已处理：${st.handedBack}` : "已处理") : "已撤回"}</span>
+        {changeable && (
+          <button className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 hover:bg-accent hover:text-foreground" title="答错了？改成别的，worker 会收到新旧两个答案" onClick={() => setChanging(st.handedBack ?? "")}>
+            <Pencil className="size-3" />
+            改答案
+          </button>
+        )}
       </div>
     );
   }
