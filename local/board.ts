@@ -16,7 +16,11 @@ const STEP = {
       items: { type: "string" },
       description: "Makes it a decision: the choices, each a short line with its trade-off. The user picks one (or writes their own) on the board, maybe days later; you get their answer as a message.",
     },
-    steps: { type: "string", description: "Numbered steps the user can follow without reading your chat: direct links, codes, values to paste" },
+    steps: {
+      type: "string",
+      description:
+        "Markdown the user reads without your chat: numbered steps, direct links, codes, values to paste. Something to look at before deciding (a screenshot, sample videos) goes in as ![](/absolute/path): the board and the chat show the image / play the video right there.",
+    },
     handBack: {
       type: "object",
       description: "What the user gives back when done. kind none (just mark done) / value (a non-secret value) / secret (stored as a panel secret named name, never shown to anyone; only panel functions can read it through ctx.secrets.get, not you or the code you write). A key your own code / commands need (an API key, a test password): kind none, and the steps say which file to put it in (a git-ignored one like .env, with its absolute path) and under what name; never ask for it in the chat",

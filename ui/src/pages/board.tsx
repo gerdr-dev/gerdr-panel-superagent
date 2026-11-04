@@ -13,6 +13,7 @@ import { day, since, type Task, useTasks } from "../lib/tasks";
 import { project, run } from "../lib/gerdr";
 import { onShowSession } from "@gerdr/core";
 import { isSubmitEnter } from "../lib/utils";
+import { Md } from "../lib/markdown";
 
 // The task board: columns left to right (to do, running, needs you, to review, done), small cards, details in a side
 // panel. Columns are worked out from facts (task status, the worker session's state, blockers), never dragged: a
@@ -528,7 +529,7 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
       </div>
       <Meta t={t} byId={byId} extra={liveText(t) ? <span className={clsx("inline-flex items-center gap-1", tone)}><CircleDot className="size-3" />{liveText(t)}{stale ? "（很久没结束）" : ""}</span> : undefined} />
       {l?.status === "waiting" && l.waiting && <p className="rounded-md bg-warn/10 px-3 py-2 text-[12px] text-warn">在等：{l.waiting}（去会话里处理）</p>}
-      {t.summary && <p className="text-[13px] whitespace-pre-wrap">{t.summary}</p>}
+      {t.summary && <Md>{t.summary}</Md>}
       <Links t={t} />
       {t.prompt && (
         <details className="text-[12px] text-muted-foreground" open={!t.summary}>
@@ -829,21 +830,9 @@ function Decision({ t, byId, busy, err, onPick, onDrop, onGo }: { t: Task; byId:
 }
 
 /** Steps as written, with bare URLs made clickable. */
+/** What a human step / question says, in the chat's Markdown (links, local videos and images shown, code). */
 function Steps({ text }: { text: string }) {
-  const parts = text.split(/(https?:\/\/[^\s)）]+)/g);
-  return (
-    <p className="rounded-md bg-muted/60 px-3 py-2 text-[13px] leading-relaxed whitespace-pre-wrap">
-      {parts.map((p, i) =>
-        /^https?:\/\//.test(p) ? (
-          <a key={i} href={p} target="_blank" rel="noreferrer" className="text-brand hover:underline">
-            {p}
-          </a>
-        ) : (
-          p
-        ),
-      )}
-    </p>
-  );
+  return <Md className="rounded-md bg-muted/60 px-3 py-2">{text}</Md>;
 }
 
 function DoneDetail({ t }: { t: Task }) {
@@ -856,7 +845,7 @@ function DoneDetail({ t }: { t: Task }) {
         {t.from && <span>· 拆自 {t.from}</span>}
         <span>· {t.status === "dropped" ? "放弃于" : "完成于"} {day(t.doneAt ?? t.updatedAt)}</span>
       </div>
-      {t.summary && <p className="text-[13px] whitespace-pre-wrap">{t.summary}</p>}
+      {t.summary && <Md>{t.summary}</Md>}
       {t.steps && <Steps text={t.steps} />}
       {t.handedBack && <p className="text-[12px] text-muted-foreground">交回：{t.handedBack}</p>}
       <Links t={t} />
