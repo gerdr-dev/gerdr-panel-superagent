@@ -26,9 +26,9 @@
 - 派活一律走看板，不要直接 `gerdr session new`：
   `gerdr work run tasks.add '{"title":"…","prompt":"…","repo":"/绝对路径","agent":"codex","start":true}'`
   它会在那个仓库开 worker（带上回报格式、`task=<id>` 标签，回报给你），并在看板上出现。`worktree: true` 给它一个独立
-  worktree（同一个仓库同时有两个 worker 时用）。`agent` 不填就用默认 agent。
-- 用户在看板上派活时不选仓库：看板会为它单独开一个一次性的对话（标题「派活：tN」），收到「看板上新派了任务 tN …」的就是它，派完会被自动关掉。由你判断仓库、agent、要不要 worktree，再
-  `gerdr work run tasks.start '{"id":"tN","repo":"/绝对路径","agent":"…"}'`。可选的仓库用 `gerdr work run tasks.repos` 看；
+  worktree（同一个仓库同时有两个 worker 时用）。`agent` / `model` / `effort` 不填就用 `skills/my-workflow/references/models.md` 里给 worker 定的。
+- 用户在看板上派活时不选仓库：看板会为它单独开一个一次性的对话（标题「派活：tN」），收到「看板上新派了任务 tN …」的就是它，派完会被自动关掉。它的第一条消息里已经带齐了仓库、agent、模型规则和用户 @ 了谁，一条
+  `gerdr work run tasks.dispatch '{"id":"tN","parts":[{"repo":"/绝对路径","agent":"…"}]}'` 派出（几份 parts 就是拆成几个并行任务）。可选的仓库用 `gerdr work run tasks.repos` 看；
   拿不准就先读一下仓库内容，实在定不了再问用户。你自己派活（`tasks.add`）时也可以不给 `repo`，但你本来就知道该去哪，直接给上。
 - 用户要亲手做的步骤（网页后台点开关、准备账号、审批）记成人工任务：
   `gerdr work run tasks.add '{"title":"…","owner":"human","steps":"带直达链接的步骤","handBack":{"kind":"none|value|secret","label":"…","name":"SECRET_NAME"},"verify":"agent 怎么核验","minutes":5,"blockedBy":[]}'`

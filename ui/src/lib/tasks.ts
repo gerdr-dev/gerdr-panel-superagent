@@ -15,6 +15,10 @@ export type Task = {
   prompt?: string;
   repo?: string;
   agent?: string;
+  model?: string;
+  effort?: string;
+  mentions?: string[];
+  from?: string;
   worktree?: boolean;
   session?: string;
   sessions?: string[];

@@ -98,7 +98,7 @@ export function ChatDrawer({
           </div>
         )}
         <div className="min-h-0 flex-1">
-          <SessionChat id={session} focused jump={jump} />
+          <SessionChat id={session} focused jump={jump} sendNow />
         </div>
       </SheetContent>
     </Sheet>

@@ -110,6 +110,16 @@ worker 拿到一组 Work 工具（`local/board.ts`，经 Gerdr 的 `gerdr work m
   它读得到 README、skill 和工具，挑好仓库用 `tasks.start` 派出去，之后由 `tasks.list` 关掉。
   - **被否掉的做法：发给右边的 Work 助手。** 每派一个就把助手的对话撑长一轮，而用户根本不看。
   - 在 Work 目录里开的会话是 Work 自己的对话，Gerdr 不会把它放进 Code，不会冒出标签页。
+- **派活要快**：派活对话要的东西全写在它的第一条消息里（仓库列表和用户挑仓库的说法、每个 agent / 角色是干什么的、
+  模型规则、用户 @ 了谁），一条 `tasks.dispatch` 派出去，要拆成几个并行的也是这一条（第一份就是原任务，其余是
+  `from` 指向它的新任务）。
+  **被否掉的做法：让它自己去读 README / skill / 看板代码。** 实测一次派活 22 秒，三轮读文件占了 10 秒，读到的东西每次都一样。
+- **@ agent**：新任务里输入 @ 点名 agent（`mentions`）。只点了一个就是这个任务的 agent；点了几个交给派活对话安排，
+  怎么分、并不并行、谁用便宜模型都由它定。指定了仓库又只点了一个，就不经过派活对话，直接派出。
+- **用哪个 agent、哪个模型**：用户写在 `skills/my-workflow/references/models.md` 的变量里，派活的对话和 worker 各一组
+  （agent / 模型 / 思考强度），`local/_config.ts` 读出来。任务上指定的优先。那组模型只配那组的 agent：
+  任务换了 agent 就不套（claude 的模型名对 codex 没意义），用那个 agent 自己的默认。
+  值写错了，Gerdr 开会话时直接报错并列出可选值，不会悄悄换成默认模型去跑。
 - **看板派出去的 worker 不回报给助手**（不设 `reportTo`）。用户看的是看板，回报只会让助手对着空气把 worker 的话复述一遍。
 - **worker 是看板的，不进 Code**（`ctx.sessions.start({ workspace: "none" })`）：Gerdr 给看板开的对话打上 `panel` 标签，
   从通知、收件箱、「进行中」点到它，Gerdr 都切回这个面板，交给看板显示（`onShowSession`：打开那个任务的抽屉）。
@@ -128,6 +138,10 @@ worker 拿到一组 Work 工具（`local/board.ts`，经 Gerdr 的 `gerdr work m
 - **被否掉的做法：在看板面板里复制 worker 的回复。** 只能看到最后一条、纯文本、不能发图片，用户要往前翻才能做决定。
 - **被否掉的做法：让 Gerdr 在页面上面替看板画抽屉**（`showSession`）。那时 Work 页面是个 iframe，用不了 Gerdr 的聊天，
   看板想在抽屉里多放一样东西，就得改一次 Gerdr。现在 Work 页面直接挂在 Gerdr 的页面里，聊天是一个组件，抽屉是看板自己的。
+
+- **消息一律立即发送**：抽屉里的输入框（`SessionChat` 的 `sendNow`）和看板函数发给 worker 的消息（`ctx.sessions.send` 的
+  `now`）都是「立即发送」：worker 在跑长命令时，命令转到后台，它马上读到新消息，不用等这一步做完。
+  用户在看板上补一句、改个方向，是希望它现在就知道，不是排在一个可能要跑十几分钟的步骤后面。
 
 人工任务、已完成的任务、还没派出去的任务，才用看板自己的详情面板。
 

@@ -4,6 +4,7 @@
 
 import { parse } from "../ui/src/lib/vars";
 import { DIR } from "./_vars";
+import { allAgents } from "./_agents";
 
 // Paths inside skills/: a skill's SKILL.md or one of its references (my-workflow/references/mr.md). No "..".
 const PATH = /^[\w\u4e00-\u9fff-]+(\/[\w\u4e00-\u9fff.-]+)*\.md$/;
@@ -82,11 +83,5 @@ export async function browse(input: { path?: string; files?: boolean }, ctx: Ctx
 
 /** For an agent variable: the agents and roles set up in Gerdr. */
 export async function agents(input: unknown, ctx: Ctx) {
-  const r = await ctx.exec("gerdr", ["session", "agents"], { timeout: 15_000 });
-  if (r.code !== 0) return [];
-  try {
-    return (JSON.parse(r.stdout) as any[]).map((a) => ({ id: a.id, name: a.name ?? a.id }));
-  } catch {
-    return [];
-  }
+  return (await allAgents(ctx)).map((a) => ({ id: a.id, name: a.name }));
 }

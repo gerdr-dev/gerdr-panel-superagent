@@ -4,7 +4,7 @@
 // (so someone writing their skill in English works too), and falls back to its careful default when the variable
 // is missing or its value doesn't fit.
 
-import { parse, typed, type Var } from "../ui/src/lib/vars";
+import { parse, render, typed, type Var } from "../ui/src/lib/vars";
 
 export const DIR = "skills";
 
@@ -47,4 +47,14 @@ export function list(ctx: Ctx, names: string[]): string[] {
   if (!v) return [];
   const t = typed(v);
   return Array.isArray(t) ? t : [String(t)];
+}
+
+/** The text of the skill file that holds one of these variables, as an agent reads it (values filled in); "" if none. */
+export function fileWith(ctx: Ctx, names: string[]): string {
+  for (const f of ctx.fs.list(DIR)) {
+    if (!f.path.endsWith(".md")) continue;
+    const text = textOf(ctx, f.path.slice(DIR.length + 1));
+    if (parse(text).some((v) => names.includes(v.name))) return render(text).trim();
+  }
+  return "";
 }

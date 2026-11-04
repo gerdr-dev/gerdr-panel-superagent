@@ -1,6 +1,8 @@
 import { workflow } from "./_config";
 import { blockersDone, find, load, newTask, note, update, type Store, type Task } from "./_store";
 import { applyBlock } from "./_apply";
+import { allAgents, mentionsIn } from "./_agents";
+import { fileWith } from "./_vars";
 
 export type { Task };
 
@@ -113,12 +115,19 @@ function firstLine(text?: string) {
   return [...line].length > 40 ? [...line].slice(0, 40).join("") + "…" : line;
 }
 
-/** A new task. { title, owner?, prompt?, repo?, agent?, steps?, handBack?, verify?, minutes?, blockedBy?, start? } */
+/** A new task. { title, owner?, prompt?, repo?, agent?, model?, effort?, steps?, handBack?, verify?, minutes?, blockedBy?, start? } */
 export async function add(input: Partial<Task> & { title?: string; start?: boolean }, ctx: Ctx) {
   // No title given (the board only asks what to do): the first line of the prompt / steps, cut short.
   const title = (input?.title || firstLine(input?.prompt) || firstLine(input?.steps) || (input?.attachments?.length ? `看附件：${input.attachments[0].name}` : "")).trim();
   if (!title) throw new Error("任务要写清楚做什么");
   const { start: go, ...rest } = input;
+  // @-mentions in the text (the board's input box, the Work agent writing "@design …"): who the router hands it to.
+  // One mention and no agent given is simply the agent.
+  if (rest.owner !== "human" && !rest.mentions && rest.prompt?.includes("@")) {
+    const m = mentionsIn(rest.prompt, await allAgents(ctx));
+    if (m.length) rest.mentions = m;
+  }
+  if (rest.mentions?.length === 1 && !rest.agent) rest.agent = rest.mentions[0];
   const t = update(ctx, (s) => newTask(s, { ...rest, title, id: undefined } as any));
   if (go && t.owner === "agent") return start({ id: t.id }, ctx);
   return t;
@@ -136,9 +145,13 @@ export function edit(input: Partial<Task> & { id: string }, ctx: Ctx) {
 
 /**
  * Hands an agent task to a new worker session: in its repository (or a git worktree of it), told the task and the
- * reply protocol, reporting to the Work agent. { id, prompt?, repo?, agent?, worktree?, mode? }
+ * reply protocol, reporting to the Work agent. { id, prompt?, repo?, agent?, model?, effort?, worktree?, mode? }
+ * Agent / model / effort not given: the task's, else the user's worker defaults (skills/…/models.md), else Gerdr's.
  */
-export async function start(input: { id: string; prompt?: string; repo?: string; agent?: string; worktree?: boolean; mode?: string }, ctx: Ctx) {
+export async function start(
+  input: { id: string; prompt?: string; repo?: string; agent?: string; model?: string; effort?: string; worktree?: boolean; mode?: string },
+  ctx: Ctx,
+) {
   const { store } = load(ctx);
   const t = find(store, input.id);
   if (t.owner !== "agent") throw new Error(`${t.id} 是人工任务，不能派给 agent`);
@@ -163,9 +176,10 @@ export async function start(input: { id: string; prompt?: string; repo?: string;
       if (r.code !== 0) throw new Error(`开 worktree 失败：${r.stderr.trim()}`);
     }
   }
+  const who = workerOf(ctx, t, input);
   const sess = await ctx.sessions.start({
     cwd,
-    agent: input.agent ?? t.agent ?? undefined,
+    ...who,
     mode: input.mode,
     title: t.title,
     prompt: (prompt || "看附件，照里面的做。") + WORKER_PROTOCOL.split("{id}").join(t.id),
@@ -180,13 +194,31 @@ export async function start(input: { id: string; prompt?: string; repo?: string;
     const x = find(s, t.id);
     Object.assign(x, { status: "running", routing: undefined, prompt, repo, session: sess.id, sessions: [...(x.sessions ?? []), sess.id], question: undefined, updatedAt: Date.now() });
     if (input.agent) x.agent = input.agent;
+    if (input.model) x.model = input.model;
+    if (input.effort) x.effort = input.effort;
     return x;
   });
 }
 
+/**
+ * Which agent / model / effort a worker runs on. The defaults in models.md go with its agent: a model named there is
+ * that agent's (a claude model means nothing to codex), so a task on another agent only gets a model it names itself.
+ */
+function workerOf(ctx: Ctx, t: Task, input: { agent?: string; model?: string; effort?: string }) {
+  const w = workflow(ctx).worker;
+  const agent = input.agent || t.agent || w.agent;
+  const same = agent === w.agent;
+  return {
+    agent: agent || undefined,
+    model: input.model || t.model || (same ? w.model : "") || undefined,
+    effort: input.effort || t.effort || (same ? w.effort : "") || undefined,
+  };
+}
+
 async function tell(ctx: Ctx, t: Task, text: string) {
   if (!t.session) throw new Error(`${t.id} 没有在跑的 agent 会话：先派出去（start）`);
-  await ctx.sessions.send(t.session, text);
+  // Right away even mid-step: a worker running something long in the background still takes the message (DESIGN.md)
+  await ctx.sessions.send(t.session, text, { now: true });
 }
 
 /** The user accepts the result: done, and the worker is parked (its context kept, a later send wakes it). */
@@ -316,27 +348,114 @@ export async function drop(input: { id: string; reason?: string }, ctx: Ctx) {
   return t;
 }
 
-/** Asks the Work agent to choose where the task runs and dispatch it. */
 /**
- * Picks the repository / agent for a task the user dispatched without one: a one-off conversation in this Work
- * directory (it reads README / skills like the Work agent, and is one of the Work's own chats, not a Code tab), which
- * dispatches it with tasks.start and is closed once it has (list → closeRouters). Not the Work agent's own chat: the
- * user follows the board, and each of these grew that chat by a turn they never read.
+ * Picks the repository / agent / model for a task the user dispatched without a repository: a one-off conversation in
+ * this Work directory, closed once the task is out (list → closeRouters). Not the Work agent's own chat: the user
+ * follows the board, and each of these grew that chat by a turn they never read.
+ *
+ * Speed is the point: everything it decides by is in its first message (the repositories and how the user picks
+ * them, the agents and what each is for, the model rules, who was @-mentioned), and one command (tasks.dispatch)
+ * sends the task out, split into parallel parts if need be. It used to read README / skills / code first: three
+ * rounds of tools, about 10 of its 22 seconds.
  */
 async function route(id: string, prompt: string, ctx: Ctx) {
   // Marked as routing only once the conversation started: a failed start leaves it a plain todo to dispatch again
   const t = update(ctx, (s) => Object.assign(find(s, id), { prompt, updatedAt: Date.now() }));
+  const r = workflow(ctx).router;
+  const agents = await allAgents(ctx);
+  const named = (id: string) => {
+    const a = agents.find((x) => x.id === id);
+    return a && a.name !== a.id ? `${a.name}（${a.id}）` : id;
+  };
+  const agentLines = agents.map((a) => {
+    const about = a.prompt ? `：${oneLine(a.prompt, 160)}` : "";
+    return `- ${a.id}（${a.name}${a.base ? `，基于 ${a.base}` : ""}）${about}`;
+  });
+  const repoText = fileWith(ctx, ["仓库", "repos"]) || `（用户没写仓库列表）最近用过的目录：\n${repos(null, ctx).map((x) => `- ${x.path}`).join("\n")}`;
+  const modelText = fileWith(ctx, ["派活 agent", "干活 agent", "router agent", "worker agent"]);
+  const mentions = t.mentions ?? [];
+  const who = mentions.length
+    ? `用户 @ 了：${mentions.map(named).join("、")}。他点名要这些 agent 做：` +
+      (mentions.length > 1 ? `通常每个 agent 一份、并行；能合成一份的也可以只派给其中一个。\n` : `就派给它。\n`)
+    : t.agent || t.model
+      ? `用户指定了 ${[t.agent && `agent「${t.agent}」`, t.model && `模型「${t.model}」`].filter(Boolean).join("、")}，照用。\n`
+      : "";
+  const ex = JSON.stringify({ id: t.id, parts: [{ repo: "/绝对路径" }] });
   const sess = await ctx.sessions.start({
     cwd: ctx.workspace.dir,
+    agent: r.agent || undefined,
+    model: r.model || undefined,
+    effort: r.effort || undefined,
     title: `派活：${t.id}`,
-    prompt:
-      `看板上新派了任务 ${t.id}「${t.title}」，用户没指定仓库。你只负责把它派出去，派完就结束，不用跟用户汇报（用户看看板）。\n\n任务内容：\n${prompt}\n\n` +
-      (t.attachments?.length ? `用户还给了 ${t.attachments.length} 个附件（派出时会自动带给 worker，要看可以直接打开）：\n${t.attachments.map((a) => `- ${a.name}：${a.path}`).join("\n")}\n\n` : "") +
-      `判断它该在哪个仓库做（不确定就先查一下；实在定不了，用你自带的提问工具问用户）、用哪个 agent、要不要独立 worktree，然后派出：\n` +
-      `gerdr work run tasks.start '{"id":"${t.id}","repo":"/绝对路径","agent":"…","worktree":false}'\n` +
-      `标题是从任务内容第一行截的，不够好就先 gerdr work run tasks.edit '{"id":"${t.id}","title":"十几个字的短标题"}'。`,
+    prompt: [
+      `看板上新派了任务 ${t.id}「${t.title}」。你只负责把它派出去：派完就结束，不用跟用户汇报（用户看看板）。`,
+      `派活要的信息下面都给了，**不要再去读 README、skill 或看板代码**，直接用一条命令派出。只有凭这些真定不了仓库时，才去候选仓库里搜一下；还定不了，用你自带的提问工具问用户。`,
+      `## 任务\n${prompt}` +
+        (t.attachments?.length ? `\n\n附件（派出时自动带给 worker）：\n${t.attachments.map((a) => `- ${a.name}：${a.path}`).join("\n")}` : ""),
+      who.trim(),
+      `## 可选的 agent\n${agentLines.join("\n")}`,
+      `## 仓库（用户自己写的）\n${repoText}`,
+      modelText && `## agent 和模型（用户自己写的）\n${modelText}`,
+      `## 派出：一条命令\n` +
+        `gerdr work run tasks.dispatch '${ex}'\n\n` +
+        `- parts 每项一份活：repo 必填；agent、model、effort 不写就用上面的默认，简单的活可以给便宜的模型；worktree 默认 false。\n` +
+        `- 只有一份：就是这个任务本身，不用写 prompt。\n` +
+        `- 拆成几份并行（用户 @ 了几个 agent，或者活明显能分开做）：每份写 title（十几个字）和 prompt（这一份做什么、和别的份怎么配合）；同一个仓库有两份以上时都写 "worktree": true。\n` +
+        `- 标题是从任务内容第一行截的，不够好就在顶层加 "title"。`,
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
   });
   return update(ctx, (s) => Object.assign(find(s, id), { routing: Date.now(), router: sess.id }));
+}
+
+function oneLine(text: string, max: number) {
+  const t = text.replace(/\s+/g, " ").trim();
+  return [...t].length > max ? [...t].slice(0, max).join("") + "…" : t;
+}
+
+type Part = { repo: string; agent?: string; model?: string; effort?: string; worktree?: boolean; title?: string; prompt?: string };
+
+/**
+ * Sends a task out in one go, as the router decided: { id, title?, parts: [{ repo, agent?, model?, effort?, worktree?,
+ * title?, prompt? }] }. One part is the task itself. Several run in parallel: the first stays this task (its title /
+ * prompt narrowed to that part), each other one becomes a new task split off it (`from`), with the same attachments.
+ */
+export async function dispatch(input: { id: string; title?: string; parts: Part[] }, ctx: Ctx) {
+  const parts = input?.parts ?? [];
+  if (!parts.length) throw new Error(`parts 至少一份：{"id":"${input?.id}","parts":[{"repo":"/绝对路径"}]}`);
+  for (const p of parts) {
+    if (!p?.repo?.trim()) throw new Error("parts 里每一份都要有 repo（仓库绝对路径）");
+    if (!ctx.dirs.stat(p.repo)?.dir) throw new Error(`仓库目录不存在：${p.repo}`);
+  }
+  const split = parts.length > 1;
+  if (split && parts.some((p) => !p.prompt?.trim())) throw new Error("拆成几份时每份都要写 prompt：这一份做什么");
+  const { store } = load(ctx);
+  const t = find(store, input.id);
+  const [first, ...rest] = parts;
+  const title = (split ? first.title : undefined) || input.title;
+  if (title) edit({ id: t.id, title }, ctx);
+  const out: Task[] = [await start({ id: t.id, repo: first.repo, agent: first.agent, model: first.model, effort: first.effort, worktree: first.worktree, prompt: split ? first.prompt : undefined }, ctx)];
+  const errors: string[] = [];
+  for (const p of rest) {
+    try {
+      out.push(
+        (await add(
+          { title: p.title, prompt: p.prompt, repo: p.repo, agent: p.agent, model: p.model, effort: p.effort, worktree: p.worktree, attachments: t.attachments, from: t.id, start: true },
+          ctx,
+        )) as Task,
+      );
+    } catch (e: any) {
+      errors.push(`${p.title ?? p.repo}：${e?.message ?? e}`);
+    }
+  }
+  if (errors.length) throw new Error(`已派出 ${out.map((x) => x.id).join("、")}；没派出去的：\n${errors.join("\n")}`);
+  return out;
+}
+
+/** For the board's @-mentions: the agents and roles a task can go to. */
+export async function agents(input: unknown, ctx: Ctx) {
+  return allAgents(ctx);
 }
 
 /** Routing conversations whose task has gone out (or was dropped), now idle: closed, they've done their one job. */

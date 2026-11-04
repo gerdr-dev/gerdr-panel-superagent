@@ -29,6 +29,13 @@ export type Task = {
   attachments?: { path: string; name: string; mime?: string }[];
   repo?: string;
   agent?: string;
+  /** The worker's model / thinking effort (the agent's own values); unset = skills/…/models.md, else Gerdr's default. */
+  model?: string;
+  effort?: string;
+  /** Agents the user @-mentioned: the router hands the task to them (one part each, or as it sees fit). */
+  mentions?: string[];
+  /** Split off this task by the router (one of several parts run in parallel). */
+  from?: string;
   worktree?: boolean;
   /** The worker session now and every one it had (re-runs, hand-offs). */
   session?: string;

@@ -229,7 +229,8 @@ function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, T
       {(t.repo || live || blockers.length > 0) && (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
           {t.repo && <span>{t.repo.split("/").pop()}</span>}
-          {t.agent && <span>· {t.agent}</span>}
+          {(t.agent || t.model) && <span>· {[t.agent, t.model].filter(Boolean).join(" / ")}</span>}
+        {t.from && <span>· 拆自 {t.from}</span>}
           {t.status === "delivering" && t.delivery ? (
             // A span, not <a>: the card is a <button> and can't hold a link
             <span
@@ -309,7 +310,8 @@ function Meta({ t, byId, extra }: { t: Task; byId: Record<string, Task>; extra?:
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
       <span className="font-mono">{t.id}</span>
       {t.repo && <span>· {t.repo.split("/").pop()}</span>}
-      {t.agent && <span>· {t.agent}</span>}
+      {(t.agent || t.model) && <span>· {[t.agent, t.model].filter(Boolean).join(" / ")}</span>}
+        {t.from && <span>· 拆自 {t.from}</span>}
       {extra}
       {blockers.map((b) => (
         <span key={b.id} className="rounded-sm bg-warn/10 px-1.5 py-0.5 text-warn">
@@ -605,7 +607,8 @@ function DoneDetail({ t }: { t: Task }) {
       <h3 className={clsx("text-[16px] font-medium", t.status === "dropped" && "text-muted-foreground line-through")}>{t.title}</h3>
       <div className="flex flex-wrap gap-x-2 text-[11px] text-muted-foreground">
         {t.repo && <span>{t.repo.split("/").pop()}</span>}
-        {t.agent && <span>· {t.agent}</span>}
+        {(t.agent || t.model) && <span>· {[t.agent, t.model].filter(Boolean).join(" / ")}</span>}
+        {t.from && <span>· 拆自 {t.from}</span>}
         <span>· {t.status === "dropped" ? "放弃于" : "完成于"} {day(t.doneAt ?? t.updatedAt)}</span>
       </div>
       {t.summary && <p className="text-[13px] whitespace-pre-wrap">{t.summary}</p>}
@@ -663,28 +666,37 @@ const input = "h-9 w-full rounded-md border bg-background px-2 text-[13px] outli
 
 function NewTask({ onClose, act }: { onClose: () => void; act: Act }) {
   const [owner, setOwner] = useState<"agent" | "human">("agent");
-  const [f, setF] = useState({ title: "", prompt: "", repo: "", agent: "", worktree: false, steps: "", kind: "none" as "none" | "value" | "secret", label: "", name: "", minutes: "" });
+  const [f, setF] = useState({ title: "", prompt: "", repo: "", agent: "", model: "", worktree: false, steps: "", kind: "none" as "none" | "value" | "secret", label: "", name: "", minutes: "" });
   const [repos, setRepos] = useState<{ path: string; name: string }[]>([]);
   const [more, setMore] = useState(false);
   const [files, setFiles] = useState<Attachment[]>([]);
   const attach = useAttach(files, setFiles);
   const { busy, err, go } = useAction(act);
+  const [agents, setAgents] = useState<AgentInfo[]>([]);
   useEffect(() => {
     run<{ path: string; name: string }[]>("tasks.repos").then(setRepos, () => {});
+    run<AgentInfo[]>("tasks.agents").then(setAgents, () => {});
   }, []);
+  const mentions = mentionsOf(f.prompt, agents);
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
     setF({ ...f, [k]: e.target.type === "checkbox" ? (e.target as HTMLInputElement).checked : e.target.value });
   const submit = async (start: boolean) => {
     const body =
       owner === "agent"
-        ? { owner, prompt: f.prompt, repo: f.repo, agent: f.agent || undefined, worktree: f.worktree, start, attachments: files.filter((a) => a.path).map((a) => ({ path: a.path, name: a.name, mime: a.mime })) }
+        ? { owner, prompt: f.prompt, repo: f.repo, agent: f.agent || undefined, model: f.model.trim() || undefined, mentions: mentions.length ? mentions.map((a) => a.id) : undefined, worktree: f.worktree, start, attachments: files.filter((a) => a.path).map((a) => ({ path: a.path, name: a.name, mime: a.mime })) }
         : { title: f.title, owner, steps: f.steps, minutes: Number(f.minutes) || undefined, handBack: { kind: f.kind, label: f.label || undefined, name: f.kind === "secret" ? f.name : undefined } };
     if (await go(start ? "start" : "add", "add", body)) onClose();
   };
   const ok = !attach.uploading && (owner === "human" ? f.title.trim() : f.prompt.trim() || files.length) && (f.kind !== "secret" || /^[\w.-]+$/.test(f.name));
   return (
     <Dialog open onOpenChange={(o) => !o && !busy && onClose()}>
-      <DialogContent showCloseButton={false} aria-describedby={undefined} className="flex max-h-[90dvh] w-full flex-col gap-3 overflow-y-auto p-4 sm:max-w-xl">
+      <DialogContent
+        showCloseButton={false}
+        aria-describedby={undefined}
+        // Esc with the @ list open closes the list (MentionArea), not the dialog
+        onEscapeKeyDown={(e) => document.querySelector("[data-mention-list]") && e.preventDefault()}
+        className="flex max-h-[90dvh] w-full flex-col gap-3 overflow-y-auto p-4 sm:max-w-xl"
+      >
         <div className="flex items-center justify-between">
           <DialogTitle className="text-[15px] font-medium">新任务</DialogTitle>
           <Button variant="ghost" size="icon" aria-label="关闭" onClick={onClose}>
@@ -703,7 +715,20 @@ function NewTask({ onClose, act }: { onClose: () => void; act: Act }) {
         {owner === "agent" ? (
           <>
             <div className="space-y-2" onDrop={attach.onDrop} onDragOver={attach.onDragOver}>
-              <textarea autoFocus onPaste={attach.onPaste} className={clsx(input, "h-40 resize-y py-2 leading-relaxed")} placeholder="要它做什么：目标、范围、做完的标准（截图可以直接粘贴）" value={f.prompt} onChange={set("prompt")} />
+              <MentionArea
+                agents={agents}
+                value={f.prompt}
+                onChange={(prompt) => setF({ ...f, prompt })}
+                onPaste={attach.onPaste}
+                className={clsx(input, "h-40 resize-y py-2 leading-relaxed")}
+                placeholder="要它做什么：目标、范围、做完的标准（截图可以直接粘贴；输入 @ 点名 agent）"
+              />
+              {mentions.length > 0 && (
+                <p className="text-[12px] text-muted-foreground">
+                  交给 {mentions.map((a) => a.name).join("、")}
+                  {mentions.length > 1 ? "：由派活的对话安排怎么分、谁用什么模型" : ""}
+                </p>
+              )}
               <AttachmentBar items={files} onChange={setFiles} onPick={attach.add} />
             </div>
             {more ? (
@@ -717,7 +742,8 @@ function NewTask({ onClose, act }: { onClose: () => void; act: Act }) {
                   ))}
                 </datalist>
                 <div className="flex items-center gap-3">
-                  <input className={input} placeholder="agent（不填 = 默认；claude / codex / 角色 id）" value={f.agent} onChange={set("agent")} />
+                  <input className={input} placeholder="agent（不填 = 流程里定的；claude / codex / 角色 id）" value={f.agent} onChange={set("agent")} />
+                  <input className={input} placeholder="模型（不填 = 流程里定的）" value={f.model} onChange={set("model")} />
                   <label className="flex shrink-0 items-center gap-1.5 text-[12px] text-muted-foreground">
                     <input type="checkbox" checked={f.worktree} onChange={set("worktree")} />
                     独立 worktree
@@ -726,7 +752,7 @@ function NewTask({ onClose, act }: { onClose: () => void; act: Act }) {
               </>
             ) : (
               <button className="self-start text-[12px] text-muted-foreground hover:text-foreground" onClick={() => setMore(true)}>
-                指定仓库 / agent（不填就由右边的助手来定）
+                指定仓库 / agent / 模型（不填就照「流程」里的设置，仓库由助手来定）
               </button>
             )}
           </>
@@ -771,5 +797,106 @@ function NewTask({ onClose, act }: { onClose: () => void; act: Act }) {
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+type AgentInfo = { id: string; name: string; base?: string; prompt?: string };
+
+/** The agents @-mentioned in the text (by id or name), each once. Same reading as local/_agents.ts. */
+function mentionsOf(text: string, agents: AgentInfo[]): AgentInfo[] {
+  const out: AgentInfo[] = [];
+  for (const m of text.matchAll(/@([^\s@，。,.;；:：!?！？)）]+)/g)) {
+    const w = m[1].toLowerCase();
+    const a = agents.find((x) => x.id.toLowerCase() === w || x.name.toLowerCase() === w);
+    if (a && !out.includes(a)) out.push(a);
+  }
+  return out;
+}
+
+/** A textarea where typing @ offers the agents: ↑ ↓ to move, Enter / Tab to pick, Esc to dismiss. */
+function MentionArea({
+  agents,
+  value,
+  onChange,
+  onPaste,
+  className,
+  placeholder,
+}: {
+  agents: AgentInfo[];
+  value: string;
+  onChange: (v: string) => void;
+  onPaste?: React.ClipboardEventHandler<HTMLTextAreaElement>;
+  className?: string;
+  placeholder?: string;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const [q, setQ] = useState<{ word: string; at: number } | null>(null);
+  const [hi, setHi] = useState(0);
+  const found = q ? agents.filter((a) => (a.id + " " + a.name).toLowerCase().includes(q.word.toLowerCase())).slice(0, 6) : [];
+  const look = (el: HTMLTextAreaElement) => {
+    const before = el.value.slice(0, el.selectionStart);
+    const m = /(^|\s)@([^\s@]*)$/.exec(before);
+    setQ(m ? { word: m[2], at: before.length - m[2].length - 1 } : null);
+    setHi(0);
+  };
+  const pick = (a: AgentInfo) => {
+    if (!q) return;
+    const end = q.at + 1 + q.word.length;
+    onChange(value.slice(0, q.at) + "@" + a.id + " " + value.slice(end));
+    setQ(null);
+    const caret = q.at + a.id.length + 2;
+    requestAnimationFrame(() => ref.current?.setSelectionRange(caret, caret));
+  };
+  return (
+    <div className="relative">
+      <textarea
+        ref={ref}
+        autoFocus
+        className={className}
+        placeholder={placeholder}
+        value={value}
+        onPaste={onPaste}
+        onChange={(e) => {
+          onChange(e.target.value);
+          look(e.target);
+        }}
+        onClick={(e) => look(e.currentTarget)}
+        onBlur={() => setTimeout(() => setQ(null), 150)}
+        onKeyDown={(e) => {
+          if (!found.length) return;
+          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            e.preventDefault();
+            setHi((h) => (h + (e.key === "ArrowDown" ? 1 : found.length - 1)) % found.length);
+          } else if (e.key === "Enter" || e.key === "Tab") {
+            e.preventDefault();
+            pick(found[hi]);
+          } else if (e.key === "Escape") {
+            // only the list closes, not the dialog
+            e.stopPropagation();
+            setQ(null);
+          }
+        }}
+      />
+      {found.length > 0 && (
+        <div data-mention-list className="absolute inset-x-2 top-full z-50 mt-1 overflow-hidden rounded-md border bg-popover text-[13px] text-popover-foreground shadow-md">
+          {found.map((a, i) => (
+            <button
+              key={a.id}
+              type="button"
+              className={clsx("flex w-full items-baseline gap-2 px-3 py-1.5 text-left", i === hi && "bg-accent")}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                pick(a);
+              }}
+              onMouseEnter={() => setHi(i)}
+            >
+              <span className="shrink-0 font-medium">{a.name}</span>
+              <span className="shrink-0 text-[11px] text-muted-foreground">@{a.id}</span>
+              {a.prompt && <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{a.prompt}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

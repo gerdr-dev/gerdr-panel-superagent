@@ -9,6 +9,9 @@ export type Workflow = {
   /** The repositories tasks are handed out to (skills/…/repos.md): the board's list, the router's choices. */
   repos: string[];
   gitlab: { host: string };
+  /** Who runs the routing conversation and the workers (skills/…/models.md); "" = Gerdr's default. */
+  router: Who;
+  worker: Who;
   mr: {
     merge: "auto" | "manual";
     minApprovals: number;
@@ -18,10 +21,22 @@ export type Workflow = {
   };
 };
 
+export type Who = { agent: string; model: string; effort: string };
+
 export function workflow(ctx: Ctx): Workflow {
   return {
     repos: list(ctx, ["仓库", "repos"]),
     gitlab: { host: str(ctx, ["GitLab", "gitlab"], "gitlab.com") },
+    router: {
+      agent: str(ctx, ["派活 agent", "router agent"], ""),
+      model: str(ctx, ["派活模型", "router model"], ""),
+      effort: str(ctx, ["派活思考强度", "router effort"], ""),
+    },
+    worker: {
+      agent: str(ctx, ["干活 agent", "worker agent"], ""),
+      model: str(ctx, ["干活模型", "worker model"], ""),
+      effort: str(ctx, ["干活思考强度", "worker effort"], ""),
+    },
     mr: {
       merge: pick(ctx, ["合并", "merge"], { auto: ["自动", "auto"], manual: ["手动", "manual"] }, "manual"),
       minApprovals: num(ctx, ["批准人数", "approvals"], 1),

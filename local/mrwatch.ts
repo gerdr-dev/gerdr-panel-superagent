@@ -103,7 +103,7 @@ async function one(t: Task, me: string, ctx: Ctx): Promise<string> {
       const body = String(n.body ?? "").slice(0, NOTE_MAX);
       return `${i + 1}. @${n.author?.username}${where}${n.resolvable ? (n.resolved ? "（已解决）" : "（未解决）") : ""}：\n${body}\n${d.url}#note_${n.id}`;
     });
-    await act(`send ${fresh.length} notes to the worker: ${fresh.map((n) => n.id).join(",")}`, () => ctx.sessions.send(t.session!, `[${label} 有 ${fresh.length} 条新意见]（任务 ${t.id}，盯 MR 的定时任务发来的）\n\n${lines.join("\n\n")}\n\n${playbook(ctx)}`));
+    await act(`send ${fresh.length} notes to the worker: ${fresh.map((n) => n.id).join(",")}`, () => ctx.sessions.send(t.session!, `[${label} 有 ${fresh.length} 条新意见]（任务 ${t.id}，盯 MR 的定时任务发来的）\n\n${lines.join("\n\n")}\n\n${playbook(ctx)}`, { now: true }));
     return save({ seen: ids, rounds, detail: `${fresh.length} 条新意见已交给 worker` }, `handed ${fresh.length} notes`);
   }
 
@@ -116,14 +116,14 @@ async function one(t: Task, me: string, ctx: Ctx): Promise<string> {
       logs.push(`### ${j.name}（job ${j.id}，${j.web_url}）\n\`\`\`\n${trace.split("\n").slice(-60).join("\n")}\n\`\`\``);
     }
     const names = jobs.map((j) => j.name).join("、") || "（没拿到 job）";
-    await act(`send failed pipeline ${pipe.id} to the worker`, () => ctx.sessions.send(t.session!, `[${label} 的流水线挂了]（任务 ${t.id}）失败的 job：${names}。${pipe.web_url}\n\n${logs.join("\n\n")}\n\n${playbook(ctx)}`));
+    await act(`send failed pipeline ${pipe.id} to the worker`, () => ctx.sessions.send(t.session!, `[${label} 的流水线挂了]（任务 ${t.id}）失败的 job：${names}。${pipe.web_url}\n\n${logs.join("\n\n")}\n\n${playbook(ctx)}`, { now: true }));
     return save({ pipeline: pipe.id, detail: `流水线挂了（${names}），已交给 worker` }, "handed failed pipeline");
   }
 
   // 3. Conflicts: the worker resolves them (once per head commit)
   if (mr.has_conflicts || state === "conflict") {
     if (d.conflict === mr.sha) return save({ detail: "有冲突，worker 在处理" }, "conflict (handed)");
-    await act("send the conflict to the worker", () => ctx.sessions.send(t.session!, `[${label} 和 ${mr.target_branch} 有冲突]（任务 ${t.id}）把 ${mr.target_branch} 合进来或者变基，解决冲突再推。\n\n${playbook(ctx)}`));
+    await act("send the conflict to the worker", () => ctx.sessions.send(t.session!, `[${label} 和 ${mr.target_branch} 有冲突]（任务 ${t.id}）把 ${mr.target_branch} 合进来或者变基，解决冲突再推。\n\n${playbook(ctx)}`, { now: true }));
     return save({ conflict: mr.sha, detail: "有冲突，已交给 worker" }, "handed conflict");
   }
 
