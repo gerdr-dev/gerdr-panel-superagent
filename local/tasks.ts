@@ -101,12 +101,24 @@ export async function list(input: unknown, ctx: Ctx) {
           `只补汇报，别重复聊天里说过的话。`,
       )
       .catch(() => {});
+  // A reminded worker is running again: its card is back in 进行中 now, not on the next refresh
+  for (const n of nudge) live[n.session] = ctx.sessions.get(n.session) ?? live[n.session];
   await closeRouters(ctx, live);
   sweep(ctx);
   return {
     tasks: s.tasks.map((t) => {
       const sess = t.session ? live[t.session] : null;
-      return { ...t, live: sess ? { status: sess.status, waiting: sess.waiting, waitingSince: sess.waitingSince, turnStartedAt: sess.turnStartedAt, updatedAt: sess.updatedAt, error: sess.error, title: sess.title } : null, column: column(s, t, sess), ready: blockersDone(s, t) };
+      const halted = stopped(s, t, sess);
+      const said = halted ? String(sess?.reply ?? "").replace(/\s+/g, " ").trim() : "";
+      return {
+        ...t,
+        live: sess ? { status: sess.status, waiting: sess.waiting, waitingSince: sess.waitingSince, turnStartedAt: sess.turnStartedAt, updatedAt: sess.updatedAt, error: sess.error, title: sess.title } : null,
+        column: column(s, t, sess),
+        ready: blockersDone(s, t),
+        // Stopped with nothing to wait on (shown under 等你): what it last said, for the card
+        stopped: halted || undefined,
+        said: said ? [...said].slice(0, 200).join("") + ([...said].length > 200 ? "…" : "") : undefined,
+      };
     }),
     at: Date.now(),
   };
@@ -146,7 +158,17 @@ function column(s: Store, t: Task, sess: any): "you" | "review" | "active" | "do
   // delivering: running as far as the user is concerned, until the watcher merges it or says it's stuck (question)
   if (t.owner === "human") return blockersDone(s, t) ? "you" : "active";
   if (t.question || sess?.status === "waiting" || sess?.status === "error") return "you";
+  // 进行中 holds only what is running or explicitly waiting (an MR to merge, a step the user owes): a worker that
+  // stopped with nothing to wait on is the user's to look at, at once — never a card in 进行中 with nothing going on
+  if (stopped(s, t, sess)) return "you";
   return "active";
+}
+
+/** Its worker isn't running, and the task waits on nothing (not delivering, no step / question of the user's open). */
+function stopped(s: Store, t: Task, sess: any) {
+  if (t.owner !== "agent" || t.status !== "running") return false;
+  if (sess && (sess.status === "running" || sess.status === "starting")) return false;
+  return blockersDone(s, t);
 }
 
 function firstLine(text?: string) {

@@ -331,7 +331,9 @@ function chatPanel(t: Task, byId: Record<string, Task>): { label: string; action
             ? `出错了：${t.live.error ?? "看看最后的报错"}`
             : t.question
               ? `它问你：${t.question}`
-              : "它在等你，见最后一条回复"
+              : t.stopped
+                ? `停下了，没在看板上说接下来要什么${(t.nudges ?? 0) > 0 ? "（已提醒它补上）" : ""}${t.said ? `。它最后说：「${t.said}」` : ""}`
+                : "它在等你，见最后一条回复"
       }`,
       actions: [drop, done],
     };
@@ -367,6 +369,7 @@ function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, T
       </div>
       <p className={clsx("line-clamp-2 text-[13px] font-medium", t.status === "dropped" && "text-muted-foreground line-through")}>{t.title}</p>
       {t.question && colOf(t) === "you" && <p className="line-clamp-2 text-[12px] text-warn">{t.question}</p>}
+      {!t.question && t.stopped && <p className="line-clamp-2 text-[12px] text-warn">停下了{t.said ? `：${t.said}` : "，没说接下来要什么"}</p>}
       {t.questions && t.status === "todo" && (
         <p className="text-[12px] text-warn">
           {unanswered(t).length ? `${unanswered(t).length} 个问题要你答` : "都答了"}
