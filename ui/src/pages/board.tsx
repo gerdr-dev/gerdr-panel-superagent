@@ -1,4 +1,4 @@
-import { AlarmClock, AlertTriangle, SquareTerminal, Bot, Hourglass, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ListTodo, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Send, Settings, Undo2, X } from "lucide-react";
+import { AlertTriangle, Bot, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ListTodo, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Send, Settings, Undo2, X } from "lucide-react";
 import clsx from "clsx";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "../components/Button";
@@ -10,7 +10,7 @@ import { ChatDrawer, type ChatAction, type ChatItem } from "../components/ChatDr
 import { Trail } from "../components/Trail";
 import { Linger } from "../lib/linger";
 import { SettingsSheet, type SettingsTab } from "../components/SettingsSheet";
-import { ago, day, since, type Task, type Wait, useTasks, waitedSince } from "../lib/tasks";
+import { ago, day, since, type Task, useTasks, waitedSince } from "../lib/tasks";
 import { project, run } from "../lib/gerdr";
 import { onShowSession } from "@gerdr/core";
 import { isSubmitEnter } from "../lib/utils";
@@ -115,12 +115,7 @@ export default function BoardPage() {
   // same drawer; its buttons are the task's live conversation's only
   // A conversation key (lib/convo): a session, or one of its subagents
   const [shown, setShown] = useState("");
-  // Opening a task straight at one of its conversations (a subagent from 在等): kept for the reset below
-  const want = useRef("");
-  useEffect(() => {
-    setShown(want.current);
-    want.current = "";
-  }, [open]);
+  useEffect(() => setShown(""), [open]);
   const viewing = shown || primary;
   const view = viewing ? parseConvo(viewing) : undefined;
   const panel =
@@ -140,19 +135,6 @@ export default function BoardPage() {
   openChat = (session: string, task?: string) => {
     setOpen("");
     setPeek({ session, task });
-  };
-  // One of a task's conversations (a helper, a subagent) from 在等: in the task's own drawer when it has one live, its
-  // 链路 open on it; else on its own
-  const openConvo = (task: string, key: string) => {
-    const t = byId[task];
-    if (t && t.owner === "agent" && !!t.session && t.status !== "done" && t.status !== "dropped") {
-      setPeek(null);
-      if (open === task) setShown(key);
-      else {
-        want.current = key;
-        setOpen(task);
-      }
-    } else setPeek({ ...parseConvo(key), task });
   };
   // A worker's conversation brought up from elsewhere in Gerdr (a notification, the inbox): it's this board's, so it
   // opens here, as its task's drawer (or just the chat when no task has it)
@@ -232,7 +214,6 @@ export default function BoardPage() {
           </h1>
         </div>
         <div className="flex min-w-0 items-center gap-1 max-md:gap-0">
-          <WaitsButton tasks={tasks ?? []} onTask={(id) => (setPeek(null), setOpen(id))} onSession={(session, task, sub) => openConvo(task, convo(session, sub))} />
           <MainButton onOpen={(id) => (setOpen(""), setPeek({ session: id }))} />
           <Button variant="ghost" size="sm" title="外面来的每条消息去了哪：交给了哪个任务、为什么没接" onClick={() => setSettings("log")}>
             <Inbox className="size-4" />
@@ -351,67 +332,6 @@ function Alerts({ onLog }: { onLog: () => void }) {
         </div>
       ))}
     </div>
-  );
-}
-
-const WAIT_ICON: Record<Wait["kind"], typeof Hourglass> = { reply: MessageSquare, check: SquareTerminal, time: AlarmClock, session: Bot, agent: Bot, user: Hand, task: ListTodo };
-
-/**
- * 在等: everything every live task waits on, in one place — a colleague's reply, a time to look again, an MR to merge,
- * a session it handed work to, a step of the user's — each with what will end it. So "is anyone still on this?" has
- * one answer, instead of a worker's "I'll wait" that nothing follows (2026-11-04).
- */
-function WaitsButton({ tasks, onTask, onSession }: { tasks: Task[]; onTask: (id: string) => void; onSession: (session: string, task: string, sub?: string) => void }) {
-  const [shown, setShown] = useState(false);
-  const rows = tasks.flatMap((t) => (t.waits ?? []).map((w) => ({ t, w }))).sort((a, b) => Number(!!b.w.user) - Number(!!a.w.user) || (a.w.since ?? 0) - (b.w.since ?? 0));
-  if (!rows.length) return null;
-  const mine = rows.filter((r) => r.w.user).length;
-  return (
-    <>
-      <Button variant="ghost" size="sm" title="每个任务在等什么、什么会叫醒它" onClick={() => setShown(true)}>
-        <Hourglass className="size-4" />
-        <span className="max-md:hidden">在等</span> {rows.length}
-        {mine > 0 && <span className="rounded-full bg-warn/15 px-1.5 text-[11px] text-warn max-md:hidden">{mine} 个等你</span>}
-      </Button>
-      <Sheet open={shown} onOpenChange={setShown}>
-        <SheetContent side="right" className="w-[440px] max-w-[95vw] overflow-y-auto p-0">
-          <SheetTitle className="border-b px-4 py-3 text-[14px]">在等 · {rows.length}</SheetTitle>
-          <p className="px-4 pt-3 text-[12px] text-muted-foreground">每个任务停下来在等什么，什么会叫醒它。等你的排在前面。</p>
-          <ul className="space-y-1.5 p-3">
-            {rows.map(({ t, w }, i) => {
-              const Icon = WAIT_ICON[w.kind] ?? Hourglass;
-              return (
-                <li key={`${t.id}-${w.kind}-${i}`}>
-                  <button
-                    className={clsx("w-full space-y-0.5 rounded-lg border bg-card px-3 py-2 text-left hover:bg-accent", w.user && "border-warn/50")}
-                    onClick={() => {
-                      setShown(false);
-                      if (w.session) onSession(w.session, t.id, w.sub);
-                      else onTask(w.item ?? t.id);
-                    }}
-                  >
-                    <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                      <Icon className={clsx("size-3.5 shrink-0", w.user && "text-warn")} />
-                      <span className="font-mono">{t.id}</span>
-                      <span className="min-w-0 truncate">{t.title}</span>
-                      {w.since ? <span className="ml-auto shrink-0">{ago(w.since)}</span> : null}
-                    </div>
-                    <p className={clsx("line-clamp-2 text-[13px]", w.user && "text-warn")}>{w.what}</p>
-                    {w.wake && <p className="line-clamp-2 text-[12px] text-muted-foreground">{w.wake}</p>}
-                    {w.woke && <p className="text-[11px] text-muted-foreground">上次叫醒：{w.woke.how} · {ago(w.woke.at)}</p>}
-                    {w.check?.last && (
-                      <p className="line-clamp-2 font-mono text-[11px] text-muted-foreground">
-                        {ago(w.check.last.at)}查：{w.check.last.out || `exit ${w.check.last.code}`}
-                      </p>
-                    )}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </SheetContent>
-      </Sheet>
-    </>
   );
 }
 
