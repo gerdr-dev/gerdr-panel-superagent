@@ -1,6 +1,8 @@
 import { workflow } from "./_config";
 import { blockersDone, find, load, newTask, note, update, type Question, type Store, type Task } from "./_store";
 import { applyBlock } from "./_apply";
+import { askUser, endQuestions, endWaits, isOutside, open, question, syncSessions, wakeText, type Wait } from "./_waits";
+import { wake } from "./_wake";
 import { allAgents, mentionsIn } from "./_agents";
 import { isMain, routeTask, sweep } from "./_main";
 
@@ -49,29 +51,38 @@ export async function list(input: unknown, ctx: Ctx) {
   const { store } = load(ctx);
   // Read sessions outside the write: ctx.sessions.get is cheap, but keep the locked part small
   for (const t of store.tasks) if (t.session && t.status !== "done" && t.status !== "dropped") live[t.session] = ctx.sessions.get(t.session);
-  // Sessions the workers handed work to (reportTo / parent / a task tag), here or on another computer: a worker
-  // waiting on one of them is waiting, not stopped
+  // Sessions the workers handed work to (reportTo / parent / a task tag), here or on another computer: waits of their
+  // task (_waits.ts syncSessions)
   const all = ctx.sessions.list() as (Session & { parent?: string; reportTo?: string })[];
+  const kidsOf = (t: Task) =>
+    helpers(t, all).map((k: any) => ({
+      id: k.id,
+      title: k.title,
+      status: k.status,
+      waiting: k.waiting,
+      waitingKind: k.waitingKind,
+      // Waits on the user: an approval, or a question its worker left unanswered
+      user: k.status === "waiting" && (k.waitingKind !== "ask" || askLeft(k, t.session ? live[t.session] : null)),
+    }));
+  const kids: Record<string, ReturnType<typeof kidsOf>> = {};
+  for (const t of store.tasks) if (t.owner === "agent" && t.status !== "done" && t.status !== "dropped") kids[t.id] = kidsOf(t);
   const nudge: { session: string; id: string }[] = [];
   const s = update(ctx, (s) => {
     nudge.length = 0; // update retries this function on a write race: decide afresh each time
     for (const t of s.tasks) {
       const sess = t.session && live[t.session];
-      // The worker is at it again: the user answered (in its chat, with whatever they attached) or it carried on.
-      // What it was asking, or the result waiting for review, is no longer the state of things.
-      if (sess?.status === "running" && (t.question || t.status === "review")) {
-        if (t.question) note(t, `问：${t.question}\n（在对话里回复了）`);
-        Object.assign(t, { question: undefined, status: t.status === "review" ? "running" : t.status, updatedAt: Date.now() });
-      }
-      // Running again since it said what it waits on (woken by the reply / the time, or the user wrote to it): that
-      // wait is over; it calls wait_for again if it still waits
-      if (t.waiting && sess?.status === "running" && (sess.turnStartedAt ?? 0) > t.waiting.since) {
-        if (t.waitEnd?.since !== t.waiting.since) t.waitEnd = { since: t.waiting.since, how: "接着做了", at: Date.now() };
-        t.waiting = undefined;
+      syncSessions(t, kids[t.id] ?? []);
+      if (sess?.status === "running") {
+        // The worker is at it again — the user answered in its chat, something woke it, or it carried on. What it asked
+        // the user before this turn, and what it waited on outside, are no longer the state of things; it asks or
+        // waits again if it must. A result waiting for review is being reworked.
+        const turn = sess.turnStartedAt ?? 0;
+        for (const w of endWaits(t, (w) => w.kind === "user" && !w.item && w.since < turn, "在对话里回复了")) note(t, `问：${w.what}\n（在对话里回复了）`);
+        endWaits(t, (w) => isOutside(w) && w.since < turn, "接着做了");
+        if (t.status === "review") Object.assign(t, { status: "running", updatedAt: Date.now() });
       }
       if (!sess || (sess.status !== "idle" && sess.status !== "error")) continue;
       if (t.synced === sess.updatedAt) continue;
-      const prevStop = t.synced ?? 0;
       t.synced = sess.updatedAt;
       const b = lastBlock(sess.reply ?? "");
       // The user asked it something in its chat and it answered: they're reading that answer and will carry on, so
@@ -79,17 +90,17 @@ export async function list(input: unknown, ctx: Ctx) {
       // delivering / question / blocked still apply: they say something changed or is needed.
       if (b && sess.byPerson && b.state === "review" && t.status === "running") applyBlock(s, t, { ...b, state: undefined });
       else if (b) applyBlock(s, t, b);
-      else if (t.status === "running" && sess.status === "idle" && !t.viaTools) t.question = "Worker 停下了，但没在看板上汇报进展：去对话里看看它说了什么，让它接着做，或者直接「标为完成」";
-      else if (t.status === "running" && sess.status === "idle" && !helpers(t, all).length && silentStop(s, t, sess, prevStop)) {
-        // It stopped without a word on the board — typically a question written only in its reply (t3 asking which
-        // style, on 2026-11-04): the task sat in 进行中 with nothing running. Reminded once to put it on the board
-        // (a card, a status); if it stops silent again, the user is told, with what it last said.
+      else if (t.status === "running" && sess.status === "idle" && !t.viaTools) askUser(t, "Worker 停下了，但没在看板上汇报进展：去对话里看看它说了什么，让它接着做，或者直接「标为完成」");
+      else if (t.status === "running" && sess.status === "idle" && silentStop(t)) {
+        // It stopped with nothing to wait on — a question written only in its reply (t3, 2026-11-04), "I'll wait" with
+        // nothing to wake it (t29), "working" reported and then nothing (t30). Reminded once to say on the board
+        // what's next; if it stops like that again, the user is told, with what it last said.
         if ((t.nudges ?? 0) < 1) {
           t.nudges = (t.nudges ?? 0) + 1;
           nudge.push({ session: sess.id, id: t.id });
         } else {
           const said = String(sess.reply ?? "").replace(/\s+/g, " ").trim();
-          t.question = `Worker 停下了，没在看板上汇报。它最后说：「${[...said].slice(0, 160).join("")}${[...said].length > 160 ? "…" : ""}」`;
+          askUser(t, `Worker 停下了，没在看板上汇报。它最后说：「${[...said].slice(0, 160).join("")}${[...said].length > 160 ? "…" : ""}」`);
         }
       }
       t.updatedAt = Date.now();
@@ -101,7 +112,7 @@ export async function list(input: unknown, ctx: Ctx) {
     await ctx.sessions
       .send(
         n.session,
-        `[看板] 你这一轮停下了，但没在看板上汇报（任务 ${n.id}）。用户看的是看板，不看聊天：\n` +
+        `[看板] 你这一轮停下了，但看板上看不出接下来要什么（任务 ${n.id}）。用户看的是看板，不看聊天：\n` +
           `- 要用户决定 / 给东西：用 ask_human 登记（决定带 options），然后结束这一轮；\n` +
           `- 做完了、交付了、要用户验收：用 task_update 报对应的 state；\n` +
           `- 在等别人（同事回话、job / 发布跑完）：用 wait_for 说等什么、在哪个对话等回复或几分钟后回来看，然后结束这一轮；\n` +
@@ -116,18 +127,20 @@ export async function list(input: unknown, ctx: Ctx) {
   return {
     tasks: s.tasks.map((t) => {
       const sess = t.session ? live[t.session] : null;
-      const kids = helpers(t, all);
-      const halted = stopped(s, t, sess, kids);
+      const halted = stopped(t, sess);
       const said = halted ? String(sess?.reply ?? "").replace(/\s+/g, " ").trim() : "";
+      const ks = kids[t.id] ?? [];
       return {
         ...t,
-        // What its worker handed out and waits on (shown as 等 … on the card; one waiting for the user puts it under 等你)
-        helpers: kids.length ? kids.map((k: any) => ({ id: k.id, title: k.title, status: k.status, waiting: k.waiting, waitingKind: k.waitingKind, left: k.status === "waiting" && (k.waitingKind !== "ask" || askLeft(k, sess)) })) : undefined,
+        // The open waits, each with what wakes it in words (the 在等 list, the card); ended ones stay in t.waits
+        waits: open(t).length ? open(t).map((w) => ({ ...w, wake: wakeText(w, t) })) : undefined,
+        // The open question to the user, for the card (a wait too: _waits.ts question)
+        question: question(t),
+        // The sessions it handed work to, for the card's chips (each is a wait as well)
+        helpers: ks.length ? ks.map((k) => ({ id: k.id, title: k.title, status: k.status, waiting: k.waiting, waitingKind: k.waitingKind, left: k.user })) : undefined,
         live: sess ? { status: sess.status, waiting: sess.waiting, waitingSince: sess.waitingSince, turnStartedAt: sess.turnStartedAt, updatedAt: sess.updatedAt, error: sess.error, title: sess.title } : null,
-        column: column(s, t, sess, kids),
+        column: column(s, t, sess),
         ready: blockersDone(s, t),
-        // Everything it waits on, one list (the board's 在等 view; the card and the drawer show the same)
-        waits: waitsOf(s, t, kids),
         // Stopped with nothing to wait on (shown under 等你): what it last said, for the card
         stopped: halted || undefined,
         said: said ? [...said].slice(0, 200).join("") + ([...said].length > 200 ? "…" : "") : undefined,
@@ -138,18 +151,12 @@ export async function list(input: unknown, ctx: Ctx) {
 }
 
 /**
- * A worker that reports through the tools stopped without reporting anything since its last stop, and isn't waiting
- * on the user (no open step / question of its own). A turn the user started in its chat counts too: they say a few
- * words, close the chat and don't come back to it — what the answer left open must be on the board as well.
+ * A worker that reports through the tools stopped, its task still running, with nothing to wait on: whether it reported
+ * "working" on the way doesn't matter (t30). A turn the user started in its chat counts too: they say a few words, close
+ * the chat and don't come back to it — what the answer left open must be on the board as well.
  */
-function silentStop(s: Store, t: Task, sess: any, prevStop: number) {
-  if (!t.viaTools) return false;
-  // Waiting on someone outside with wait_for is waiting. A "working" report is not: t30 (2026-11-04) reported
-  // working mid-turn, ended with "I'll rerun it next" and sat stopped — so whether it reported doesn't matter, only
-  // that it stopped with the task still running and nothing to wait on
-  if (t.waiting) return false;
-  const waiting = s.tasks.some((h) => h.owner === "human" && h.status === "todo" && (h.askedBy === t.id || t.blockedBy?.includes(h.id)));
-  return !waiting;
+function silentStop(t: Task) {
+  return !!t.viaTools && !open(t).length;
 }
 
 /**
@@ -168,88 +175,26 @@ function dropOrphans(s: Store) {
   }
 }
 
-function column(s: Store, t: Task, sess: any, kids: Session[] = []): "you" | "review" | "active" | "done" {
+/**
+ * Where the board shows a task. For an agent task it follows from its waits (_waits.ts), nothing else: one waiting
+ * on the user → 等你; the worker running, or anything still awaited → 进行中; neither → it stopped with nothing
+ * going on, and that's the user's to look at (等你) — never a card in 进行中 with nothing going on.
+ */
+function column(s: Store, t: Task, sess: any): "you" | "review" | "active" | "done" {
   if (t.status === "done" || t.status === "dropped") return "done";
   if (t.status === "review") return "review";
-  // delivering: running as far as the user is concerned, until the watcher merges it or says it's stuck (question)
   if (t.owner === "human") return blockersDone(s, t) ? "you" : "active";
-  if (t.question || sess?.status === "waiting" || sess?.status === "error") return "you";
-  // A session it handed work to waits: an approval is the user's; a question is its worker's to answer (Gerdr reports
-  // it there), so only one the worker has left unanswered — it ran since the question came and stopped again, or it
-  // hasn't picked it up in two minutes — is the user's
-  if (t.status === "running" && kids.some((k) => k.status === "waiting" && (k.waitingKind !== "ask" || askLeft(k, sess)))) return "you";
-  // 进行中 holds only what is running or explicitly waiting (an MR to merge, a step the user owes): a worker that
-  // stopped with nothing to wait on is the user's to look at, at once — never a card in 进行中 with nothing going on
-  if (stopped(s, t, sess, kids)) return "you";
+  if (sess?.status === "waiting" || sess?.status === "error") return "you";
+  if (open(t).some((w) => w.user)) return "you";
+  if (stopped(t, sess)) return "you";
   return "active";
 }
 
-/**
- * Its worker isn't running, and the task waits on nothing: not delivering, no step / question of the user's open, no
- * session it handed work to still going (t3 waiting on a music session on another computer it started, 2026-11-04).
- */
-function stopped(s: Store, t: Task, sess: any, kids: Session[] = []) {
+/** Its worker isn't running and the task waits on nothing. */
+function stopped(t: Task, sess: any) {
   if (t.owner !== "agent" || t.status !== "running") return false;
   if (sess && (sess.status === "running" || sess.status === "starting")) return false;
-  if (kids.length) return false;
-  if (t.waiting) return false; // wait_for: a reply or a time will wake it (waits.ts)
-  return blockersDone(s, t);
-}
-
-export type Wait = {
-  /** reply: a person in a conversation it follows; time: a time to look again; mr: an MR to merge; session: a session
-   * it handed work to; you: a step / question of the user's */
-  kind: "reply" | "time" | "mr" | "session" | "you";
-  what: string;
-  /** What ends it / wakes the worker */
-  wake?: string;
-  since?: number;
-  url?: string;
-  /** A session to open (kind session), a board item (kind you) */
-  session?: string;
-  item?: string;
-  /** It waits on the user now */
-  user?: boolean;
-};
-
-/**
- * Everything a live task waits on, of every kind, in one list: what the user reads to know nothing is forgotten —
- * every wait says what it waits for and what will end it (2026-11-04: waits were each drawn their own way, an MR's only
- * in the drawer's header, a wait_for's nowhere in the chat).
- */
-function waitsOf(s: Store, t: Task, kids: Session[] = []): Wait[] | undefined {
-  if (t.status === "done" || t.status === "dropped" || t.owner !== "agent") return undefined;
-  const out: Wait[] = [];
-  const hhmm = (ms: number) => new Date(ms).toTimeString().slice(0, 5);
-  const w = t.waiting;
-  if (w && t.status === "running") {
-    if (w.key) out.push({ kind: "reply", what: w.what, wake: `${w.where ?? `${w.source} ${w.key}`} 一回复就叫醒它`, since: w.since });
-    if (w.recheckAt) out.push({ kind: "time", what: w.what, wake: `${hhmm(w.recheckAt)} 回来看`, since: w.since });
-  }
-  const d = t.delivery;
-  if (t.status === "delivering" && d)
-    out.push({
-      kind: "mr",
-      what: `MR !${d.iid} 合并：${d.detail ?? "还没查过"}`,
-      wake: `每 5 分钟查一次${d.checked ? `（上次 ${hhmm(d.checked)}）` : ""}；review 意见、挂掉的流水线叫醒它，能合就自动合`,
-      since: d.since,
-      url: d.url,
-    });
-  for (const k of kids as any[])
-    out.push({
-      kind: "session",
-      what: `它派出的「${k.title || k.id}」${k.status === "waiting" ? `在等：${k.waiting ?? "批准或回答"}` : "在跑"}`,
-      wake: "做完会回报给它",
-      since: k.turnStartedAt ?? k.updatedAt,
-      session: k.id,
-      user: k.status === "waiting" && (k.waitingKind !== "ask" || askLeft(k, null)),
-    });
-  for (const id of t.blockedBy ?? []) {
-    const h = s.tasks.find((x) => x.id === id);
-    if (!h || h.status === "done" || h.status === "dropped") continue;
-    out.push({ kind: "you", what: `${h.id} ${h.title}`, wake: "你答了 / 做完就叫醒它", since: h.createdAt, item: h.id, user: h.owner === "human" });
-  }
-  return out.length ? out : undefined;
+  return !open(t).length;
 }
 
 /** A helper's question its worker didn't take: it has stopped since the question came, or two minutes went by. */
@@ -357,7 +302,8 @@ export async function start(
   });
   return update(ctx, (s) => {
     const x = find(s, t.id);
-    Object.assign(x, { status: "running", routing: undefined, prompt, repo, session: sess.id, sessions: [...(x.sessions ?? []), sess.id], question: undefined, updatedAt: Date.now() });
+    Object.assign(x, { status: "running", routing: undefined, prompt, repo, session: sess.id, sessions: [...(x.sessions ?? []), sess.id], updatedAt: Date.now() });
+    endQuestions(x, "重新派出去了");
     if (input.agent) x.agent = input.agent;
     if (input.model) x.model = input.model;
     if (input.effort) x.effort = input.effort;
@@ -401,7 +347,7 @@ async function tell(ctx: Ctx, t: Task, text: string) {
 export async function accept(input: { id: string }, ctx: Ctx) {
   const t = update(ctx, (s) => {
     const t = find(s, input.id);
-    Object.assign(t, { status: "done", question: undefined, doneAt: Date.now(), updatedAt: Date.now() });
+    Object.assign(t, { status: "done", doneAt: Date.now(), updatedAt: Date.now() });
     return t;
   });
   if (t.session && (ctx.sessions as any).close) await (ctx.sessions as any).close(t.session).catch(() => {});
@@ -423,7 +369,8 @@ export function deliver(input: { id: string; mr?: string }, ctx: Ctx) {
     if (!t.session) throw new Error(`${t.id} 没有 worker 会话，没人处理 review 意见`);
     if (!(t.links ?? []).some((l) => l.url === m[0])) t.links = [...(t.links ?? []), { label: `MR !${m[3]}`, url: m[0], at: Date.now() }];
     t.delivery = { kind: "mr", url: m[0], project: m[2], iid: Number(m[3]), since: Date.now(), seen: [], rounds: 0 };
-    Object.assign(t, { status: "delivering", question: undefined, updatedAt: Date.now() });
+    Object.assign(t, { status: "delivering", updatedAt: Date.now() });
+    endQuestions(t, "交给 mrwatch 了");
     note(t, `交给 mrwatch：等 MR !${m[3]} 合并`);
     return t;
   });
@@ -444,17 +391,19 @@ export async function reject(input: { id: string; feedback: string }, ctx: Ctx) 
   return t;
 }
 
-/** Answers the worker's question. { id, answer } */
+/** Answers the worker's question (the open question to the user on the task). { id, answer } */
 export async function answer(input: { id: string; answer: string }, ctx: Ctx) {
-  if (!input.answer?.trim()) throw new Error("回答是空的");
-  const t = update(ctx, (s) => {
-    const t = find(s, input.id);
-    note(t, `问：${t.question ?? ""}\n答：${input.answer.trim()}`);
-    Object.assign(t, { question: undefined, updatedAt: Date.now() });
-    return t;
+  const ans = input.answer?.trim();
+  if (!ans) throw new Error("回答是空的");
+  const cur = find(load(ctx).store, input.id);
+  if (!cur.session) throw new Error(`${cur.id} 没有在跑的 agent 会话：先派出去（start）`);
+  const q = question(cur) ?? "";
+  return wake(ctx, input.id, {
+    how: `你答了：${ans}`,
+    text: `关于你的问题，用户的决定：${ans}`,
+    ends: (w) => w.kind === "user" && !w.item,
+    also: (t) => note(t, `问：${q}\n答：${ans}`),
   });
-  await tell(ctx, t, `关于你的问题，用户的决定：${input.answer.trim()}`);
-  return t;
 }
 
 /**
@@ -462,7 +411,7 @@ export async function answer(input: { id: string; answer: string }, ctx: Ctx) {
  * with what was handed back; a secret is named, never sent.
  */
 export async function complete(input: { id: string; value?: string }, ctx: Ctx) {
-  let wake: Task[] = [];
+  let woken: Task[] = [];
   const h = update(ctx, (s) => {
     const h = find(s, input.id);
     if (h.owner !== "human") throw new Error(`${h.id} 不是人工任务`);
@@ -472,18 +421,19 @@ export async function complete(input: { id: string; value?: string }, ctx: Ctx) 
     if (h.status === "dropped") throw new Error(`${h.id} 已经不需要了`);
     if ((h.handBack?.kind === "value" || h.handBack?.kind === "choice") && !input.value?.trim()) throw new Error(h.handBack.kind === "choice" ? "选一个，或者写下你的决定" : `要交回：${h.handBack.label || "一个值"}`);
     Object.assign(h, { status: "done", handedBack: input.value?.trim() || undefined, doneAt: Date.now(), updatedAt: Date.now() });
-    wake = s.tasks.filter((t) => t.owner === "agent" && t.session && t.status === "running" && t.blockedBy?.includes(h.id) && blockersDone(s, t));
+    woken = s.tasks.filter((t) => t.owner === "agent" && t.session && t.status === "running" && t.blockedBy?.includes(h.id) && blockersDone(s, t));
     return h;
   });
   let back = "";
   if (h.handBack?.kind === "value") back = `\n交回的${h.handBack.label || "值"}：${h.handedBack}`;
-  if (h.handBack?.kind === "choice") {
-    for (const t of wake) await tell(ctx, t, `你问的「${h.title}」（${h.id}），用户的决定：${h.handedBack}\n照这个接着做。`);
-    return { task: h, woke: wake.map((t) => t.id) };
-  }
   if (h.handBack?.kind === "secret") back = `\n密钥已存为面板密钥「${h.handBack.name}」（只有面板的本地函数能读，你看不到值）。`;
-  for (const t of wake) await tell(ctx, t, `人工任务「${h.title}」（${h.id}）用户做完了。${back}\n先按你说的方式核验${h.verify ? `（${h.verify}）` : ""}，没问题再继续；核验不过就用 ask_human 再登记一个，说明哪里不对。`);
-  return { task: h, woke: wake.map((t) => t.id) };
+  const text =
+    h.handBack?.kind === "choice"
+      ? `你问的「${h.title}」（${h.id}），用户的决定：${h.handedBack}\n照这个接着做。`
+      : `人工任务「${h.title}」（${h.id}）用户做完了。${back}\n先按你说的方式核验${h.verify ? `（${h.verify}）` : ""}，没问题再继续；核验不过就用 ask_human 再登记一个，说明哪里不对。`;
+  // Its wait on h ended in the write above (_waits.ts sync); this only tells the worker, the one way every wake goes
+  for (const t of woken) await wake(ctx, t.id, { how: h.handBack?.kind === "choice" ? `你答了：${h.handedBack}` : "你做完了", text });
+  return { task: h, woke: woken.map((t) => t.id) };
 }
 
 /**
@@ -717,7 +667,7 @@ export async function answerQuestion(input: { id: string; q: string; value: stri
     if (h.status === "done" && old) {
       changed = { q, old };
       note(h, `改了「${q.title}」的答案：${old} → ${value}`);
-    } else if (open(h).every((x) => x.answer)) {
+    } else if (asked(h).every((x) => x.answer)) {
       finished = true;
       Object.assign(h, { status: "done", handedBack: summary(h), doneAt: Date.now() });
     }
@@ -729,7 +679,7 @@ export async function answerQuestion(input: { id: string; q: string; value: stri
   const workers = store.tasks.filter((t) => t.owner === "agent" && t.session && t.status !== "dropped" && t.status !== "done" && (t.id === h.askedBy || t.blockedBy?.includes(h.id)));
   if (finished) {
     for (const t of workers.filter((t) => blockersDone(store, t) || t.id === h.askedBy))
-      await tell(ctx, t, `你问的 ${open(h).length} 个问题（${h.id}），用户都答了：\n${open(h).map((q, i) => `${i + 1}. ${q.title}\n   → ${q.answer}`).join("\n")}\n照这些接着做。`).catch(() => {});
+      await wake(ctx, t.id, { how: `你答了 ${asked(h).length} 个问题`, text: `你问的 ${asked(h).length} 个问题（${h.id}），用户都答了：\n${asked(h).map((q, i) => `${i + 1}. ${q.title}\n   → ${q.answer}`).join("\n")}\n照这些接着做。` }).catch(() => {});
   } else if (changed) {
     const c = changed as { q: Question; old: string };
     for (const t of workers) await tell(ctx, t, `用户改了「${c.q.title}」（${h.id}）的答案：原来是「${c.old}」，现在是「${value}」。\n按新的来；已经照旧答案做了的，改过来。`).catch(() => {});
@@ -738,12 +688,12 @@ export async function answerQuestion(input: { id: string; q: string; value: stri
 }
 
 /** The questions still asked (not taken back). */
-function open(h: Task) {
+function asked(h: Task) {
   return (h.questions ?? []).filter((q) => !q.dropped);
 }
 
 function summary(h: Task) {
-  return open(h)
+  return asked(h)
     .map((q) => `${q.title}：${q.answer ?? "（没答）"}`)
     .join("；");
 }

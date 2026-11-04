@@ -1,6 +1,7 @@
 // The task board's data (user/data/tasks.json: this person's, never shared — _user.ts), shared by tasks.ts (the board, the panel's agent) and the watchers
 // (mrwatch.ts). A helper file (leading _): nothing here is callable from a page.
 
+import { addWait, askUser, question, sync, type Wait } from "./_waits";
 import { DATA, migrate } from "./_user";
 
 export const FILE = `${DATA}/tasks.json`;
@@ -59,14 +60,11 @@ export type Task = {
    * one goes straight to this task's worker, without Eval (_main.ts subscribers). Unset on older tasks: the origin's.
    */
   threads?: { source: string; key: string }[];
-  /**
-   * What its worker waits on from outside, having ended its turn (board tool wait_for, waits.ts): a person's reply in a
-   * conversation (source + key: the message wakes it) and / or a time to look again (recheckAt). Under 进行中 meanwhile,
-   * never "stopped"; cleared when the reply or the time comes, or the worker reports anything else.
-   */
+  /** Everything it waits on, open and lately ended (_waits.ts): where it stands follows from these. */
+  waits?: Wait[];
+  /** @deprecated before waits: a worker's question (now a user wait) and a wait_for (reply / time waits). Read once by upgrade. */
   waiting?: { what: string; since: number; source?: string; key?: string; where?: string; recheckAt?: number };
-  /** How the last wait ended (the chat's wait card shows it): which wait (its since), what woke it, when. */
-  waitEnd?: { since: number; how: string; at: number };
+  waitEnd?: unknown;
   origin?: { id: string; source: string; kind: string; key?: string; title?: string; url?: string; reply?: { kind: string; data?: unknown } };
   /** Split off this task by the router (one of several parts run in parallel). */
   from?: string;
@@ -76,7 +74,7 @@ export type Task = {
   sessions?: string[];
   /** Tasks that must be done first (a human task blocking an agent task, or the other way round). */
   blockedBy?: string[];
-  /** A question the worker / panel agent wants the user to decide. */
+  /** @deprecated a question for the user: now a user wait (_waits.ts askUser). */
   question?: string;
   /** The latest result in a line or a paragraph, and where to look (MR, doc). */
   summary?: string;
@@ -137,7 +135,27 @@ export function load(ctx: Ctx): { store: Store; etag?: string } {
   migrate(ctx);
   const st = ctx.fs.stat(FILE);
   if (!st) return { store: { next: 1, tasks: [] } };
-  return { store: JSON.parse(ctx.fs.read(FILE)), etag: st.etag };
+  return { store: upgrade(JSON.parse(ctx.fs.read(FILE))), etag: st.etag };
+}
+
+/** Tasks written before waits: their question and wait_for become waits (kept so on the next write). */
+function upgrade(s: Store): Store {
+  for (const t of s.tasks) {
+    if (t.question) {
+      if (t.status !== "done" && t.status !== "dropped") askUser(t, t.question);
+      t.question = undefined;
+    }
+    const w = t.waiting;
+    if (w) {
+      if (t.status === "running") {
+        if (w.key) addWait(t, { kind: "reply", what: w.what, since: w.since, on: { source: w.source!, key: w.key }, where: w.where });
+        if (w.recheckAt) addWait(t, { kind: "time", what: w.what, since: w.since, at: w.recheckAt });
+      }
+      t.waiting = undefined;
+    }
+    t.waitEnd = undefined;
+  }
+  return s;
 }
 
 /** Read, change, write back; retried when another run wrote in between (the etag no longer matches). */
@@ -146,6 +164,7 @@ export function update<T>(ctx: Ctx, fn: (s: Store) => T): T {
     const { store, etag } = load(ctx);
     const before = snapshot(store);
     const out = fn(store);
+    sync(store);
     try {
       ctx.fs.write(FILE, JSON.stringify(store, null, 2), etag ? { etag } : undefined);
       tellOrigins(ctx, before, store);
@@ -161,7 +180,7 @@ export function update<T>(ctx: Ctx, fn: (s: Store) => T): T {
 type Seen = Record<string, { status: string; question?: string }>;
 function snapshot(s: Store): Seen {
   const out: Seen = {};
-  for (const t of s.tasks) if (t.origin?.reply) out[t.id] = { status: t.status, question: t.question };
+  for (const t of s.tasks) if (t.origin?.reply) out[t.id] = { status: t.status, question: question(t) };
   return out;
 }
 
@@ -178,8 +197,8 @@ function tellOrigins(ctx: Ctx, before: Seen, s: Store) {
       else if (t.status === "review") text = `${t.id} 有结论了，等你看${summary}`;
       else if (t.status === "delivering") text = `${t.id} 交付了${t.delivery?.url ? `：${t.delivery.url}` : summary}，等合并`;
       else if (t.status === "dropped") text = `${t.id} 不做了`;
-    } else if (t.question && t.question !== b.question) {
-      text = `${t.id} 需要你定：${t.question}（在任务看板上回答）`;
+    } else if (question(t) && question(t) !== b.question) {
+      text = `${t.id} 需要你定：${question(t)}（在任务看板上回答）`;
     }
     if (!text) continue;
     try {

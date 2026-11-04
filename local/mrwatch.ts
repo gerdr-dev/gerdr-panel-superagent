@@ -2,6 +2,7 @@ import { get, send, text } from "./_glab";
 import { find, load, note, update, type Delivery, type Task } from "./_store";
 import { workflow } from "./_config";
 import { mrThread } from "./_apply";
+import { askUser, endWaits, open } from "./_waits";
 
 // Follows the MRs that board tasks went out in (status "delivering", see tasks.ts) until they're merged. Run on a
 // schedule (schedules/mrwatch.json), all deterministic: it reads GitLab and decides by its fields. What needs
@@ -285,12 +286,13 @@ function apply(id: string, c: Change, ctx: Ctx) {
     if (t.status !== "delivering" || !t.delivery) return; // accepted / dropped meanwhile
     const { question, done, summary, ...d } = c;
     Object.assign(t.delivery, d);
-    if (question && t.question !== question) {
-      t.question = question;
+    if (question && !open(t).some((w) => w.kind === "user" && w.what === question)) {
+      askUser(t, question);
       note(t, question);
     }
     if (done) {
-      Object.assign(t, { status: "done", doneAt: Date.now(), question: undefined });
+      endWaits(t, () => true, `MR !${t.delivery.iid} 合并了`);
+      Object.assign(t, { status: "done", doneAt: Date.now() });
       note(t, `MR !${t.delivery.iid} 已合并`);
     }
     t.updatedAt = Date.now();

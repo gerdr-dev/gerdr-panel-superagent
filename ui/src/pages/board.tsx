@@ -268,7 +268,7 @@ function Alerts({ onLog }: { onLog: () => void }) {
   );
 }
 
-const WAIT_ICON: Record<Wait["kind"], typeof Hourglass> = { reply: MessageSquare, time: AlarmClock, mr: GitPullRequest, session: Bot, you: Hand };
+const WAIT_ICON: Record<Wait["kind"], typeof Hourglass> = { reply: MessageSquare, time: AlarmClock, mr: GitPullRequest, session: Bot, user: Hand, task: ListTodo };
 
 /**
  * 在等: everything every live task waits on, in one place — a colleague's reply, a time to look again, an MR to merge,
@@ -312,6 +312,7 @@ function WaitsButton({ tasks, onTask, onSession }: { tasks: Task[]; onTask: (id:
                     </div>
                     <p className={clsx("line-clamp-2 text-[13px]", w.user && "text-warn")}>{w.what}</p>
                     {w.wake && <p className="line-clamp-2 text-[12px] text-muted-foreground">{w.wake}</p>}
+                    {w.woke && <p className="text-[11px] text-muted-foreground">上次叫醒：{w.woke.how} · {ago(w.woke.at)}</p>}
                   </button>
                 </li>
               );
@@ -456,7 +457,7 @@ function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, T
       <p className={clsx("line-clamp-2 text-[13px] font-medium", t.status === "dropped" && "text-muted-foreground line-through")}>{t.title}</p>
       {t.question && colOf(t) === "you" && <p className="line-clamp-2 text-[12px] text-warn">{t.question}</p>}
       {!t.question && t.stopped && <p className="line-clamp-2 text-[12px] text-warn">停下了{t.said ? `：${t.said}` : "，没说接下来要什么"}</p>}
-      {!t.question && t.waiting && t.status === "running" && <p className="line-clamp-2 text-[12px] text-muted-foreground">等：{t.waiting.what}</p>}
+      {!t.question && t.status === "running" && outside(t)[0] && <p className="line-clamp-2 text-[12px] text-muted-foreground">等：{outside(t)[0].what}</p>}
       {!t.question &&
         t.helpers
           ?.filter((k) => k.status === "waiting")
@@ -630,6 +631,11 @@ function liveTone(t: Task) {
   return l?.status === "waiting" || l?.status === "error" || stale ? "text-warn" : l?.status === "running" ? "text-ok" : "";
 }
 
+/** What its worker waits on outside (wait_for): a reply, a time to look again. */
+function outside(t: Task) {
+  return (t.waits ?? []).filter((w) => w.kind === "reply" || w.kind === "time");
+}
+
 function liveText(t: Task) {
   const l = t.live;
   if (!l) return t.status === "todo" ? (t.routing ? "Superagent 在派" : "还没派出去") : t.session ? `会话已关闭 · ${ago(t.updatedAt)}` : "";
@@ -639,8 +645,11 @@ function liveText(t: Task) {
   // Its turn is over but a session it handed work to is still going: waiting on that, not stopped
   if (t.helpers?.length) return `等它派出的会话 · ${ago(l.updatedAt)}`;
   // It said what it waits on outside (wait_for): a reply in a conversation it follows, and / or a time to look again
-  if (t.waiting && t.status === "running")
-    return t.waiting.recheckAt && t.waiting.recheckAt > Date.now() ? `等外面 · ${Math.max(1, Math.round((t.waiting.recheckAt - Date.now()) / 60000))} 分钟后回来看` : `等回复 · ${ago(t.waiting.since)}`;
+  const out = t.status === "running" ? outside(t) : [];
+  if (out.length) {
+    const at = out.find((w) => w.kind === "time")?.at;
+    return at && at > Date.now() && !out.some((w) => w.kind === "reply") ? `等外面 · ${Math.max(1, Math.round((at - Date.now()) / 60000))} 分钟后回来看` : `等回复 · ${ago(out[0].since)}`;
+  }
   return `停下 · ${ago(l.updatedAt)}`;
 }
 

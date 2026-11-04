@@ -36,10 +36,8 @@ export type Task = {
   steps?: string;
   handBack?: { kind: "none" | "value" | "secret" | "choice" | "questions"; name?: string; label?: string; options?: string[] };
   /** handBack "questions": several decisions / values asked at once, each answered on its own (local/_store.ts). */
-  /** Everything it waits on, of every kind (local/tasks.ts waitsOf): the 在等 view. */
+  /** Everything it waits on now, of every kind (local/_waits.ts): where it stands follows from these; the 在等 view. */
   waits?: Wait[];
-  /** Its worker ended its turn waiting on someone / something outside (wait_for, local/waits.ts): still 进行中. */
-  waiting?: { what: string; since: number; source?: string; key?: string; recheckAt?: number };
   /** Its worker stopped with nothing to wait on (tasks.ts list): under 等你, with what it last said. */
   stopped?: boolean;
   /** Sessions its worker handed work to, still going: it waits on them. */
@@ -143,13 +141,18 @@ export function day(ms: number) {
   return new Date(ms).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric", weekday: "short" });
 }
 
+/** One thing a task waits on (local/_waits.ts): what, whether it's the user, what wakes it (wake: in words). */
 export type Wait = {
-  kind: "reply" | "time" | "mr" | "session" | "you";
+  id: string;
+  kind: "reply" | "time" | "mr" | "session" | "user" | "task";
   what: string;
-  wake?: string;
-  since?: number;
-  url?: string;
+  since: number;
+  user?: boolean;
+  where?: string;
+  at?: number;
   session?: string;
   item?: string;
-  user?: boolean;
+  url?: string;
+  woke?: { how: string; at: number };
+  wake?: string;
 };

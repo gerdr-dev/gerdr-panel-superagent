@@ -15,6 +15,8 @@ import { allAgents } from "./_agents";
 import { textOf } from "./playbooks";
 import { DATA, migrate } from "./_user";
 import { find, load as loadTasks, note, update as updateTasks, type Task } from "./_store";
+import { wake } from "./_wake";
+import { isOutside } from "./_waits";
 
 const STATE = `${DATA}/superagent.json`;
 /** A fresh main session after this many items: its context stays small, so it stays fast. */
@@ -156,35 +158,29 @@ export async function followUp(ctx: Ctx, id: string, e: Ev) {
   const by = who(e) ? `${who(e)} ` : "";
   const text = (e.text ?? "").trim() || e.title || "";
   const files = e.files ?? [];
-  const t = updateTasks(ctx, (s) => {
-    const x = find(s, id);
-    x.followups = [...(x.followups ?? []), e.id];
-    // What it waited on came (or something else did: it looks again either way)
-    if (x.waiting) x.waitEnd = { since: x.waiting.since, how: `${by || "有人"}回复了`, at: Date.now() };
-    x.waiting = undefined;
-    note(x, `${by}接着说：${text}`);
-    if (!x.session) {
-      x.prompt = `${x.prompt ?? ""}\n\n${by}接着说：${text}`;
-      if (files.length) x.attachments = [...(x.attachments ?? []), ...files];
-    } else if (x.status === "done" || x.status === "review") {
-      Object.assign(x, { status: "running", question: undefined });
-      x.doneAt = undefined;
-    }
-    x.updatedAt = Date.now();
-    return x;
+  // A person in a chat (it has a reply address) "goes on"; anything else (an MR review, a failed pipeline) is headed by
+  // its own title. Only a chat hears back about results (tellOrigins).
+  const head = e.reply ? `${e.source} 上${by}接着说` : e.title || `${e.source}/${e.kind}`;
+  return wake(ctx, id, {
+    how: e.reply ? `${by || "有人"}回复了` : e.title || `${e.source}/${e.kind}`,
+    text:
+      `[${head}]（任务 ${id}，消息 ${e.id}）\n\n${text}\n\n` +
+      `是这个任务的事就照常做、用 task_update 汇报${e.reply ? "，结果会转回给他" : ""}；超出这个任务、或者是别的任务的事，用 hand_back 交回，不要自己答。`,
+    files: files.map((f) => f.path),
+    // What it waited on outside came — or something else did: it looks again either way, and waits again if it must
+    ends: isOutside,
+    on: e.key ? { source: e.source, key: e.key } : undefined,
+    resume: true,
+    followup: e.id,
+    also: (x) => {
+      note(x, `${by}接着说：${text}`);
+      // Not sent out yet: it goes with the task when it is
+      if (!x.session) {
+        x.prompt = `${x.prompt ?? ""}\n\n${by}接着说：${text}`;
+        if (files.length) x.attachments = [...(x.attachments ?? []), ...files];
+      }
+    },
   });
-  if (t.session) {
-    // A person in a chat (it has a reply address) "goes on"; anything else (an MR review, a failed pipeline) is
-    // headed by its own title. Only a chat hears back about results (tellOrigins).
-    const head = e.reply ? `${e.source} 上${by}接着说` : e.title || `${e.source}/${e.kind}`;
-    await ctx.sessions.send(
-      t.session,
-      `[${head}]（任务 ${t.id}，消息 ${e.id}）\n\n${text}\n\n` +
-        `是这个任务的事就照常做、用 task_update 汇报${e.reply ? "，结果会转回给他" : ""}；超出这个任务、或者是别的任务的事，用 hand_back 交回，不要自己答。`,
-      { now: true, attachments: files.map((f) => f.path) },
-    );
-  }
-  return t;
 }
 
 // ---- the main session ----

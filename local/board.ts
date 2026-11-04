@@ -6,7 +6,8 @@
 import { applyBlock } from "./_apply";
 import { find, load, note, update, type Store, type Task } from "./_store";
 import { handBack } from "./_main";
-import { mrText } from "./waits";
+import { waitCard } from "./waits";
+import { endWaits, isOutside, open, question, sync } from "./_waits";
 
 const STEP = {
   type: "object",
@@ -90,23 +91,16 @@ export function task_update(input: { state: string; summary?: string; links?: { 
     // "working" says nothing about what's next: it doesn't reset the reminder count, or a worker that answers each
     // reminder with "still working" and stops would be reminded forever (tasks.ts silentStop)
     Object.assign(t, { viaTools: true, synced: undefined, reportedAt: Date.now(), updatedAt: Date.now() });
-    if (state) Object.assign(t, { nudges: 0, waiting: undefined });
-    // Handed to the MR watcher: the wait shows in the chat as a card (ui/src/cards.tsx "task-wait"), like wait_for's
-    const d = input.state === "delivering" && t.status === "delivering" ? t.delivery : undefined;
-    const gerdrCard = d && {
-      type: "task-wait",
-      ref: `${t.id}:mr:${d.since}`,
-      project: ctx.workspace.project,
-      task: t.id,
-      since: d.since,
-      kind: "mr",
-      kicker: `在等 · ${t.id}`,
-      title: `MR !${d.iid} 合并`,
-      body: mrText(d),
-      url: d.url,
-      tone: "info",
-    };
-    return { id: t.id, status: t.status, column: t.question ? "等你" : t.status, ...(gerdrCard ? { gerdrCard } : {}) };
+    // A new state is what's next: the reminder count starts over, and a wait_for before it no longer says what it waits on
+    if (state) {
+      t.nudges = 0;
+      endWaits(t, isOutside, "worker 报了新进展");
+    }
+    // Handed to the MR watcher: the MR wait (made by sync, here at once so the card can name it) shows in the chat as
+    // a card, like wait_for's
+    sync(s);
+    const mr = input.state === "delivering" && t.status === "delivering" ? open(t).find((w) => w.kind === "mr") : undefined;
+    return { id: t.id, status: t.status, column: question(t) ? "等你" : t.status, ...(mr ? { gerdrCard: waitCard(ctx, t, [mr]) } : {}) };
   });
 }
 
@@ -116,7 +110,8 @@ export function ask_human(input: any, ctx: Ctx) {
     const decision = Array.isArray(input.options) && input.options.length > 0;
     const human = decision ? { ...input, steps: input.steps ?? "", handBack: { kind: "choice", options: input.options.map(String), label: "你的决定" } } : input;
     const h = applyBlock(s, t, { state: "blocked", human, replace: false })!;
-    Object.assign(t, { viaTools: true, reportedAt: Date.now(), nudges: 0, waiting: undefined, updatedAt: Date.now() });
+    Object.assign(t, { viaTools: true, reportedAt: Date.now(), nudges: 0, updatedAt: Date.now() });
+    endWaits(t, isOutside, "worker 改成问你了");
     if (h.handBack?.kind === "questions") return questionCard(h, ctx);
     if (decision) h.urgent = false; // a decision can wait: no warning mark, it just sits under 等你
     // gerdrCard: Gerdr draws this result as a card in the chat, so the user sees the step where they are too
@@ -197,7 +192,8 @@ export function my_task(input: unknown, ctx: Ctx) {
     title: t.title,
     status: t.status,
     summary: t.summary,
-    question: t.question,
+    question: question(t),
+    waits: open(t).map((w) => ({ kind: w.kind, what: w.what, since: w.since })),
     artifacts: t.links ?? [],
     mr: t.delivery?.url,
     humanSteps: humans.map((h) => ({ id: h.id, title: h.title, status: h.status, handedBack: h.handBack?.kind === "secret" ? (h.status === "done" ? `secret ${h.handBack.name} saved` : undefined) : h.handedBack })),

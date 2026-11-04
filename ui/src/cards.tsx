@@ -76,7 +76,7 @@ function TaskStep({ card }: CardProps) {
 
 registerCard("task-step", TaskStep);
 
-type Wait = { state: "waiting" | "ended" | "gone"; body?: string; how?: string; at?: number };
+type Wait = { state: "waiting" | "ended" | "gone"; body?: string; how?: string; at?: number; woke?: { how: string; at: number } };
 
 /**
  * A worker ending its turn to wait on someone / something outside (wait_for, local/waits.ts). Without it the chat just
@@ -84,21 +84,21 @@ type Wait = { state: "waiting" | "ended" | "gone"; body?: string; how?: string; 
  * it waits for and what will wake it, with a pulse; once over, what woke it. The board is asked every 20s.
  */
 function TaskWait({ card }: CardProps) {
-  // kind "mr": an MR handed to the watcher (task_update delivering); else a wait_for
-  const c = card as { project?: string; task?: string; since?: number; title?: string; body?: string; kind?: string; url?: string };
+  // waits: the task's waits it stands for (local/_waits.ts); cards made before those had ids carry since (+ kind "mr")
+  const c = card as { project?: string; task?: string; waits?: string[]; since?: number; title?: string; body?: string; kind?: string; url?: string };
   const [st, setSt] = useState<Wait>();
   const [, tick] = useState(0);
   useEffect(() => {
-    if (!c.project || !c.task || !c.since) return;
+    if (!c.project || !c.task || (!c.waits?.length && !c.since)) return;
     let dead = false;
-    const get = () => run<Wait>("waits.status", { id: c.task, since: c.since, kind: c.kind }, { project: c.project }).then((v) => !dead && setSt(v), () => {});
+    const get = () => run<Wait>("waits.status", { id: c.task, waits: c.waits, since: c.since, kind: c.kind }, { project: c.project }).then((v) => !dead && setSt(v), () => {});
     void get();
     const timer = setInterval(() => (get(), tick((n) => n + 1)), 20000);
     return () => {
       dead = true;
       clearInterval(timer);
     };
-  }, [c.project, c.task, c.since, c.kind]);
+  }, [c.project, c.task, c.waits?.join(","), c.since, c.kind]);
   const on = !st || st.state === "waiting";
   const mins = c.since ? Math.max(0, Math.round((Date.now() - c.since) / 60000)) : 0;
   const waited = mins < 1 ? "刚开始" : mins < 60 ? `等了 ${mins} 分钟` : `等了 ${Math.floor(mins / 60)} 小时 ${mins % 60} 分`;
@@ -133,6 +133,11 @@ function TaskWait({ card }: CardProps) {
         <p className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
           {st?.body?.includes("回来看") || c.body?.includes("回来看") ? <AlarmClock className="size-3.5 shrink-0" /> : <Hourglass className="size-3.5 shrink-0" />}
           {st?.body ?? c.body}
+        </p>
+      )}
+      {st?.woke && (
+        <p className="text-[12px] text-muted-foreground">
+          上次叫醒：{st.woke.how} · {new Date(st.woke.at).toTimeString().slice(0, 5)}
         </p>
       )}
       <p className="text-[11px] text-muted-foreground">它这一轮结束后不占着，等到了会被叫醒接着做；想催它或改主意，直接在下面说。</p>

@@ -2,6 +2,7 @@
 // list) or from its panel tools (board.ts task_update / ask_human). One set of rules for both.
 
 import { newTask, note, type Question, type Store, type Task } from "./_store";
+import { askUser, endQuestions } from "./_waits";
 
 /** The conversation an MR is, as mrwatch.ts emits its events: gitlab, group/repo!34. */
 export function mrThread(project: string, iid: number) {
@@ -24,15 +25,15 @@ export function applyBlock(s: Store, t: Task, b: any): Task | null {
   switch (b.state) {
     case "review":
       t.status = "review";
-      t.question = undefined;
+      endQuestions(t, "worker 交了结论");
       break;
     case "done":
-      Object.assign(t, { status: "done", question: undefined, delivery: undefined, doneAt: Date.now() });
+      Object.assign(t, { status: "done", delivery: undefined, doneAt: Date.now() });
       break;
     case "delivering": {
       const m = /^(https?:\/\/[^/]+)\/(.+?)\/-\/merge_requests\/(\d+)/.exec(String(b.mr ?? ""));
       if (!m) {
-        t.question = `worker 说在等交付，但没给出 MR 地址（mr 字段）：${b.mr ?? "空"}。去对话里让它补上`;
+        askUser(t, `worker 说在等交付，但没给出 MR 地址（mr 字段）：${b.mr ?? "空"}。去对话里让它补上`);
         break;
       }
       const url = m[0];
@@ -45,11 +46,12 @@ export function applyBlock(s: Store, t: Task, b: any): Task | null {
       const th = mrThread(m[2], Number(m[3]));
       const cur = t.threads ?? (t.origin?.key ? [{ source: t.origin.source, key: t.origin.key }] : []);
       if (!cur.some((x) => x.source === th.source && x.key === th.key)) t.threads = [...cur, th];
-      Object.assign(t, { status: "delivering", question: undefined });
+      t.status = "delivering";
+      endQuestions(t, "交付了，等合并");
       break;
     }
     case "question":
-      t.question = String(b.question || b.summary || "需要你决定");
+      askUser(t, String(b.question || b.summary || "需要你决定"));
       break;
     case "blocked": {
       const h = b.human ?? {};

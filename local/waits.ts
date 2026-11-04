@@ -13,6 +13,8 @@
 // it) ends the wait — it calls wait_for again if it still waits.
 
 import { load, note, update, type Task } from "./_store";
+import { addWait, endWaits, isOutside, open, wakeText, type Wait } from "./_waits";
+import { wake } from "./_wake";
 import { followUp, record, subscribers, compact } from "./_main";
 import { mine } from "./board";
 import { USER } from "./_user";
@@ -75,68 +77,72 @@ export function wait_for(input: { what: string; conversation?: string; recheck?:
   if (recheck != null && !(recheck >= 1 && recheck <= 1440)) throw new Error("recheck 是 1 到 1440 分钟");
   if (!input.conversation?.trim() && recheck == null) throw new Error("conversation 和 recheck 至少给一个：不然没有什么会叫醒你");
   const th = input.conversation?.trim() ? resolve(ctx, input.conversation) : undefined;
-  const t = update(ctx, (s) => {
+  const { t, ws } = update(ctx, (s) => {
     const t = mine(s, ctx);
     if (t.status !== "running") throw new Error(`${t.id} 现在不是进行中（${t.status}），不用等`);
+    const now = Date.now();
+    // A new wait_for replaces the one before: it says what it waits on now
+    endWaits(t, isOutside, "换成了新的等待");
+    const ws: Wait[] = [];
     if (th) {
       const cur = t.threads ?? (t.origin?.key ? [{ source: t.origin.source, key: t.origin.key }] : []);
-      if (!cur.some((x) => x.source === th.source && x.key === th.key)) t.threads = [...cur, th];
+      if (!cur.some((x) => x.source === th.source && x.key === th.key)) t.threads = [...cur, { source: th.source, key: th.key }];
+      ws.push(addWait(t, { kind: "reply", what, since: now, on: { source: th.source, key: th.key }, where: th.where }));
     }
-    const now = Date.now();
-    t.waiting = { what, since: now, ...th, recheckAt: recheck != null ? now + recheck * 60_000 : undefined };
+    if (recheck != null) ws.push(addWait(t, { kind: "time", what, since: now, at: now + recheck * 60_000 }));
     note(t, `等：${what}${th ? `（${th.where} 上的回复）` : ""}${recheck != null ? `，${recheck} 分钟后回来看` : ""}`);
-    Object.assign(t, { viaTools: true, reportedAt: now, nudges: 0, question: undefined, updatedAt: now });
-    return t;
+    Object.assign(t, { viaTools: true, reportedAt: now, nudges: 0, updatedAt: now });
+    return { t, ws };
   });
   if (th) ensureTrigger(ctx, th);
-  const w = t.waiting!;
   return {
     id: t.id,
-    // gerdrCard: the wait shows in the chat as a card (ui/src/cards.tsx "task-wait") that says what it waits on, what
-    // will wake it, and later what did — a turn that just ends after "I'll wait" left the user unsure anything was
-    // happening (2026-11-04)
-    gerdrCard: {
-      type: "task-wait",
-      ref: `${t.id}:wait:${w.since}`,
-      project: ctx.workspace.project,
-      task: t.id,
-      since: w.since,
-      kicker: `在等 · ${t.id}`,
-      title: what,
-      body: wakeText(w),
-      tone: "info",
-    },
+    gerdrCard: waitCard(ctx, t, ws),
     note:
-      [th && `${th.source} ${th.key} 上来的回复会发给你`, recheck != null && `${recheck} 分钟后会叫你回来看`].filter(Boolean).join("；") +
+      [th && `${th.where} 上来的回复会发给你`, recheck != null && `${recheck} 分钟后会叫你回来看`].filter(Boolean).join("；") +
       "。现在结束这一轮，不用再等。",
   };
 }
 
-export function mrText(d: NonNullable<Task["delivery"]>) {
-  const at = (ms: number) => new Date(ms).toTimeString().slice(0, 5);
-  return `${d.detail ?? "还没查过"}${d.checked ? `（${at(d.checked)} 查的）` : ""}。每 5 分钟查一次；review 意见、挂掉的流水线会叫醒它，能合就自动合`;
-}
-
-function wakeText(w: NonNullable<Task["waiting"]>) {
-  const at = (ms: number) => new Date(ms).toTimeString().slice(0, 5);
-  return [w.where && `${w.where} 一回复就叫醒它`, w.recheckAt && `${at(w.recheckAt)} 回来看一次`].filter(Boolean).join("；");
+/**
+ * A wait shown in the worker's chat (ui/src/cards.tsx "task-wait"): what it waits on, what will wake it, and later how
+ * it ended — a turn that just ends after "I'll wait" left the user unsure anything was going on (2026-11-04). Used by
+ * wait_for and by task_update delivering (the MR).
+ */
+export function waitCard(ctx: Ctx, t: Task, ws: Wait[]) {
+  return {
+    type: "task-wait",
+    ref: `${t.id}:${ws.map((w) => w.id).join(",")}`,
+    project: ctx.workspace.project,
+    task: t.id,
+    waits: ws.map((w) => w.id),
+    kicker: `在等 · ${t.id}`,
+    title: ws[0]?.what ?? "",
+    body: ws.map((w) => wakeText(w, t)).join("；"),
+    url: ws.find((w) => w.url)?.url,
+    since: ws[0]?.since,
+    tone: "info",
+  };
 }
 
 /**
- * For the chat's wait card: is this wait (task + since) still on, and if not, how it ended. { id, since, kind? } —
- * kind "mr": the MR it handed over (delivering) rather than a wait_for.
+ * For the chat's wait card: are these waits still on, and if not, how they ended. { id, waits } — or, from cards made
+ * before waits had ids, { id, since, kind? }.
  */
-export function status(input: { id: string; since: number; kind?: string }, ctx: Ctx) {
+export function status(input: { id: string; waits?: string[]; since?: number; kind?: string }, ctx: Ctx) {
   const t = load(ctx).store.tasks.find((x) => x.id === input?.id);
   if (!t) return { state: "gone" };
-  if (input.kind === "mr") {
-    const d = t.delivery;
-    if (t.status === "delivering" && d?.since === input.since) return { state: "waiting", body: mrText(d) };
-    return { state: "ended", how: t.status === "done" ? "合并了，任务完成" : t.status === "dropped" ? "任务放弃了" : "不再等这个 MR", at: t.doneAt };
+  const all = t.waits ?? [];
+  const ws = input.waits?.length
+    ? all.filter((w) => input.waits!.includes(w.id))
+    : all.filter((w) => w.since === input.since && (input.kind === "mr" ? w.kind === "mr" : isOutside(w)));
+  const on = ws.filter((w) => !w.end);
+  if (on.length) {
+    const woke = on.find((w) => w.woke)?.woke;
+    return { state: "waiting", body: on.map((w) => wakeText(w, t)).join("；"), woke };
   }
-  if (t.waiting?.since === input.since) return { state: "waiting", body: wakeText(t.waiting), recheckAt: t.waiting.recheckAt };
-  if (t.waitEnd?.since === input.since) return { state: "ended", how: t.waitEnd.how, at: t.waitEnd.at };
-  // A later wait replaced it, or the task finished / was reported on since
+  const end = ws.map((w) => w.end).filter(Boolean).sort((a, b) => a!.at - b!.at)[0];
+  if (end) return { state: "ended", how: end.how, at: end.at };
   return { state: "ended", how: t.status === "done" ? "任务完成了" : t.status === "dropped" ? "任务放弃了" : "接着做了" };
 }
 
@@ -198,32 +204,28 @@ export async function onFollowed(input: { event: GerdrEvent }, ctx: Ctx) {
 
 // ---- every minute ----
 
-/** Wakes workers whose recheck time came, and removes follow triggers no live task needs. */
+/** Wakes workers whose time to look again came (the one wake path: _wake.ts), and removes follow triggers no live task needs. */
 export async function tick(input: unknown, ctx: Ctx) {
   const now = Date.now();
-  const due: { id: string; session: string; what: string }[] = [];
-  const { store } = update(ctx, (s) => {
-    due.length = 0;
-    for (const t of s.tasks) {
-      const w = t.waiting;
-      if (!w?.recheckAt || w.recheckAt > now) continue;
-      if (t.status !== "running" || !t.session) {
-        t.waiting = undefined;
-        continue;
-      }
-      due.push({ id: t.id, session: t.session, what: w.what });
-      t.waitEnd = { since: w.since, how: "到点了，回来看", at: now };
-      t.waiting = w.key ? { ...w, recheckAt: undefined } : undefined;
-      t.updatedAt = now;
+  const due = load(ctx)
+    .store.tasks.filter((t) => t.status === "running")
+    .flatMap((t) => open(t).filter((w) => w.kind === "time" && (w.at ?? 0) <= now).map((w) => ({ t, w })));
+  const woke: string[] = [];
+  for (const { t, w } of due) {
+    try {
+      await wake(ctx, t.id, {
+        how: "到点了，回来看",
+        text: `[看板] 到时间了，回来看一下（任务 ${t.id}）：${w.what}。有结果就照常做、用 task_update 汇报；还没好就再 wait_for。`,
+        // The whole wait_for ends: it looks again and waits again if it must
+        ends: isOutside,
+      });
+      woke.push(t.id);
+    } catch (err: any) {
+      ctx.log(`${t.id} 叫不醒：${err?.message ?? err}`);
     }
-    return { store: s };
-  });
-  for (const d of due)
-    await ctx.sessions
-      .send(d.session, `[看板] 到时间了，回来看一下（任务 ${d.id}）：${d.what}。有结果就照常做、用 task_update 汇报；还没好就再 wait_for。`, { now: true })
-      .catch((err: any) => ctx.log(`${d.id} 叫不醒：${err?.message ?? err}`));
-  const removed = sweepTriggers(ctx, store.tasks);
-  return { woke: due.map((d) => d.id), removed };
+  }
+  const removed = sweepTriggers(ctx, load(ctx).store.tasks);
+  return { woke, removed };
 }
 
 function sweepTriggers(ctx: Ctx, tasks: Task[]) {
