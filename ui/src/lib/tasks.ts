@@ -1,7 +1,7 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { run } from "./gerdr";
 import * as core from "@gerdr/core";
-import { usePoll } from "./visible";
+import { sessionsKey, usePanelChange, useRefresh, useSessions } from "./visible";
 
 // Gerdr's toast (sonner), through the namespace so an older Gerdr without it still runs the board
 const toast = (core as unknown as { toast?: ((m: string, o?: Record<string, unknown>) => unknown) & { error?: (m: string) => unknown } }).toast;
@@ -59,9 +59,12 @@ export type Task = {
   ready: boolean;
 };
 
-const POLL = 5000;
-
-/** The board, refreshed every few seconds while the panel is on screen (the run is a file read plus session lookups). */
+/**
+ * The board, while the panel is on screen. tasks.list reads the tasks and reconciles them with their sessions, so it
+ * runs again when either moves: the data files (written by functions: pushed) or one of the conversations the board
+ * shows — workers and the helpers they handed work to (pushed too). A slow fallback catches what isn't pushed (a
+ * file an agent edited directly); an older Gerdr pushes nothing, and the board polls every 5 s as it used to.
+ */
 export function useTasks() {
   const [tasks, setTasks] = useState<Task[] | null>(null);
   const [error, setError] = useState("");
@@ -79,8 +82,26 @@ export function useTasks() {
       busy.current = false;
     }
   }, []);
-  // Only while the panel is on screen, and at once when it comes back (lib/visible.ts)
-  usePoll(reload, POLL);
+  const data = usePanelChange("user/data");
+  const watched = useMemo(() => {
+    const ids = new Set<string>();
+    const taskIds = new Set<string>();
+    for (const t of tasks ?? []) {
+      if (t.status === "done" || t.status === "dropped") continue;
+      taskIds.add(t.id);
+      for (const id of [t.session, ...(t.sessions ?? []), ...(t.helpers ?? []).map((h) => h.id)]) if (id) ids.add(id);
+    }
+    return { ids, taskIds };
+  }, [tasks]);
+  // The board's workers and anyone working for them (as tasks.ts helpers() finds them): what they're doing now
+  const sessions = useSessions(
+    (x) =>
+      watched.ids.has(x.id) ||
+      (!!x.reportTo && watched.ids.has(x.reportTo)) ||
+      (!!x.parent && watched.ids.has(x.parent)) ||
+      (!!x.tags?.task && watched.taskIds.has(x.tags.task)),
+  );
+  useRefresh(reload, [data, sessionsKey(sessions)]);
   /** Runs a tasks.<fn> and refreshes the board after. 放弃 gets an undo in a toast: it's easy to click by mistake. */
   const act = useCallback(
     async (fn: string, input: unknown) => {

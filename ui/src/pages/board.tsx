@@ -18,7 +18,7 @@ import { isSubmitEnter } from "../lib/utils";
 import { Md } from "../lib/markdown";
 import { usePhone, useSwipePages } from "../lib/swipe";
 import { convo, parseConvo } from "../lib/convo";
-import { usePoll } from "../lib/visible";
+import { usePanelChange, useRefresh, useSessions } from "../lib/visible";
 
 // The task board: columns left to right (to do, running, needs you, to review, done), small cards, details in a side
 // panel. Columns are worked out from facts (task status, the worker session's state, blockers), never dragged: a
@@ -311,12 +311,13 @@ type LogSummary = {
  */
 function Alerts({ onLog }: { onLog: () => void }) {
   const [log, setLog] = useState<LogSummary | null>(null);
-  usePoll(() => run<LogSummary>("superagent.log", { limit: 300 }).then(setLog, () => {}), 10_000);
+  // Reloaded when the log changes (it's written by functions: pushed), the main session's state followed live
+  useRefresh(() => run<LogSummary>("superagent.log", { limit: 300 }).then(setLog, () => {}), [usePanelChange("user/data")], { poll: 10_000 });
+  const m = useLiveMain(log?.main ?? null);
   const day = Date.now() - 24 * 3600_000;
   const items = log?.items ?? [];
   const unavailable = items.filter((x) => x.state === "unavailable").length;
   const observed = items.filter((x) => x.state === "observed" && x.at > day).length;
-  const m = log?.main;
   const problems: { text: string; label: string; go: () => void }[] = [];
   if (m?.status === "waiting") problems.push({ text: `Superagent 在问你：${m.waiting ?? "去它的对话里看看"}`, label: "去回答", go: () => openChat(m.id) });
   if (m?.status === "error") problems.push({ text: "Superagent 的调度会话出错了：下一件事来时会换一个新的", label: "看看", go: () => openChat(m.id) });
@@ -344,8 +345,14 @@ function Alerts({ onLog }: { onLog: () => void }) {
  * (deciding, asking the user) and opens its chat, to see how it decided or to tell it something.
  */
 function MainButton({ onOpen }: { onOpen: (id: string) => void }) {
-  const [m, setM] = useState<{ id: string; status: string; waiting?: string } | null>(null);
-  usePoll(() => run<{ main: { id: string; status: string; waiting?: string } | null }>("superagent.log", { limit: 1 }).then((r) => setM(r.main), () => {}), 10_000);
+  const [main, setMain] = useState<{ id: string; status: string; waiting?: string } | null>(null);
+  // Which session is the main one only changes with the log (pushed); its state is followed live
+  useRefresh(
+    () => run<{ main: { id: string; status: string; waiting?: string } | null }>("superagent.log", { limit: 1 }).then((r) => setMain(r.main), () => {}),
+    [usePanelChange("user/data")],
+    { poll: 10_000 },
+  );
+  const m = useLiveMain(main);
   if (!m || m.status === "gone") return null;
   const label = m.status === "running" ? "在判断" : m.status === "waiting" ? "等你回答" : m.status === "error" ? "出错了" : "空闲";
   return (
@@ -355,6 +362,12 @@ function MainButton({ onOpen }: { onOpen: (id: string) => void }) {
       {m.status !== "idle" && <span className="text-[11px] text-muted-foreground max-md:hidden">{label}</span>}
     </Button>
   );
+}
+
+/** The main session as superagent.log last said, with its status / waiting as Gerdr pushes them now. */
+function useLiveMain<T extends { id: string; status: string; waiting?: string }>(main: T | null): T | null {
+  const live = useSessions((s) => s.id === main?.id)[0];
+  return main && live ? { ...main, status: live.status, waiting: live.waiting } : main;
 }
 
 /** Opens a conversation in the drawer, from anywhere on the page (set by BoardPage). */

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Button } from "../components/Button";
 import { run } from "../lib/gerdr";
 import { since } from "../lib/tasks";
-import { usePoll } from "../lib/visible";
+import { usePanelChange, useRefresh } from "../lib/visible";
 
 // 去向: every outside message and where it went (local/superagent.ts log). Answers "what happened to the message I
 // sent it?" without reading the main session's chat: handed to a task, judged not work (and why), or let through
@@ -43,7 +43,7 @@ export default function Log({ onTask }: { onTask: (id: string) => void }) {
       (r) => (setItems(r.items), setErr("")),
       (e) => setErr(String(e.message || e)),
     );
-  usePoll(load, 10_000);
+  useRefresh(load, [usePanelChange("user/data")], { poll: 10_000 });
   const top = (x: Item) => x.state === "unavailable" || x.state === "observed";
   const first = (items ?? []).filter(top);
   const rest = (items ?? []).filter((x) => !top(x));

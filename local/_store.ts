@@ -112,11 +112,12 @@ export type Task = {
 
 export type Store = { next: number; tasks: Task[] };
 
-export function load(ctx: Ctx): { store: Store; etag?: string } {
+export function load(ctx: Ctx): { store: Store; etag?: string; text?: string } {
   migrate(ctx);
   const st = ctx.fs.stat(FILE);
   if (!st) return { store: { next: 1, tasks: [] } };
-  return { store: upgrade(JSON.parse(ctx.fs.read(FILE))), etag: st.etag };
+  const text = ctx.fs.read(FILE);
+  return { store: upgrade(JSON.parse(text)), etag: st.etag, text };
 }
 
 /** Tasks written before waits: their question and wait_for become waits (kept so on the next write). */
@@ -153,12 +154,16 @@ function upgrade(s: Store): Store {
 /** Read, change, write back; retried when another run wrote in between (the etag no longer matches). */
 export function update<T>(ctx: Ctx, fn: (s: Store) => T): T {
   for (let i = 0; ; i++) {
-    const { store, etag } = load(ctx);
+    const { store, etag, text } = load(ctx);
     const before = snapshot(store);
     const out = fn(store);
     sync(store);
+    const next = JSON.stringify(store, null, 2);
+    // Nothing changed (tasks.list reconciling an unchanged board, mostly): no write. A write tells the board's page
+    // to reload (Gerdr's usePanelChange), and the page's reload runs tasks.list: writing anyway would loop.
+    if (next === text) return out;
     try {
-      ctx.fs.write(FILE, JSON.stringify(store, null, 2), etag ? { etag } : undefined);
+      ctx.fs.write(FILE, next, etag ? { etag } : undefined);
       tellOrigins(ctx, before, store);
       return out;
     } catch (e) {
