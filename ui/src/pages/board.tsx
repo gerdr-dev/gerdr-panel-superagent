@@ -39,9 +39,6 @@ export default function BoardPage() {
   const [settings, setSettings] = useState<SettingsTab | null>(null);
   const [open, setOpen] = useState("");
   const [doneLimit, setDoneLimit] = useState(20);
-  // Home is what needs the user (dsh's Overview); the whole board is a click away. Remembered per browser.
-  const [view, setView] = useState<"you" | "board">(() => (localStorage.getItem("superagent.view") === "board" ? "board" : "you"));
-  useEffect(() => localStorage.setItem("superagent.view", view), [view]);
   const byId = Object.fromEntries((tasks ?? []).map((t) => [t.id, t]));
   const list = (c: Col) => {
     const l = (tasks ?? []).filter((t) => colOf(t) === c);
@@ -118,18 +115,6 @@ export default function BoardPage() {
             <ListTodo className="size-4 text-muted-foreground" />
             Superagent
           </h1>
-          <nav className="flex rounded-md bg-muted p-0.5 text-[12px]">
-            {(
-              [
-                ["you", `要你管${tasks ? ` ${needsYou(tasks).length}` : ""}`],
-                ["board", "看板"],
-              ] as const
-            ).map(([id, label]) => (
-              <button key={id} className={clsx("rounded px-2 py-0.5", view === id ? "bg-background font-medium shadow-xs" : "text-muted-foreground hover:text-foreground")} onClick={() => setView(id)}>
-                {label}
-              </button>
-            ))}
-          </nav>
         </div>
         <div className="flex items-center gap-1">
           <MainButton onOpen={(id) => (setOpen(""), setPeek({ session: id }))} />
@@ -149,20 +134,27 @@ export default function BoardPage() {
       {error && <p role="alert" className="px-4 pt-3 text-[13px] text-bad">读取失败：{error}</p>}
       {!tasks && !error ? (
         <p className="p-8 text-center text-[13px] text-muted-foreground">正在加载…</p>
-      ) : view === "you" ? (
-        <Overview tasks={tasks ?? []} byId={byId} open={open} onOpen={setOpen} onLog={() => setSettings("log")} onBoard={() => setView("board")} />
       ) : (
+        <>
+        <Alerts onLog={() => setSettings("log")} />
         <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto p-3 max-md:snap-x max-md:snap-mandatory">
           {COLS.map((c) => {
             const all = list(c.id);
             const shown = c.id === "done" ? all.slice(0, doneLimit) : all;
             const minutes = c.id === "you" ? all.filter((t) => t.owner === "human").reduce((n, t) => n + (t.minutes ?? 0), 0) : 0;
             return (
-              <section key={c.id} className="flex min-w-60 flex-1 basis-0 flex-col rounded-xl bg-muted/50 max-md:w-[85vw] max-md:flex-none max-md:snap-start">
+              <section
+                key={c.id}
+                className={clsx(
+                  "flex min-w-60 flex-1 basis-0 flex-col rounded-xl max-md:w-[85vw] max-md:flex-none max-md:snap-start",
+                  // What needs the user stands out in the board itself: 等你 with anything in it, 待验收 a little
+                  c.id === "you" && all.length ? "bg-warn/10 ring-1 ring-warn/40" : c.id === "review" && all.length ? "bg-ok/5 ring-1 ring-ok/30" : "bg-muted/50",
+                )}
+              >
                 <h2 className="flex items-center gap-2 px-3 pt-3 pb-2 text-[13px] font-medium">
                   {c.icon}
                   {c.title}
-                  <span className="text-[12px] font-normal text-muted-foreground tabular-nums">{all.length}</span>
+                  <span className={clsx("text-[12px] tabular-nums", c.id === "you" && all.length ? "rounded-full bg-warn px-1.5 font-medium text-background" : "font-normal text-muted-foreground")}>{all.length}</span>
                   {minutes > 0 && <span className="text-[11px] font-normal text-muted-foreground">· 约 {minutes} 分钟</span>}
                   {c.id === "todo" && (
                     <button aria-label="新任务" className="ml-auto rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => setCreating(true)}>
@@ -182,6 +174,7 @@ export default function BoardPage() {
             );
           })}
         </div>
+        </>
       )}
       {sel && !inChat && <Drawer t={sel} byId={byId} act={act} onClose={() => setOpen("")} onGo={setOpen} />}
       {panel && sel && viewing && !peek && (
@@ -218,14 +211,9 @@ export default function BoardPage() {
   );
 }
 
-/** What needs the user: their column, things to judge, and tasks that didn't get dispatched. */
-function needsYou(tasks: Task[]) {
-  return tasks.filter((t) => {
-    const c = colOf(t);
-    if (c === "you" || c === "review") return true;
-    // An agent task nobody is dispatching: the Superagent gave up on it, or it was added without starting
-    return t.owner === "agent" && t.status === "todo" && !t.routing && !t.session;
-  });
+/** An agent task nobody is dispatching: the Superagent gave up on it, or it was added without starting. */
+function notDispatched(t: Task) {
+  return t.owner === "agent" && t.status === "todo" && !t.routing && !t.session;
 }
 
 type LogSummary = {
@@ -234,12 +222,12 @@ type LogSummary = {
 };
 
 /**
- * Home (dsh-superagent's Overview, its "three questions" in this order): does anything need me now — the tasks in
- * 等你 / 待验收 / not dispatched, with their own actions one click away; is the Superagent healthy — its main session
- * waiting or failed, messages it gave no decision on, what proactive work only recorded; and a line of what happened
- * in the last day. A healthy state takes no space: no lists, one sentence.
+ * What the Superagent itself needs from the user, above the board: its main session asking something or failed,
+ * messages it gave no decision on, what proactive work recorded today as "would have taken". Each with where to go.
+ * Nothing at all while it's healthy (dsh: a healthy state takes no space). The tasks that need the user stand out
+ * in the board itself (the 等你 column, cards not dispatched).
  */
-function Overview({ tasks, byId, open, onOpen, onLog, onBoard }: { tasks: Task[]; byId: Record<string, Task>; open: string; onOpen: (id: string) => void; onLog: () => void; onBoard: () => void }) {
+function Alerts({ onLog }: { onLog: () => void }) {
   const [log, setLog] = useState<LogSummary | null>(null);
   useEffect(() => {
     const load = () => run<LogSummary>("superagent.log", { limit: 300 }).then(setLog, () => {});
@@ -247,68 +235,28 @@ function Overview({ tasks, byId, open, onOpen, onLog, onBoard }: { tasks: Task[]
     const t = setInterval(() => document.visibilityState === "visible" && load(), 10_000);
     return () => clearInterval(t);
   }, []);
-  const mine = needsYou(tasks);
-  const groups: { title: string; hint: string; list: Task[] }[] = [
-    { title: "等你", hint: "要你做、要你定，或者它卡住了", list: mine.filter((t) => colOf(t) === "you").sort((a, b) => Number(!!b.urgent) - Number(!!a.urgent) || a.updatedAt - b.updatedAt) },
-    { title: "待验收", hint: "结论要你看", list: mine.filter((t) => colOf(t) === "review").sort((a, b) => a.updatedAt - b.updatedAt) },
-    { title: "没派出去", hint: "点开再派一次", list: mine.filter((t) => colOf(t) !== "you" && colOf(t) !== "review") },
-  ].filter((g) => g.list.length);
   const day = Date.now() - 24 * 3600_000;
   const items = log?.items ?? [];
   const unavailable = items.filter((x) => x.state === "unavailable").length;
   const observed = items.filter((x) => x.state === "observed" && x.at > day).length;
   const m = log?.main;
-  const problems: { text: string; action?: { label: string; go: () => void } }[] = [];
-  if (m?.status === "waiting") problems.push({ text: `Superagent 在问你：${m.waiting ?? "去它的对话里看看"}`, action: { label: "去回答", go: () => openChat(m.id) } });
-  if (m?.status === "error") problems.push({ text: "Superagent 的调度会话出错了：下一件事来时会换一个新的", action: { label: "看看", go: () => openChat(m.id) } });
-  if (unavailable) problems.push({ text: `${unavailable} 条消息 Superagent 没给决定`, action: { label: "去向", go: onLog } });
-  if (observed) problems.push({ text: `主动工作今天记了 ${observed} 条「本来会接」：看对不对，对的点照做`, action: { label: "去向", go: onLog } });
-  const got = items.filter((x) => x.at > day);
-  const taken = got.filter((x) => x.state === "accepted" || x.state === "attached" || x.state === "delivered").length;
-  const running = tasks.filter((t) => colOf(t) === "active").length;
-  const doneToday = tasks.filter((t) => t.status === "done" && (t.doneAt ?? 0) > day).length;
-  const stats = [got.length && `收到 ${got.length} 条消息，交给任务 ${taken} 条`, running && `${running} 个在跑`, doneToday && `${doneToday} 个做完`].filter(Boolean).join(" · ");
+  const problems: { text: string; label: string; go: () => void }[] = [];
+  if (m?.status === "waiting") problems.push({ text: `Superagent 在问你：${m.waiting ?? "去它的对话里看看"}`, label: "去回答", go: () => openChat(m.id) });
+  if (m?.status === "error") problems.push({ text: "Superagent 的调度会话出错了：下一件事来时会换一个新的", label: "看看", go: () => openChat(m.id) });
+  if (unavailable) problems.push({ text: `${unavailable} 条消息 Superagent 没给决定`, label: "去向", go: onLog });
+  if (observed) problems.push({ text: `主动工作今天记了 ${observed} 条「本来会接」：看对不对，对的点照做`, label: "去向", go: onLog });
+  if (!problems.length) return null;
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-3xl space-y-5 p-4 max-md:p-3">
-        {problems.map((p) => (
-          <div key={p.text} className="flex items-center gap-2 rounded-lg border border-warn/40 bg-warn/5 px-3 py-2 text-[13px]">
-            <AlertTriangle className="size-3.5 shrink-0 text-warn" />
-            <span className="min-w-0 flex-1">{p.text}</span>
-            {p.action && (
-              <Button variant="outline" onClick={p.action.go}>
-                {p.action.label}
-              </Button>
-            )}
-          </div>
-        ))}
-        {groups.map((g) => (
-          <section key={g.title} className="space-y-2">
-            <h2 className="flex items-baseline gap-2 text-[13px] font-medium">
-              {g.title}
-              <span className="text-[12px] font-normal text-muted-foreground tabular-nums">{g.list.length}</span>
-              <span className="text-[12px] font-normal text-muted-foreground">{g.hint}</span>
-            </h2>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {g.list.map((t) => (
-                <MiniCard key={t.id} t={t} byId={byId} active={t.id === open} onOpen={() => onOpen(t.id)} />
-              ))}
-            </div>
-          </section>
-        ))}
-        {!groups.length && !problems.length && (
-          <div className="py-16 text-center">
-            <CheckCircle2 className="mx-auto size-6 text-ok" />
-            <p className="mt-2 text-[14px] font-medium">没有要你管的事</p>
-          </div>
-        )}
-        <p className="text-center text-[12px] text-muted-foreground">
-          {stats ? `最近一天：${stats}。` : ""}
-          <button className="underline-offset-2 hover:text-foreground hover:underline" onClick={onBoard}>
-            看全部任务
-          </button>
-        </p>
-      </div>
+    <div className="space-y-1.5 px-3 pt-3">
+      {problems.map((p) => (
+        <div key={p.text} className="flex items-center gap-2 rounded-lg border border-warn/40 bg-warn/5 px-3 py-1.5 text-[13px]">
+          <AlertTriangle className="size-3.5 shrink-0 text-warn" />
+          <span className="min-w-0 flex-1">{p.text}</span>
+          <Button variant="outline" onClick={p.go}>
+            {p.label}
+          </Button>
+        </div>
+      ))}
     </div>
   );
 }
@@ -402,7 +350,7 @@ function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, T
   const blockers = (t.blockedBy ?? []).filter((b) => byId[b] && byId[b].status !== "done" && byId[b].status !== "dropped");
   const live = t.owner === "agent" ? liveText(t) : "";
   return (
-    <button onClick={onOpen} className={clsx("block w-full space-y-1.5 rounded-lg border bg-card p-3 text-left shadow-xs transition-[border-color,box-shadow,transform] duration-150 hover:border-ring/50 hover:shadow-sm active:scale-[0.99]", active && "border-ring")}>
+    <button onClick={onOpen} className={clsx("block w-full space-y-1.5 rounded-lg border bg-card p-3 text-left shadow-xs transition-[border-color,box-shadow,transform] duration-150 hover:border-ring/50 hover:shadow-sm active:scale-[0.99]", active ? "border-ring" : notDispatched(t) && "border-warn/60")}>
       <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
         {t.owner === "human" ? t.handBack?.kind === "choice" ? <CircleHelp className="size-3" /> : <Hand className="size-3" /> : <Bot className="size-3" />}
         <span className="font-mono">{t.id}</span>
@@ -536,6 +484,7 @@ function Links({ t }: { t: Task }) {
 }
 
 function liveTone(t: Task) {
+  if (notDispatched(t)) return "text-warn";
   const l = t.live;
   const stale = l?.status === "running" && l.turnStartedAt && Date.now() - l.turnStartedAt > 40 * 60000;
   return l?.status === "waiting" || l?.status === "error" || stale ? "text-warn" : l?.status === "running" ? "text-ok" : "";
