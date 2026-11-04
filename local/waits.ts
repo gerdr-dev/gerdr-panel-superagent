@@ -42,7 +42,7 @@ export const tools = {
 };
 
 /** Which conversation a worker means, as events name it: { source, key }, from what has come from it lately. */
-function resolve(ctx: Ctx, conv: string): { source: string; key: string } {
+function resolve(ctx: Ctx, conv: string): { source: string; key: string; where: string } {
   const c = conv.trim();
   const keys = new Set<string>([c]);
   const slack = /\/archives\/([A-Z0-9]+)/.exec(c);
@@ -52,10 +52,16 @@ function resolve(ctx: Ctx, conv: string): { source: string; key: string } {
   const since = Date.now() - 30 * DAY;
   for (const key of keys) {
     const seen = ctx.events.list({ key, since, limit: 1 });
-    if (seen.length) return { source: seen[seen.length - 1].source, key };
+    if (seen.length) {
+      // For the chat's card: where, in words — "Slack 有人私聊我 · 石石 (Yang Lei)", not D09DJBLRF4K
+      const e = seen[seen.length - 1];
+      const kind = ctx.events.catalog().find((x) => x.on === `${e.source}/${e.kind}`)?.title || e.source;
+      const who = compact(e).who;
+      return { source: e.source, key, where: who ? `${kind} · ${who}` : `${kind} · ${key}` };
+    }
   }
   // An MR nobody has commented on yet: its events will come from the GitLab watcher (mrwatch.ts) as gitlab/*
-  if (mr) return { source: "gitlab", key: `${mr[1]}!${mr[2]}` };
+  if (mr) return { source: "gitlab", key: `${mr[1]}!${mr[2]}`, where: `MR ${mr[1].split("/").pop()}!${mr[2]}` };
   throw new Error(
     `没找到「${c}」这个对话：最近 30 天没有它的消息进来（可能这个来源的插件没开，或者写的不是频道 / 私信 id）。` +
       `只等状态变化的（job、发布）用 recheck 定时回来看；要人回话的，换成对方会回复的那个对话的 id 或链接`,
@@ -78,17 +84,47 @@ export function wait_for(input: { what: string; conversation?: string; recheck?:
     }
     const now = Date.now();
     t.waiting = { what, since: now, ...th, recheckAt: recheck != null ? now + recheck * 60_000 : undefined };
-    note(t, `等：${what}${th ? `（${th.source} ${th.key} 上的回复）` : ""}${recheck != null ? `，${recheck} 分钟后回来看` : ""}`);
+    note(t, `等：${what}${th ? `（${th.where} 上的回复）` : ""}${recheck != null ? `，${recheck} 分钟后回来看` : ""}`);
     Object.assign(t, { viaTools: true, reportedAt: now, nudges: 0, question: undefined, updatedAt: now });
     return t;
   });
   if (th) ensureTrigger(ctx, th);
+  const w = t.waiting!;
   return {
     id: t.id,
+    // gerdrCard: the wait shows in the chat as a card (ui/src/cards.tsx "task-wait") that says what it waits on, what
+    // will wake it, and later what did — a turn that just ends after "I'll wait" left the user unsure anything was
+    // happening (2026-11-04)
+    gerdrCard: {
+      type: "task-wait",
+      ref: `${t.id}:wait:${w.since}`,
+      project: ctx.workspace.project,
+      task: t.id,
+      since: w.since,
+      kicker: `在等 · ${t.id}`,
+      title: what,
+      body: wakeText(w),
+      tone: "info",
+    },
     note:
       [th && `${th.source} ${th.key} 上来的回复会发给你`, recheck != null && `${recheck} 分钟后会叫你回来看`].filter(Boolean).join("；") +
       "。现在结束这一轮，不用再等。",
   };
+}
+
+function wakeText(w: NonNullable<Task["waiting"]>) {
+  const at = (ms: number) => new Date(ms).toTimeString().slice(0, 5);
+  return [w.where && `${w.where} 一回复就叫醒它`, w.recheckAt && `${at(w.recheckAt)} 回来看一次`].filter(Boolean).join("；");
+}
+
+/** For the chat's wait card: is this wait (task + since) still on, and if not, how it ended. { id, since } */
+export function status(input: { id: string; since: number }, ctx: Ctx) {
+  const t = load(ctx).store.tasks.find((x) => x.id === input?.id);
+  if (!t) return { state: "gone" };
+  if (t.waiting?.since === input.since) return { state: "waiting", body: wakeText(t.waiting), recheckAt: t.waiting.recheckAt };
+  if (t.waitEnd?.since === input.since) return { state: "ended", how: t.waitEnd.how, at: t.waitEnd.at };
+  // A later wait replaced it, or the task finished / was reported on since
+  return { state: "ended", how: t.status === "done" ? "任务完成了" : t.status === "dropped" ? "任务放弃了" : "接着做了" };
 }
 
 // ---- the trigger that brings a followed conversation in ----
@@ -163,6 +199,7 @@ export async function tick(input: unknown, ctx: Ctx) {
         continue;
       }
       due.push({ id: t.id, session: t.session, what: w.what });
+      t.waitEnd = { since: w.since, how: "到点了，回来看", at: now };
       t.waiting = w.key ? { ...w, recheckAt: undefined } : undefined;
       t.updatedAt = now;
     }

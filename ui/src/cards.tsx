@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, Pencil, Undo2 } from "lucide-react";
+import { AlarmClock, Check, Hourglass, Pencil, Undo2 } from "lucide-react";
 import { DefaultCard, registerCard, type CardProps } from "@gerdr/core";
 import { run } from "./lib/gerdr";
 
@@ -75,3 +75,60 @@ function TaskStep({ card }: CardProps) {
 }
 
 registerCard("task-step", TaskStep);
+
+type Wait = { state: "waiting" | "ended" | "gone"; body?: string; how?: string; at?: number };
+
+/**
+ * A worker ending its turn to wait on someone / something outside (wait_for, local/waits.ts). Without it the chat just
+ * stopped after "I'll wait", and the user couldn't tell whether anything was still going on. While the wait is on: what
+ * it waits for and what will wake it, with a pulse; once over, what woke it. The board is asked every 20s.
+ */
+function TaskWait({ card }: CardProps) {
+  const c = card as { project?: string; task?: string; since?: number; title?: string; body?: string };
+  const [st, setSt] = useState<Wait>();
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!c.project || !c.task || !c.since) return;
+    let dead = false;
+    const get = () => run<Wait>("waits.status", { id: c.task, since: c.since }, { project: c.project }).then((v) => !dead && setSt(v), () => {});
+    void get();
+    const timer = setInterval(() => (get(), tick((n) => n + 1)), 20000);
+    return () => {
+      dead = true;
+      clearInterval(timer);
+    };
+  }, [c.project, c.task, c.since]);
+  const on = !st || st.state === "waiting";
+  const mins = c.since ? Math.max(0, Math.round((Date.now() - c.since) / 60000)) : 0;
+  const waited = mins < 1 ? "刚开始" : mins < 60 ? `等了 ${mins} 分钟` : `等了 ${Math.floor(mins / 60)} 小时 ${mins % 60} 分`;
+  if (!on)
+    return (
+      <div className="my-1.5 flex items-center gap-2 rounded-lg border border-l-2 border-l-ok bg-card px-3 py-2 text-[12px] text-muted-foreground">
+        <Check className="size-3.5 shrink-0 text-ok" />
+        <span className="min-w-0 flex-1 truncate">等：{c.title}</span>
+        <span className="shrink-0">{st?.how ?? "不等了"}{st?.at ? ` · ${new Date(st.at).toTimeString().slice(0, 5)}` : ""}</span>
+      </div>
+    );
+  return (
+    <div className="my-1.5 space-y-1 rounded-lg border border-l-2 border-l-brand bg-card px-3 py-2">
+      <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
+        <span className="relative flex size-2 shrink-0">
+          <span className="absolute inline-flex size-full animate-ping rounded-full bg-brand opacity-60" />
+          <span className="relative inline-flex size-2 rounded-full bg-brand" />
+        </span>
+        <span>在等 · {c.task}</span>
+        <span className="ml-auto shrink-0">{waited}</span>
+      </div>
+      <p className="text-[13px] font-medium">{c.title}</p>
+      {(st?.body ?? c.body) && (
+        <p className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+          {st?.body?.includes("回来看") || c.body?.includes("回来看") ? <AlarmClock className="size-3.5 shrink-0" /> : <Hourglass className="size-3.5 shrink-0" />}
+          {st?.body ?? c.body}
+        </p>
+      )}
+      <p className="text-[11px] text-muted-foreground">它这一轮结束后不占着，等到了会被叫醒接着做；想催它或改主意，直接在下面说。</p>
+    </div>
+  );
+}
+
+registerCard("task-wait", TaskWait);

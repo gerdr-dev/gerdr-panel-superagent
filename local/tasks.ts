@@ -65,7 +65,10 @@ export async function list(input: unknown, ctx: Ctx) {
       }
       // Running again since it said what it waits on (woken by the reply / the time, or the user wrote to it): that
       // wait is over; it calls wait_for again if it still waits
-      if (t.waiting && sess?.status === "running" && (sess.turnStartedAt ?? 0) > t.waiting.since) t.waiting = undefined;
+      if (t.waiting && sess?.status === "running" && (sess.turnStartedAt ?? 0) > t.waiting.since) {
+        if (t.waitEnd?.since !== t.waiting.since) t.waitEnd = { since: t.waiting.since, how: "接着做了", at: Date.now() };
+        t.waiting = undefined;
+      }
       if (!sess || (sess.status !== "idle" && sess.status !== "error")) continue;
       if (t.synced === sess.updatedAt) continue;
       const prevStop = t.synced ?? 0;
