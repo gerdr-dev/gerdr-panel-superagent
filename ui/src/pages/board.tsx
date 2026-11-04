@@ -355,16 +355,36 @@ function chatPanel(t: Task, byId: Record<string, Task>): { label: string; action
 function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, Task>; active: boolean; onOpen: () => void }) {
   const blockers = (t.blockedBy ?? []).filter((b) => byId[b] && byId[b].status !== "done" && byId[b].status !== "dropped");
   const live = t.owner === "agent" ? liveText(t) : "";
+  // A human step / question: the agent task that asked for it, when its conversation can be opened
+  const by = t.owner === "human" ? (t.askedBy && byId[t.askedBy]) || Object.values(byId).find((x) => x.owner === "agent" && x.blockedBy?.includes(t.id)) : undefined;
+  const asker = by?.session ? by : undefined;
   return (
     <button onClick={onOpen} className={clsx("block w-full space-y-1.5 rounded-lg border bg-card p-3 text-left shadow-xs transition-[border-color,box-shadow,transform] duration-150 hover:border-ring/50 hover:shadow-sm active:scale-[0.99]", active ? "border-ring" : notDispatched(t) && "border-warn/60")}>
       <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
         {t.owner === "human" ? t.handBack?.kind === "choice" ? <CircleHelp className="size-3" /> : <Hand className="size-3" /> : <Bot className="size-3" />}
         <span className="font-mono">{t.id}</span>
         {t.urgent && <AlertTriangle className="size-3 text-warn" />}
+        {asker && (
+          // Where it came from, in the card's own line: the task whose worker asked it, a click opening that
+          // conversation (the context for answering). A span, not a button: the card is a <button> already.
+          <span
+            role="link"
+            title={`${asker.id} ${asker.title}：打开它的对话`}
+            onClick={(e) => {
+              e.stopPropagation();
+              openChat(asker.session!, asker.id);
+            }}
+            className="inline-flex min-w-0 items-center gap-1 rounded-sm px-1 hover:bg-accent hover:text-foreground"
+          >
+            <MessageSquare className="size-3 shrink-0" />
+            <span className="shrink-0 font-mono">{asker.id}</span>
+            <span className="min-w-0 truncate">{asker.title}</span>
+          </span>
+        )}
         {t.expiresAt && t.status !== "done" && t.status !== "dropped" ? (
-          <Expiry at={t.expiresAt} className="ml-auto" />
+          <Expiry at={t.expiresAt} className="ml-auto shrink-0" />
         ) : t.minutes ? (
-          <span className="ml-auto">约 {t.minutes} 分钟</span>
+          <span className="ml-auto shrink-0">约 {t.minutes} 分钟</span>
         ) : null}
       </div>
       <p className={clsx("line-clamp-2 text-[13px] font-medium", t.status === "dropped" && "text-muted-foreground line-through")}>{t.title}</p>
