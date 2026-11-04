@@ -1,9 +1,9 @@
 {
-  "name": "gerdr-panel-taskboard",
+  "name": "gerdr-panel-superagent",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "A Gerdr panel: hand work to coding agents and follow it on a task board.",
+  "description": "A Gerdr panel: an agent that takes work from your board and outside messages, judges it and dispatches coding agents.",
   "dependencies": {
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",

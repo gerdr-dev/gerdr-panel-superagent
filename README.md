@@ -1,4 +1,4 @@
-# Superagent（gerdr-panel-taskboard）
+# Superagent（gerdr-panel-superagent）
 
 [Gerdr](https://github.com/gerdr-dev/gerdr) 的一个面板：一个替你接活、派活的 agent，和一块跟进它们的看板。
 它接住看板上你建的任务和外面来的消息（Slack / 飞书私信、@、告警……），判断是不是活、派给哪个仓库的哪个 agent，
@@ -13,8 +13,13 @@
 - 要你处理的在看板上突出：「等你」一列有东西就高亮，派不出去的卡片描黄边；Superagent 自己需要你看的（它在问你、没判断成的消息、主动工作记下的）在看板上方一行一条，正常时不占地方。
 - 你的做事方式写在 `skills/my-workflow/`（看板右上角的齿轮 → 流程）：仓库列表、MR 合不合、怎么合……默认都是手动的，按需改。
 
-**安装**：Gerdr 设置 → 面板 → 从 GitHub 安装面板，填 `https://github.com/gerdr-dev/gerdr-panel-taskboard`。
+**安装**：Gerdr 设置 → 面板 → 从 GitHub 安装面板，填 `https://github.com/gerdr-dev/gerdr-panel-superagent`。
 更多面板：GitHub 上带 `gerdr-panel` 标签的仓库，见 https://github.com/topics/gerdr-panel 。
+
+## 开发
+
+在单独的克隆里改（这个仓库），提交、推送；装了它的项目用 `gerdr panel update` 更新，你在 `user/` 里的数据和设置不受影响。
+不要在装好的面板目录里直接改代码：那是用的，不是改的。
 
 ---
 
