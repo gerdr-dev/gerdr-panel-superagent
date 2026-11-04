@@ -22,8 +22,9 @@ export type Task = {
   /** When it was handed to the Work agent to pick the repository / agent (the user dispatched it without one). */
   routing?: number;
   /**
-   * The one-off conversation that dispatched it (tasks.ts route; a part split off shares its parent's). Kept after
-   * that conversation is closed (routerClosed), so every task traces back to the decision that sent it out.
+   * The conversation that dispatched it: the Superagent's main session (_main.ts; a part split off shares its
+   * parent's), or, for older tasks, a one-off router since closed (routerClosed). Kept, so every task traces back to
+   * the decision that sent it out.
    */
   router?: string;
   routerClosed?: boolean;
@@ -44,6 +45,11 @@ export type Task = {
    */
   /** Later messages of the same conversation handled as follow-ups (event ids), so a re-sent one isn't handled twice. */
   followups?: string[];
+  /**
+   * The conversations it follows (source + key): its origin's, and any the Superagent attached since. A message in
+   * one goes straight to this task's worker, without Eval (_main.ts subscribers). Unset on older tasks: the origin's.
+   */
+  threads?: { source: string; key: string }[];
   origin?: { id: string; source: string; kind: string; key?: string; title?: string; url?: string; reply?: { kind: string; data?: unknown } };
   /** Split off this task by the router (one of several parts run in parallel). */
   from?: string;

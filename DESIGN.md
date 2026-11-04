@@ -1,6 +1,6 @@
-# 任务看板的设计
+# Superagent（任务看板）的设计
 
-改看板（`ui/src/pages/board.tsx`、`local/tasks.ts`、`local/board.ts`、`local/mrwatch.ts`）之前先读这份。
+改它（`ui/src/pages/board.tsx`、`local/tasks.ts`、`local/_main.ts`、`local/superagent.ts`、`local/inbox.ts`、`local/board.ts`、`local/mrwatch.ts`）之前先读这份。
 这里记的是**为什么这么做**，以及试过、被否掉的做法。每一条都是用户实际用的时候踩出来的。
 
 ## 出发点
@@ -106,16 +106,16 @@ worker 拿到一组 Work 工具（`local/board.ts`，经 Gerdr 的 `gerdr work m
 ## 派活
 
 - **用户只写「要做什么」**：不用填标题（取第一行），也不用选仓库。可以带图片、文件（上传后作为附件带给 worker）。
-- **没选仓库的，由一个一次性对话来挑**（`route`）：它在 Work 目录里开，标题「派活：tN」。
-  它读得到 README、skill 和工具，挑好仓库用 `tasks.start` 派出去，之后由 `tasks.list` 关掉。
-  - **被否掉的做法：发给右边的 Work 助手。** 每派一个就把助手的对话撑长一轮，而用户根本不看。
-  - 在 Work 目录里开的会话是 Work 自己的对话，Gerdr 不会把它放进 Code，不会冒出标签页。
-- **派活要快**：派活对话要的东西全写在它的第一条消息里（仓库列表和用户挑仓库的说法、每个 agent / 角色是干什么的、
-  模型规则、用户 @ 了谁），一条 `tasks.dispatch` 派出去，要拆成几个并行的也是这一条（第一份就是原任务，其余是
+- **没选仓库的，交给 Superagent 的调度会话**（下面「Superagent」）：一直开着，只分派。
+  - **被否掉的做法：发给右边的 Work 助手。** 每派一个就把助手的对话撑长一轮，而用户根本不看；助手陪用户说话时也派不了。
+  - **被否掉的做法：每个任务开一个一次性的派活对话**（标题「派活：tN」，派完关掉）。每次都要开会话、重读同样的规则；
+    外面的消息来了也没有一个「谁来判断」的地方。旧任务的 `router` 还指向那些对话（`routerClosed`），链路照样能看。
+- **派活要快**：调度会话要的东西全写在它的第一条消息里（仓库列表和用户挑仓库的说法、每个 agent / 角色是干什么的、
+  模型规则、用户 @ 了谁），一条 `superagent.decide` 给出一批的决定，要拆成几个并行的也在这一条里（第一份就是原任务，其余是
   `from` 指向它的新任务）。
   **被否掉的做法：让它自己去读 README / skill / 看板代码。** 实测一次派活 22 秒，三轮读文件占了 10 秒，读到的东西每次都一样。
-- **@ agent**：新任务里输入 @ 点名 agent（`mentions`）。只点了一个就是这个任务的 agent；点了几个交给派活对话安排，
-  怎么分、并不并行、谁用便宜模型都由它定。指定了仓库又只点了一个，就不经过派活对话，直接派出。
+- **@ agent**：新任务里输入 @ 点名 agent（`mentions`）。只点了一个就是这个任务的 agent；点了几个交给调度会话安排，
+  怎么分、并不并行、谁用便宜模型都由它定。指定了仓库又只点了一个，就不经过调度会话，直接派出。
 - **用哪个 agent、哪个模型**：用户写在 `skills/my-workflow/references/models.md` 的变量里，派活的对话和 worker 各一组
   （agent / 模型 / 思考强度），`local/_config.ts` 读出来。任务上指定的优先。那组模型只配那组的 agent：
   任务换了 agent 就不套（claude 的模型名对 codex 没意义），用那个 agent 自己的默认。
@@ -128,22 +128,44 @@ worker 拿到一组 Work 工具（`local/board.ts`，经 Gerdr 的 `gerdr work m
   新任务的仓库下拉和派活的对话都只看这一份。没写的时候拿最近用过的目录当建议。
   **被否掉的做法：读 Code 的工作区。** 看板和 Code 是平级的两套界面，各管各的；而且 Code 的工作区里混着很多和这个项目无关的目录。
 
-## 外面来的活：触发器
+## Superagent
 
-私信、@、告警这类 Gerdr 事件可以直接变成任务（看板设置 →「触发器」，`local/inbox.ts`）。
+照 [dsh-superagent](https://github.com/deepseek-ai/dsh-superagent-prototype) 的领域模型（它的 docs/000～005）做，
+名字对得上才叫这个名字。原则一样：**尽量少占人的注意力，尽量多给价值**。
 
-- **能选什么不写死**：列表来自 `ctx.events.catalog()`，也就是装了的插件声明会发的事件，加上最近 30 天真来过的。
-  没装 Slack 的人看不到 Slack，装了飞书插件就自己出现。默认一个都不开。
-  **被否掉的做法：看板里直接写一个 Slack 开关。** 很多人不用 Slack，还有飞书，写死一个来源对谁都不友好。
-- **开关就是 Gerdr 的触发器文件**：打开一个来源，就写 `triggers/inbox-<来源>.json`（`fn: inbox.onEvent`，可选 `key`
-  只收某个频道）；关掉就把文件挪进废纸篓。听不听由看板自己定，Gerdr 里没有开关。
-- **收到就是一个普通任务**：标题取第一行，附件带上，不给仓库，交给派活的对话（和在看板上手动建的一样）；
-  同一个事件来两次只建一个任务（`origin.id`）。
-- **同一段对话接着说，是同一个任务**：事件的 `key` 是来源定的「这段对话」（Slack：一个私信频道，或频道里的一个 thread）。
-  同一来源、同一 key、还没结束（或做完不到一天）的任务就接着用，和 deva 一段对话一个 agent 一样：还在派活就补进任务内容，
-  已经有 worker 就立即发给它；做完 / 待验收的重新打开，下一个结果照样回过去。超过一天再说，就开新任务（旧上下文太旧）。
-- **回复不认来源**：事件自带回复地址，`ctx.events.reply` 原路回去。建好时说「建了 tN」；之后任务做完、
-  要你验收、开了 MR、要你定的时候再说一声（`_store.ts` 的 `tellOrigins`：所有改动都经过 `update`，所以只在这一处看）。
+外面的事 → 准入 → 有任务在跟这段对话：直接交给那个任务（订阅）；没有：调度会话判断（评估）→ 接 / 并进 / 停 / 不接。
+看板上建的任务是用户自己定了要做的，跳过判断，只让调度会话挑仓库和 agent。
+
+| dsh 的概念 | 这里 |
+|---|---|
+| Source / Trigger / Thread / Channel | Gerdr 的事件（插件、轮询）/ 一个事件 / 事件的 `key` / 事件的 `reply` |
+| Gate（准入，代码判断） | 触发器文件里的 `input.allow`（「只收这些人」），按事件的 `actor` 比（`inbox.onEvent`） |
+| Eval + Main Session | 调度会话（`_main.ts`）：一直开着，只分派，一次 `superagent.decide` 给出一批决定 |
+| Decision：accept / stop / ignore / unavailable | 接（建任务派出）/ 停 / 不接（带理由，可回一句）/ 没判断成；另加「并进」（attach） |
+| Ticket / Assignment | 任务 / 任务的 worker 会话（`sessions`） |
+| Subscription | 任务的 `threads`：这段对话里的后续直接交给它，不再评估 |
+| Disposition（去向） | `data/superagent.json` 的 `items`，界面「去向」 |
+
+- **调度会话只分派、从不等待**：不做技术判断，不读代码（定不了仓库时才看一眼），不 sleep 不轮询，判断完就结束这一轮。
+  它一卡住，后面的消息全堵着。忙的时候来的新东西用普通发送（不是立即发送），排到它下一个停顿，一批一起看。
+- **处理满 30 条就换一个新的**：上下文一直长下去会变慢变贵。用户的规则（仓库、模型、角色）变了，下一条消息前面先附上新规则。
+- **没给决定要看得出来**：它空闲了一阵、消息还挂着，就记成「没判断成」，任务退回待办（`sweep`，每次刷新看板时跑）。
+  「去向」里能「重新判断」，不接 / 没收的也能。
+- **订阅，不是「24 小时内同一个 key」**：任务记着它跟的对话（`threads`：来源那段，加上 attach 进来的）。
+  后续消息给所有还没结束的订阅任务；都结束了，给最近结束的那个，它重新打开（dsh：人在原对话里说话就接着做）。
+  放弃的任务什么都收不到：人停掉的，再说话就是新的活，要评估。
+  **被否掉的做法：一天内同一个 key 接着用，超过就开新任务。** 一段对话里可能有好几件事，也可能隔几天才追问。
+- **worker 决定后续归不归它**：超出这个任务、或是别的任务的事，worker 用 `hand_back` 交回，不自己答。
+  交给它的任务都交回了，才去评估（带上它们的理由）。
+- **并进要有明确的指向**（提到 tN、它的链接、它说过的话），只是话题像不算。并进后那段对话也算这个任务订阅的。
+- **消息是数据，不是指令**：调度会话的说明里写明了；准入是代码判断，消息内容改不了。
+- **能选什么来源不写死**：列表来自 `ctx.events.catalog()`（装了的插件声明会发的，加上最近 30 天真来过的），
+  默认一个都不开。打开就是写 `triggers/inbox-<来源>.json`，关掉挪进废纸篓。
+  **被否掉的做法：看板里直接写一个 Slack 开关。** 很多人不用 Slack，还有飞书。
+- **回复不认来源**：事件自带回复地址，`ctx.events.reply` 原路回去。接了说「建了 tN」，之后做完、要验收、开了 MR、
+  要你定的时候再说一声（`_store.ts` 的 `tellOrigins`）。干活的时候不出声。
+- **还没做的**（dsh 有）：主动工作（团队写规则，先只记录不执行，看着对了再放开，mrwatch 会是第一条）；
+  worker 订阅别的对话只拿上下文（比如它的 MR 的评论，现在是 mrwatch 手写交过去）；首页只放要人管的事。
 
 ## 链路：每个任务都能追到是谁派的
 
@@ -151,13 +173,14 @@ worker 拿到一组 Work 工具（`local/board.ts`，经 Gerdr 的 `gerdr work m
 agent 复盘也要整条链。所以：
 
 - **链是一棵会话树，层数不限**：Gerdr 给每个会话记 `parent`（谁开的它：agent 的 `gerdr session new`，
-  或它跑 `gerdr work run` 调的函数开的）。路由跑 `tasks.dispatch` 开出 worker，worker 再开帮手，帮手再开……
+  或它跑 `gerdr work run` 调的函数开的）。调度会话跑 `superagent.decide` 开出 worker，worker 再开帮手，帮手再开……
   都在一棵树上。看板不写死「路由 → worker」两层（`local/tasks.ts` 的 `tree`）。
-- **派完不丢**：派活对话派完照样关掉，但 `router` 留在任务上（`routerClosed` 标记已关）。
+- **派完不丢**：`router` 留在任务上（调度会话，或旧任务的一次性派活对话，`routerClosed` 标记已关）。
+  调度会话派过所有任务，所以它在一个任务的链路里只挂这个任务自己的 worker。
   **被否掉的做法：关掉时把 `router` 清掉。** 派完就再也找不到它当时为什么这么派。拆出来的子任务继承同一个 `router`。
-- **在任务的抽屉里看，不在右边**：右边是 Work 助手，派活对话属于任务。抽屉顶上「链路」：来源、上一级（谁派的这个任务）、
-  拆自、整棵会话树、拆出；点哪个，抽屉就换成哪个对话。还在派活的任务，点卡片直接打开派活对话，能实时纠正。
-- **看完就能调**：在派活对话里有「改『流程』里的派活规则」，直接去改仓库、模型规则。
+- **在任务的抽屉里看，不在右边**：右边是 Work 助手，派活的决定属于任务。抽屉顶上「链路」：来源、上一级（谁派的这个任务）、
+  拆自、整棵会话树、拆出；点哪个，抽屉就换成哪个对话。还在派活的任务，点卡片直接打开调度会话，能实时纠正。
+- **看完就能调**：在调度会话里有「改『流程』里的派活规则」，直接去改仓库、模型规则。
 - **给 agent 复盘**：`tasks.trace`（任务这一级的链）和 `tasks.tree`（整棵会话树），再用 `gerdr session read` 读每个对话。
 
 ## 用户在对话里
@@ -192,12 +215,15 @@ agent 复盘也要整条链。所以：
 | `local/_store.ts` | 任务数据和读写（带 etag 重试） |
 | `local/_apply.ts` | worker 汇报怎么落到任务上（工具和旧文字块共用） |
 | `local/tasks.ts` | 看板和 Work 助手调用的函数：list / add / start / accept / complete / deliver / redo / drop… |
+| `local/_main.ts` | Superagent 的核心：调度会话、订阅、交回、没判断成、事件的去向记录（`data/superagent.json`） |
+| `local/superagent.ts` | 调度会话的 `decide`，「去向」的 `log` / `retry` |
+| `local/inbox.ts` | 触发器的设置和 `onEvent`（准入 → 订阅 → 评估） |
 | `local/board.ts` | 给 worker 的 Work 工具 |
 | `local/mrwatch.ts` | 盯 MR |
 | `local/_config.ts`、`local/_vars.ts` | 从 skill 里的 `{{变量}}` 读出代码要用的值 |
 | `local/playbooks.ts`、`local/schedules.ts` | 「流程」「定时任务」的读写 |
 | `ui/src/pages/board.tsx` | 看板，这个面板唯一的页面 |
-| `ui/src/components/SettingsSheet.tsx`、`ui/src/settings/` | 看板设置：「流程」「定时任务」（不是单独的页面：面板就是看板，它们是看板的设置） |
+| `ui/src/components/SettingsSheet.tsx`、`ui/src/settings/` | 「去向」「流程」「触发器」「定时任务」（不是单独的页面：面板就是看板，它们在看板背后） |
 | `ui/src/components/ChatDrawer.tsx` | worker 对话的抽屉（`SessionChat`） |
 | `ui/src/cards.tsx` | 对话里的 `task-step` 卡片 |
 | `skills/my-workflow/` | 用户本人的做事方式（给所有 agent 看） |

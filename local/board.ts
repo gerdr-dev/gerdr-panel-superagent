@@ -5,6 +5,7 @@
 
 import { applyBlock } from "./_apply";
 import { find, load, note, update, type Store, type Task } from "./_store";
+import { handBack } from "./_main";
 
 const STEP = {
   type: "object",
@@ -52,6 +53,11 @@ export const tools = {
     description:
       "Take back a step you asked the user for with ask_human: they answered it in the chat already, you found another way, or it's superseded. It leaves their board with your reason.",
     input: { type: "object", properties: { id: { type: "string" }, reason: { type: "string" } }, required: ["id", "reason"] },
+  },
+  hand_back: {
+    description:
+      "Give back a message that reached your task from its conversation (a Slack thread, a DM) but isn't for it: it asks for something beyond your task, or is about another one. The Superagent then decides what it is (a new task, another task's, nothing). Don't answer it yourself. event: the message id given with it.",
+    input: { type: "object", properties: { event: { type: "string" }, reason: { type: "string", description: "Why it isn't this task's, in a sentence" } }, required: ["event", "reason"] },
   },
   my_task: {
     description: "Your board task as the board sees it: status, summary, artifacts, and the human steps you asked for (open or done, with what was handed back).",
@@ -156,4 +162,11 @@ export function my_task(input: unknown, ctx: Ctx) {
     mr: t.delivery?.url,
     humanSteps: humans.map((h) => ({ id: h.id, title: h.title, status: h.status, handedBack: h.handBack?.kind === "secret" ? (h.status === "done" ? `secret ${h.handBack.name} saved` : undefined) : h.handedBack })),
   };
+}
+
+export async function hand_back(input: { event: string; reason: string }, ctx: Ctx) {
+  const { store } = load(ctx);
+  const t = mine(store, ctx);
+  if (!input?.reason?.trim()) throw new Error("写一句为什么不是这个任务的事");
+  return handBack(ctx, t.id, input.event, input.reason.trim(), store.tasks);
 }

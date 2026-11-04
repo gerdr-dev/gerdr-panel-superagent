@@ -5,12 +5,12 @@ import { Button } from "../components/Button";
 import { project, run } from "../lib/gerdr";
 import { since } from "../lib/tasks";
 
-// 触发器: which events become tasks. The choices are whatever Gerdr can deliver now (ctx.events.catalog: what the
+// 触发器: which events come in to the Superagent, and who may ask through each (the gate). The choices are whatever Gerdr can deliver now (ctx.events.catalog: what the
 // installed add-ons emit, what came lately) — nothing here names Slack or Feishu, so someone without them sees
 // neither. Turning one on writes a Gerdr trigger file (triggers/inbox-*.json, local/inbox.ts); its runs come from
 // /api/work/triggers.
 
-type Source = { on: string; title?: string; description?: string; addon?: string; canReply?: boolean; seen?: number; enabled: boolean; key?: string };
+type Source = { on: string; title?: string; description?: string; addon?: string; canReply?: boolean; seen?: number; enabled: boolean; key?: string; allow?: string[] };
 type TriggerInfo = { id: string; on: string; runs: number; last?: { startedAt: string; ok: boolean; error?: string } };
 
 export default function TriggersPage() {
@@ -37,8 +37,8 @@ export default function TriggersPage() {
       <header>
         <h1 className="text-[22px] font-semibold tracking-tight">触发器</h1>
         <p className="mt-1 text-[13px] text-muted-foreground">
-          外面发生的事（私信、@ 你、告警……）自动变成看板上的任务，交给派活的对话安排。能选什么取决于装了哪些插件、有哪些事件来过；
-          来源支持回复的，建好任务、有了结果都会回到原来的对话里说一声。
+          外面发生的事（私信、@ 你、告警……）交给 Superagent：已有任务的对话里的后续直接交给那个任务，其余的由它判断是不是活、派给谁（每条去了哪，看「去向」）。
+          能选什么取决于装了哪些插件、有哪些事件来过；来源支持回复的，接了活、有了结果都会回到原来的对话里说一声。
         </p>
       </header>
       {err && <p role="alert" className="text-[13px] text-bad">{err}</p>}
@@ -59,13 +59,15 @@ export default function TriggersPage() {
 
 function Row({ s, info, onSaved }: { s: Source; info?: TriggerInfo; onSaved: () => void }) {
   const [key, setKey] = useState(s.key ?? "");
+  const [allow, setAllow] = useState((s.allow ?? []).join(", "));
+  const allowNow = (s.allow ?? []).join(", ");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const save = async (enabled: boolean) => {
     setBusy(true);
     setErr("");
     try {
-      await run("inbox.setSource", { on: s.on, enabled, key, title: s.title });
+      await run("inbox.setSource", { on: s.on, enabled, key, title: s.title, allow });
       onSaved();
     } catch (e: any) {
       setErr(String(e.message || e));
@@ -93,21 +95,23 @@ function Row({ s, info, onSaved }: { s: Source; info?: TriggerInfo; onSaved: () 
         <label className="flex shrink-0 cursor-pointer items-center gap-2 text-[13px]">
           {busy && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
           <input type="checkbox" className="size-4 accent-[var(--brand)]" checked={s.enabled} disabled={busy} onChange={(e) => save(e.target.checked)} />
-          收到就建任务
+          收进来
         </label>
       </div>
       {s.enabled && (
         <div className="flex flex-wrap items-center gap-2 text-[12px]">
           <span className="text-muted-foreground">只要这些（key，可用 *，空 = 全部）</span>
           <input className="h-7 w-56 rounded-md border bg-background px-2 font-mono text-[12px]" value={key} placeholder="比如某个频道 id" onChange={(e) => setKey(e.target.value)} />
-          {key !== (s.key ?? "") && (
+          <span className="text-muted-foreground">只收这些人（发送人 ID 或名字，逗号分隔；空 = 来源放进来的都收）</span>
+          <input className="h-7 w-56 rounded-md border bg-background px-2 font-mono text-[12px]" value={allow} placeholder="比如 U012ABCD" onChange={(e) => setAllow(e.target.value)} />
+          {(key !== (s.key ?? "") || allow !== allowNow) && (
             <Button disabled={busy} onClick={() => save(true)}>
               保存
             </Button>
           )}
           {info && (
             <span className={clsx("ml-auto", last && !last.ok ? "text-bad" : "text-muted-foreground")}>
-              建过 {info.runs} 次{last ? ` · 上次${since(Date.parse(last.startedAt))}前${last.ok ? "" : `失败：${last.error}`}` : ""}
+              收过 {info.runs} 条{last ? ` · 上次${since(Date.parse(last.startedAt))}前${last.ok ? "" : `失败：${last.error}`}` : ""}
             </span>
           )}
         </div>

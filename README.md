@@ -1,10 +1,13 @@
-# 任务看板（gerdr-panel-taskboard）
+# Superagent（gerdr-panel-taskboard）
 
-[Gerdr](https://github.com/gerdr-dev/gerdr) 的一个面板：把活派给 coding agent、在一块看板上跟进。
+[Gerdr](https://github.com/gerdr-dev/gerdr) 的一个面板：一个替你接活、派活的 agent，和一块跟进它们的看板。
+它接住看板上你建的任务和外面来的消息（Slack / 飞书私信、@、告警……），判断是不是活、派给哪个仓库的哪个 agent，
+结果回到消息来的地方。原则照 [dsh-superagent](https://github.com/deepseek-ai/dsh-superagent-prototype)：尽量少占人的注意力，尽量多给价值。
 
 - 派活：写一句要做什么，选仓库或让它自己挑，派给 Claude Code / Codex 的 worker。
 - worker 通过看板的工具汇报：进行中、交付了（开了 MR）、要你验收；要你亲手做的步骤、要你拍板的决定都排进「等你」，在对话里也能直接答。
-- 外面来的活：看板设置 →「触发器」选哪些事件（Slack / 飞书私信、告警……装了哪些插件就有哪些）收到就建任务，结果回到原对话。
+- 外面来的活：设置 →「触发器」选收哪些事件（装了哪些插件就有哪些）、只收谁的。已有任务的对话里的后续直接交给那个任务；
+  其余的由 Superagent 的调度会话判断：接（建任务派出）、并进已有任务、停掉某个任务、不接。每条去了哪，看「去向」。
 - MR 有人盯：新的 review 意见、挂掉的流水线交回给 worker，按你的规则变基、合并。
 - 你的做事方式写在 `skills/my-workflow/`（看板右上角的齿轮 → 流程）：仓库列表、MR 合不合、怎么合……默认都是手动的，按需改。
 
@@ -28,9 +31,10 @@
   `gerdr work run tasks.add '{"title":"…","prompt":"…","repo":"/绝对路径","agent":"codex","start":true}'`
   它会在那个仓库开 worker（带上回报格式、`task=<id>` 标签，回报给你），并在看板上出现。`worktree: true` 给它一个独立
   worktree（同一个仓库同时有两个 worker 时用）。`agent` / `model` / `effort` 不填就用 `skills/my-workflow/references/models.md` 里给 worker 定的。
-- 用户在看板上派活时不选仓库：看板会为它单独开一个一次性的对话（标题「派活：tN」），收到「看板上新派了任务 tN …」的就是它，派完会被自动关掉。它的第一条消息里已经带齐了仓库、agent、模型规则和用户 @ 了谁，一条
-  `gerdr work run tasks.dispatch '{"id":"tN","parts":[{"repo":"/绝对路径","agent":"…"}]}'` 派出（几份 parts 就是拆成几个并行任务）。可选的仓库用 `gerdr work run tasks.repos` 看；
-  拿不准就先读一下仓库内容，实在定不了再问用户。你自己派活（`tasks.add`）时也可以不给 `repo`，但你本来就知道该去哪，直接给上。
+- 用户在看板上派活时不选仓库、外面来了消息：都交给 Superagent 的调度会话（标题「Superagent 调度」，一直开着，
+  local/_main.ts）。它的第一条消息带齐了仓库、agent、模型规则，之后每条消息是一批 `[任务 tN]` / `[消息 cN]`，一条
+  `gerdr work run superagent.decide '{"decisions":[…]}'` 给出全部决定。你不是它：你是陪用户说话的那个。
+  可选的仓库用 `gerdr work run tasks.repos` 看。你自己派活（`tasks.add`）时也可以不给 `repo`，但你本来就知道该去哪，直接给上。
 - 用户要亲手做的步骤（网页后台点开关、准备账号、审批）记成人工任务：
   `gerdr work run tasks.add '{"title":"…","owner":"human","steps":"带直达链接的步骤","handBack":{"kind":"none|value|secret","label":"…","name":"SECRET_NAME"},"verify":"agent 怎么核验","minutes":5,"blockedBy":[]}'`
   依赖它的 agent 任务写 `"blockedBy":["t3"]`。密码 / token 只能用 `secret`，永远不要让用户在对话里贴。

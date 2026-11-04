@@ -13,7 +13,7 @@ description: 用户本人的工作方式：派活挑哪些仓库、用哪个 age
 | 参考 | 什么时候看 |
 |---|---|
 | [references/repos.md](references/repos.md) | 派活、挑仓库的时候：我有哪些仓库 |
-| [references/models.md](references/models.md) | 派活、挑 agent 和模型的时候：派活的对话和 worker 各用哪个 |
+| [references/models.md](references/models.md) | 派活、挑 agent 和模型的时候：Superagent 的调度会话和 worker 各用哪个 |
 | [references/deliver.md](references/deliver.md) | 改完代码、要交付的时候：开 MR 还是直推，做完怎么汇报 |
 | [references/mr.md](references/mr.md) | MR 来了新的 review 意见、流水线挂了、有冲突的时候；也写了自动合并、变基的规则 |
 | [references/human.md](references/human.md) | 有一步得我亲手做的时候（点授权、建账号、在后台开开关、交密码） |

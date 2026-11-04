@@ -17,7 +17,7 @@ type Tree = {
   roots: Node[];
 };
 
-const ROLE = { router: "派活", worker: "worker", helper: "子会话" };
+const ROLE = { router: "调度", worker: "worker", helper: "子会话" };
 
 function count(n: Node[]): number {
   return n.reduce((k, x) => k + 1 + count(x.children), 0);

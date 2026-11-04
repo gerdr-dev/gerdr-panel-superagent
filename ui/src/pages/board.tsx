@@ -1,4 +1,4 @@
-import { AlertTriangle, Bot, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ListTodo, ExternalLink, GitPullRequest, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Send, Settings, Undo2, X } from "lucide-react";
+import { AlertTriangle, Bot, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ListTodo, ExternalLink, GitPullRequest, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Send, Settings, Undo2, X } from "lucide-react";
 import clsx from "clsx";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "../components/Button";
@@ -62,9 +62,9 @@ export default function BoardPage() {
   const panel =
     sel && inChat && viewing
       ? viewing !== primary
-        ? { label: viewing === sel.router ? `${sel.id} 的派活对话：它当时怎么判断的。以后都不想这样派，就改「流程」里的规则` : `${sel.id} 背后的另一个对话`, actions: [] }
+        ? { label: viewing === sel.router ? `Superagent 的调度会话：它派 ${sel.id} 时怎么判断的。以后都不想这样派，就改「流程」里的规则` : `${sel.id} 背后的另一个对话`, actions: [] }
         : routingNow
-          ? { label: `${sel.id} · 正在派活：挑仓库、agent 和模型。看到不对直接在下面纠正`, actions: [{ id: "drop", label: "放弃", confirm: "确定放弃？" } as ChatAction] }
+          ? { label: `Superagent 正在派 ${sel.id}：挑仓库、agent 和模型。看到不对直接在下面纠正`, actions: [{ id: "drop", label: "放弃", confirm: "确定放弃？" } as ChatAction] }
           : chatPanel(sel, byId)
       : null;
   // A conversation opened from a panel ("回到 tN 的对话", a finished task's chat): the chat alone, over the panel,
@@ -82,7 +82,8 @@ export default function BoardPage() {
   useEffect(
     () =>
       onShowSession(project, (session) => {
-        const t = (tasksRef.current ?? []).find((x) => x.session === session || x.sessions?.includes(session) || x.router === session);
+        // The Superagent's main session dispatched every task: it's a task's only while that task is being dispatched
+        const t = (tasksRef.current ?? []).find((x) => x.session === session || x.sessions?.includes(session) || (x.router === session && x.status === "todo" && !!x.routing));
         const live = t && t.owner === "agent" && t.status !== "done" && t.status !== "dropped";
         if (live && (t.session === session || (t.router === session && t.status === "todo" && t.routing))) {
           setPeek(null);
@@ -111,10 +112,15 @@ export default function BoardPage() {
       <header className="flex items-center justify-between gap-3 border-b px-4 py-2.5">
         <h1 className="flex items-center gap-2 text-[14px] font-medium">
           <ListTodo className="size-4 text-muted-foreground" />
-          任务
+          Superagent
         </h1>
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" aria-label="看板设置" title="看板设置：流程、定时任务" onClick={() => setSettings("flow")}>
+          <MainButton onOpen={(id) => (setOpen(""), setPeek({ session: id }))} />
+          <Button variant="ghost" size="sm" title="外面来的每条消息去了哪：交给了哪个任务、为什么没接" onClick={() => setSettings("log")}>
+            <Inbox className="size-4" />
+            去向
+          </Button>
+          <Button variant="ghost" size="icon" aria-label="设置" title="设置：流程、触发器、定时任务" onClick={() => setSettings("flow")}>
             <Settings className="size-4" />
           </Button>
           <Button onClick={() => setCreating(true)}>
@@ -188,8 +194,32 @@ export default function BoardPage() {
         />
       )}
       {creating && <NewTask onClose={() => setCreating(false)} act={act} />}
-      {settings && <SettingsSheet tab={settings} onTab={setSettings} onClose={() => setSettings(null)} />}
+      {settings && <SettingsSheet tab={settings} onTab={setSettings} onClose={() => setSettings(null)} onTask={(id) => (setSettings(null), setOpen(id))} />}
     </div>
+  );
+}
+
+/**
+ * The Superagent's main session (local/_main.ts): the one conversation every task and outside message goes through
+ * to be judged and dispatched. A button, not a column: a healthy state takes no space; it shows what it's doing
+ * (deciding, asking the user) and opens its chat, to see how it decided or to tell it something.
+ */
+function MainButton({ onOpen }: { onOpen: (id: string) => void }) {
+  const [m, setM] = useState<{ id: string; status: string; waiting?: string } | null>(null);
+  useEffect(() => {
+    const load = () => run<{ main: { id: string; status: string; waiting?: string } | null }>("superagent.log", { limit: 1 }).then((r) => setM(r.main), () => {});
+    load();
+    const t = setInterval(() => document.visibilityState === "visible" && load(), 10_000);
+    return () => clearInterval(t);
+  }, []);
+  if (!m || m.status === "gone") return null;
+  const label = m.status === "running" ? "在判断" : m.status === "waiting" ? "等你回答" : m.status === "error" ? "出错了" : "空闲";
+  return (
+    <Button variant="ghost" size="sm" title={`Superagent 的调度会话（${label}）：它怎么判断、派给谁，都在这里`} onClick={() => onOpen(m.id)}>
+      <span className={clsx("size-1.5 rounded-full", m.status === "running" ? "bg-ok" : m.status === "waiting" || m.status === "error" ? "bg-warn" : "bg-muted-foreground/40")} />
+      调度
+      {m.status !== "idle" && <span className="text-[11px] text-muted-foreground">{label}</span>}
+    </Button>
   );
 }
 
@@ -399,7 +429,7 @@ function liveTone(t: Task) {
 
 function liveText(t: Task) {
   const l = t.live;
-  if (!l) return t.status === "todo" ? (t.routing ? "助手在挑仓库" : "还没派出去") : t.session ? "会话已关闭" : "";
+  if (!l) return t.status === "todo" ? (t.routing ? "Superagent 在派" : "还没派出去") : t.session ? "会话已关闭" : "";
   if (l.status === "running") return `在跑 · ${since(l.turnStartedAt)}`;
   if (l.status === "waiting") return `等审批 / 回答 · ${since(l.waitingSince)}`;
   if (l.status === "error") return `出错：${l.error ?? ""}`;

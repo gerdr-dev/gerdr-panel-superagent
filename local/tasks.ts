@@ -2,7 +2,7 @@ import { workflow } from "./_config";
 import { blockersDone, find, load, newTask, note, update, type Store, type Task } from "./_store";
 import { applyBlock } from "./_apply";
 import { allAgents, mentionsIn } from "./_agents";
-import { fileWith } from "./_vars";
+import { isMain, routeTask, sweep } from "./_main";
 
 export type { Task };
 
@@ -76,6 +76,7 @@ export async function list(input: unknown, ctx: Ctx) {
     return s;
   });
   await closeRouters(ctx, live);
+  sweep(ctx);
   return {
     tasks: s.tasks.map((t) => {
       const sess = t.session ? live[t.session] : null;
@@ -349,69 +350,13 @@ export async function drop(input: { id: string; reason?: string }, ctx: Ctx) {
 }
 
 /**
- * Picks the repository / agent / model for a task the user dispatched without a repository: a one-off conversation in
- * this Work directory, closed once the task is out (list → closeRouters). Not the Work agent's own chat: the user
- * follows the board, and each of these grew that chat by a turn they never read.
- *
- * Speed is the point: everything it decides by is in its first message (the repositories and how the user picks
- * them, the agents and what each is for, the model rules, who was @-mentioned), and one command (tasks.dispatch)
- * sends the task out, split into parallel parts if need be. It used to read README / skills / code first: three
- * rounds of tools, about 10 of its 22 seconds.
+ * No repository given: the Superagent's main session picks one (and the agent, the model, a split into parallel
+ * parts) and sends it out with superagent.decide. The prompt is saved first, so a failed hand-off leaves a plain
+ * todo to dispatch again.
  */
 async function route(id: string, prompt: string, ctx: Ctx) {
-  // Marked as routing only once the conversation started: a failed start leaves it a plain todo to dispatch again
-  const t = update(ctx, (s) => Object.assign(find(s, id), { prompt, updatedAt: Date.now() }));
-  const r = workflow(ctx).router;
-  const agents = await allAgents(ctx);
-  const named = (id: string) => {
-    const a = agents.find((x) => x.id === id);
-    return a && a.name !== a.id ? `${a.name}（${a.id}）` : id;
-  };
-  const agentLines = agents.map((a) => {
-    const about = a.prompt ? `：${oneLine(a.prompt, 160)}` : "";
-    return `- ${a.id}（${a.name}${a.base ? `，基于 ${a.base}` : ""}）${about}`;
-  });
-  const repoText = fileWith(ctx, ["仓库", "repos"]) || `（用户没写仓库列表）最近用过的目录：\n${repos(null, ctx).map((x) => `- ${x.path}`).join("\n")}`;
-  const modelText = fileWith(ctx, ["派活 agent", "干活 agent", "router agent", "worker agent"]);
-  const mentions = t.mentions ?? [];
-  const who = mentions.length
-    ? `用户 @ 了：${mentions.map(named).join("、")}。他点名要这些 agent 做：` +
-      (mentions.length > 1 ? `通常每个 agent 一份、并行；能合成一份的也可以只派给其中一个。\n` : `就派给它。\n`)
-    : t.agent || t.model
-      ? `用户指定了 ${[t.agent && `agent「${t.agent}」`, t.model && `模型「${t.model}」`].filter(Boolean).join("、")}，照用。\n`
-      : "";
-  const ex = JSON.stringify({ id: t.id, parts: [{ repo: "/绝对路径" }] });
-  const sess = await ctx.sessions.start({
-    cwd: ctx.workspace.dir,
-    agent: r.agent || undefined,
-    model: r.model || undefined,
-    effort: r.effort || undefined,
-    title: `派活：${t.id}`,
-    prompt: [
-      `看板上新派了任务 ${t.id}「${t.title}」。你只负责把它派出去：派完就结束，不用跟用户汇报（用户看看板）。`,
-      `派活要的信息下面都给了，**不要再去读 README、skill 或看板代码**，直接用一条命令派出。只有凭这些真定不了仓库时，才去候选仓库里搜一下；还定不了，用你自带的提问工具问用户。`,
-      `## 任务\n${prompt}` +
-        (t.attachments?.length ? `\n\n附件（派出时自动带给 worker）：\n${t.attachments.map((a) => `- ${a.name}：${a.path}`).join("\n")}` : ""),
-      who.trim(),
-      `## 可选的 agent\n${agentLines.join("\n")}`,
-      `## 仓库（用户自己写的）\n${repoText}`,
-      modelText && `## agent 和模型（用户自己写的）\n${modelText}`,
-      `## 派出：一条命令\n` +
-        `gerdr work run tasks.dispatch '${ex}'\n\n` +
-        `- parts 每项一份活：repo 必填；agent、model、effort 不写就用上面的默认，简单的活可以给便宜的模型；worktree 默认 false。\n` +
-        `- 只有一份：就是这个任务本身，不用写 prompt。\n` +
-        `- 拆成几份并行（用户 @ 了几个 agent，或者活明显能分开做）：每份写 title（十几个字）和 prompt（这一份做什么、和别的份怎么配合）；同一个仓库有两份以上时都写 "worktree": true。\n` +
-        `- 标题是从任务内容第一行截的，不够好就在顶层加 "title"。`,
-    ]
-      .filter(Boolean)
-      .join("\n\n"),
-  });
-  return update(ctx, (s) => Object.assign(find(s, id), { routing: Date.now(), router: sess.id }));
-}
-
-function oneLine(text: string, max: number) {
-  const t = text.replace(/\s+/g, " ").trim();
-  return [...t].length > max ? [...t].slice(0, max).join("") + "…" : t;
+  update(ctx, (s) => Object.assign(find(s, id), { prompt, updatedAt: Date.now() }));
+  return routeTask(ctx, id);
 }
 
 type Part = { repo: string; agent?: string; model?: string; effort?: string; worktree?: boolean; title?: string; prompt?: string };
@@ -490,12 +435,15 @@ export function tree(input: { id: string }, ctx: Ctx) {
   const kids = new Map<string, string[]>();
   for (const x of all) if (x.parent) kids.set(x.parent, [...(kids.get(x.parent) ?? []), x.id]);
   const workers = new Set(t.sessions ?? (t.session ? [t.session] : []));
+  const mainRoot = isMain(ctx, t.router);
   const seen = new Set<string>();
   const node = (id: string, depth: number): TreeNode | null => {
     if (seen.has(id) || depth > 12) return null;
     seen.add(id);
     const x = byId.get(id);
+    // The Superagent's main session dispatches every task: under it, only this task's own workers
     const children = (kids.get(id) ?? [])
+      .filter((k) => id !== t.router || !mainRoot || workers.has(k))
       .map((k) => node(k, depth + 1))
       .filter((n): n is TreeNode => !!n)
       .sort((a, b) => (byId.get(a.id)?.createdAt ?? 0) - (byId.get(b.id)?.createdAt ?? 0));
@@ -527,6 +475,7 @@ async function closeRouters(ctx: Ctx, live: Record<string, any>) {
     const out: string[] = [];
     for (const t of s.tasks) {
       if (!t.router || t.routerClosed || (t.status === "todo" && t.routing)) continue; // still being routed
+      if (isMain(ctx, t.router)) continue; // the Superagent's main session: it stays for the next one
       const r = live[t.router] ?? ctx.sessions.get(t.router);
       if (r && r.status !== "idle" && r.status !== "error") continue; // still finishing its turn
       out.push(t.router);
