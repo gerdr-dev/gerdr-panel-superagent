@@ -112,15 +112,28 @@ export function wait_for(input: { what: string; conversation?: string; recheck?:
   };
 }
 
+export function mrText(d: NonNullable<Task["delivery"]>) {
+  const at = (ms: number) => new Date(ms).toTimeString().slice(0, 5);
+  return `${d.detail ?? "还没查过"}${d.checked ? `（${at(d.checked)} 查的）` : ""}。每 5 分钟查一次；review 意见、挂掉的流水线会叫醒它，能合就自动合`;
+}
+
 function wakeText(w: NonNullable<Task["waiting"]>) {
   const at = (ms: number) => new Date(ms).toTimeString().slice(0, 5);
   return [w.where && `${w.where} 一回复就叫醒它`, w.recheckAt && `${at(w.recheckAt)} 回来看一次`].filter(Boolean).join("；");
 }
 
-/** For the chat's wait card: is this wait (task + since) still on, and if not, how it ended. { id, since } */
-export function status(input: { id: string; since: number }, ctx: Ctx) {
+/**
+ * For the chat's wait card: is this wait (task + since) still on, and if not, how it ended. { id, since, kind? } —
+ * kind "mr": the MR it handed over (delivering) rather than a wait_for.
+ */
+export function status(input: { id: string; since: number; kind?: string }, ctx: Ctx) {
   const t = load(ctx).store.tasks.find((x) => x.id === input?.id);
   if (!t) return { state: "gone" };
+  if (input.kind === "mr") {
+    const d = t.delivery;
+    if (t.status === "delivering" && d?.since === input.since) return { state: "waiting", body: mrText(d) };
+    return { state: "ended", how: t.status === "done" ? "合并了，任务完成" : t.status === "dropped" ? "任务放弃了" : "不再等这个 MR", at: t.doneAt };
+  }
   if (t.waiting?.since === input.since) return { state: "waiting", body: wakeText(t.waiting), recheckAt: t.waiting.recheckAt };
   if (t.waitEnd?.since === input.since) return { state: "ended", how: t.waitEnd.how, at: t.waitEnd.at };
   // A later wait replaced it, or the task finished / was reported on since

@@ -84,20 +84,21 @@ type Wait = { state: "waiting" | "ended" | "gone"; body?: string; how?: string; 
  * it waits for and what will wake it, with a pulse; once over, what woke it. The board is asked every 20s.
  */
 function TaskWait({ card }: CardProps) {
-  const c = card as { project?: string; task?: string; since?: number; title?: string; body?: string };
+  // kind "mr": an MR handed to the watcher (task_update delivering); else a wait_for
+  const c = card as { project?: string; task?: string; since?: number; title?: string; body?: string; kind?: string; url?: string };
   const [st, setSt] = useState<Wait>();
   const [, tick] = useState(0);
   useEffect(() => {
     if (!c.project || !c.task || !c.since) return;
     let dead = false;
-    const get = () => run<Wait>("waits.status", { id: c.task, since: c.since }, { project: c.project }).then((v) => !dead && setSt(v), () => {});
+    const get = () => run<Wait>("waits.status", { id: c.task, since: c.since, kind: c.kind }, { project: c.project }).then((v) => !dead && setSt(v), () => {});
     void get();
     const timer = setInterval(() => (get(), tick((n) => n + 1)), 20000);
     return () => {
       dead = true;
       clearInterval(timer);
     };
-  }, [c.project, c.task, c.since]);
+  }, [c.project, c.task, c.since, c.kind]);
   const on = !st || st.state === "waiting";
   const mins = c.since ? Math.max(0, Math.round((Date.now() - c.since) / 60000)) : 0;
   const waited = mins < 1 ? "刚开始" : mins < 60 ? `等了 ${mins} 分钟` : `等了 ${Math.floor(mins / 60)} 小时 ${mins % 60} 分`;
@@ -119,7 +120,15 @@ function TaskWait({ card }: CardProps) {
         <span>在等 · {c.task}</span>
         <span className="ml-auto shrink-0">{waited}</span>
       </div>
-      <p className="text-[13px] font-medium">{c.title}</p>
+      <p className="text-[13px] font-medium">
+        {c.url ? (
+          <a href={c.url} target="_blank" rel="noreferrer" className="hover:underline">
+            {c.title}
+          </a>
+        ) : (
+          c.title
+        )}
+      </p>
       {(st?.body ?? c.body) && (
         <p className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
           {st?.body?.includes("回来看") || c.body?.includes("回来看") ? <AlarmClock className="size-3.5 shrink-0" /> : <Hourglass className="size-3.5 shrink-0" />}

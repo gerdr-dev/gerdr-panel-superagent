@@ -36,6 +36,8 @@ export type Task = {
   steps?: string;
   handBack?: { kind: "none" | "value" | "secret" | "choice" | "questions"; name?: string; label?: string; options?: string[] };
   /** handBack "questions": several decisions / values asked at once, each answered on its own (local/_store.ts). */
+  /** Everything it waits on, of every kind (local/tasks.ts waitsOf): the 在等 view. */
+  waits?: Wait[];
   /** Its worker ended its turn waiting on someone / something outside (wait_for, local/waits.ts): still 进行中. */
   waiting?: { what: string; since: number; source?: string; key?: string; recheckAt?: number };
   /** Its worker stopped with nothing to wait on (tasks.ts list): under 等你, with what it last said. */
@@ -140,3 +142,14 @@ export function waitedSince(t: Task) {
 export function day(ms: number) {
   return new Date(ms).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric", weekday: "short" });
 }
+
+export type Wait = {
+  kind: "reply" | "time" | "mr" | "session" | "you";
+  what: string;
+  wake?: string;
+  since?: number;
+  url?: string;
+  session?: string;
+  item?: string;
+  user?: boolean;
+};

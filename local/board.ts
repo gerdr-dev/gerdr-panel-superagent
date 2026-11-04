@@ -6,6 +6,7 @@
 import { applyBlock } from "./_apply";
 import { find, load, note, update, type Store, type Task } from "./_store";
 import { handBack } from "./_main";
+import { mrText } from "./waits";
 
 const STEP = {
   type: "object",
@@ -90,7 +91,22 @@ export function task_update(input: { state: string; summary?: string; links?: { 
     // reminder with "still working" and stops would be reminded forever (tasks.ts silentStop)
     Object.assign(t, { viaTools: true, synced: undefined, reportedAt: Date.now(), updatedAt: Date.now() });
     if (state) Object.assign(t, { nudges: 0, waiting: undefined });
-    return { id: t.id, status: t.status, column: t.question ? "等你" : t.status };
+    // Handed to the MR watcher: the wait shows in the chat as a card (ui/src/cards.tsx "task-wait"), like wait_for's
+    const d = input.state === "delivering" && t.status === "delivering" ? t.delivery : undefined;
+    const gerdrCard = d && {
+      type: "task-wait",
+      ref: `${t.id}:mr:${d.since}`,
+      project: ctx.workspace.project,
+      task: t.id,
+      since: d.since,
+      kind: "mr",
+      kicker: `在等 · ${t.id}`,
+      title: `MR !${d.iid} 合并`,
+      body: mrText(d),
+      url: d.url,
+      tone: "info",
+    };
+    return { id: t.id, status: t.status, column: t.question ? "等你" : t.status, ...(gerdrCard ? { gerdrCard } : {}) };
   });
 }
 

@@ -126,6 +126,8 @@ export async function list(input: unknown, ctx: Ctx) {
         live: sess ? { status: sess.status, waiting: sess.waiting, waitingSince: sess.waitingSince, turnStartedAt: sess.turnStartedAt, updatedAt: sess.updatedAt, error: sess.error, title: sess.title } : null,
         column: column(s, t, sess, kids),
         ready: blockersDone(s, t),
+        // Everything it waits on, one list (the board's 在等 view; the card and the drawer show the same)
+        waits: waitsOf(s, t, kids),
         // Stopped with nothing to wait on (shown under 等你): what it last said, for the card
         stopped: halted || undefined,
         said: said ? [...said].slice(0, 200).join("") + ([...said].length > 200 ? "…" : "") : undefined,
@@ -192,6 +194,62 @@ function stopped(s: Store, t: Task, sess: any, kids: Session[] = []) {
   if (kids.length) return false;
   if (t.waiting) return false; // wait_for: a reply or a time will wake it (waits.ts)
   return blockersDone(s, t);
+}
+
+export type Wait = {
+  /** reply: a person in a conversation it follows; time: a time to look again; mr: an MR to merge; session: a session
+   * it handed work to; you: a step / question of the user's */
+  kind: "reply" | "time" | "mr" | "session" | "you";
+  what: string;
+  /** What ends it / wakes the worker */
+  wake?: string;
+  since?: number;
+  url?: string;
+  /** A session to open (kind session), a board item (kind you) */
+  session?: string;
+  item?: string;
+  /** It waits on the user now */
+  user?: boolean;
+};
+
+/**
+ * Everything a live task waits on, of every kind, in one list: what the user reads to know nothing is forgotten —
+ * every wait says what it waits for and what will end it (2026-11-04: waits were each drawn their own way, an MR's only
+ * in the drawer's header, a wait_for's nowhere in the chat).
+ */
+function waitsOf(s: Store, t: Task, kids: Session[] = []): Wait[] | undefined {
+  if (t.status === "done" || t.status === "dropped" || t.owner !== "agent") return undefined;
+  const out: Wait[] = [];
+  const hhmm = (ms: number) => new Date(ms).toTimeString().slice(0, 5);
+  const w = t.waiting;
+  if (w && t.status === "running") {
+    if (w.key) out.push({ kind: "reply", what: w.what, wake: `${w.where ?? `${w.source} ${w.key}`} 一回复就叫醒它`, since: w.since });
+    if (w.recheckAt) out.push({ kind: "time", what: w.what, wake: `${hhmm(w.recheckAt)} 回来看`, since: w.since });
+  }
+  const d = t.delivery;
+  if (t.status === "delivering" && d)
+    out.push({
+      kind: "mr",
+      what: `MR !${d.iid} 合并：${d.detail ?? "还没查过"}`,
+      wake: `每 5 分钟查一次${d.checked ? `（上次 ${hhmm(d.checked)}）` : ""}；review 意见、挂掉的流水线叫醒它，能合就自动合`,
+      since: d.since,
+      url: d.url,
+    });
+  for (const k of kids as any[])
+    out.push({
+      kind: "session",
+      what: `它派出的「${k.title || k.id}」${k.status === "waiting" ? `在等：${k.waiting ?? "批准或回答"}` : "在跑"}`,
+      wake: "做完会回报给它",
+      since: k.turnStartedAt ?? k.updatedAt,
+      session: k.id,
+      user: k.status === "waiting" && (k.waitingKind !== "ask" || askLeft(k, null)),
+    });
+  for (const id of t.blockedBy ?? []) {
+    const h = s.tasks.find((x) => x.id === id);
+    if (!h || h.status === "done" || h.status === "dropped") continue;
+    out.push({ kind: "you", what: `${h.id} ${h.title}`, wake: "你答了 / 做完就叫醒它", since: h.createdAt, item: h.id, user: h.owner === "human" });
+  }
+  return out.length ? out : undefined;
 }
 
 /** A helper's question its worker didn't take: it has stopped since the question came, or two minutes went by. */
