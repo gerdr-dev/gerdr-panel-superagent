@@ -51,6 +51,9 @@ export async function list(input: unknown, ctx: Ctx) {
   const { store } = load(ctx);
   // Read sessions outside the write: ctx.sessions.get is cheap, but keep the locked part small
   for (const t of store.tasks) if (t.session && t.status !== "done" && t.status !== "dropped") live[t.session] = ctx.sessions.get(t.session);
+  // Sessions the workers handed work to (reportTo / parent / a task tag), here or on another computer: a worker
+  // waiting on one of them is waiting, not stopped
+  const all = ctx.sessions.list() as (Session & { parent?: string; reportTo?: string })[];
   const nudge: { session: string; id: string }[] = [];
   const s = update(ctx, (s) => {
     nudge.length = 0; // update retries this function on a write race: decide afresh each time
@@ -73,7 +76,7 @@ export async function list(input: unknown, ctx: Ctx) {
       if (b && sess.byPerson && b.state === "review" && t.status === "running") applyBlock(s, t, { ...b, state: undefined });
       else if (b) applyBlock(s, t, b);
       else if (t.status === "running" && sess.status === "idle" && !t.viaTools) t.question = "Worker 停下了，但没在看板上汇报进展：去对话里看看它说了什么，让它接着做，或者直接「标为完成」";
-      else if (t.status === "running" && sess.status === "idle" && silentStop(s, t, sess, prevStop)) {
+      else if (t.status === "running" && sess.status === "idle" && !helpers(t, all).length && silentStop(s, t, sess, prevStop)) {
         // It stopped without a word on the board — typically a question written only in its reply (t3 asking which
         // style, on 2026-11-04): the task sat in 进行中 with nothing running. Reminded once to put it on the board
         // (a card, a status); if it stops silent again, the user is told, with what it last said.
@@ -108,12 +111,15 @@ export async function list(input: unknown, ctx: Ctx) {
   return {
     tasks: s.tasks.map((t) => {
       const sess = t.session ? live[t.session] : null;
-      const halted = stopped(s, t, sess);
+      const kids = helpers(t, all);
+      const halted = stopped(s, t, sess, kids);
       const said = halted ? String(sess?.reply ?? "").replace(/\s+/g, " ").trim() : "";
       return {
         ...t,
+        // What its worker handed out and waits on (shown as 等 … on the card; one waiting for the user puts it under 等你)
+        helpers: kids.length ? kids.map((k) => ({ id: k.id, title: k.title, status: k.status, waiting: k.waiting })) : undefined,
         live: sess ? { status: sess.status, waiting: sess.waiting, waitingSince: sess.waitingSince, turnStartedAt: sess.turnStartedAt, updatedAt: sess.updatedAt, error: sess.error, title: sess.title } : null,
-        column: column(s, t, sess),
+        column: column(s, t, sess, kids),
         ready: blockersDone(s, t),
         // Stopped with nothing to wait on (shown under 等你): what it last said, for the card
         stopped: halted || undefined,
@@ -152,23 +158,44 @@ function dropOrphans(s: Store) {
   }
 }
 
-function column(s: Store, t: Task, sess: any): "you" | "review" | "active" | "done" {
+function column(s: Store, t: Task, sess: any, kids: Session[] = []): "you" | "review" | "active" | "done" {
   if (t.status === "done" || t.status === "dropped") return "done";
   if (t.status === "review") return "review";
   // delivering: running as far as the user is concerned, until the watcher merges it or says it's stuck (question)
   if (t.owner === "human") return blockersDone(s, t) ? "you" : "active";
   if (t.question || sess?.status === "waiting" || sess?.status === "error") return "you";
+  // A session it handed work to asks the user something (an approval): the user's to act on
+  if (t.status === "running" && kids.some((k) => k.status === "waiting")) return "you";
   // 进行中 holds only what is running or explicitly waiting (an MR to merge, a step the user owes): a worker that
   // stopped with nothing to wait on is the user's to look at, at once — never a card in 进行中 with nothing going on
-  if (stopped(s, t, sess)) return "you";
+  if (stopped(s, t, sess, kids)) return "you";
   return "active";
 }
 
-/** Its worker isn't running, and the task waits on nothing (not delivering, no step / question of the user's open). */
-function stopped(s: Store, t: Task, sess: any) {
+/**
+ * Its worker isn't running, and the task waits on nothing: not delivering, no step / question of the user's open, no
+ * session it handed work to still going (t3 waiting on a music session on another computer it started, 2026-11-04).
+ */
+function stopped(s: Store, t: Task, sess: any, kids: Session[] = []) {
   if (t.owner !== "agent" || t.status !== "running") return false;
   if (sess && (sess.status === "running" || sess.status === "starting")) return false;
+  if (kids.length) return false;
   return blockersDone(s, t);
+}
+
+/**
+ * Sessions a task's workers handed work to that are still going (running, starting, or waiting for the user): the
+ * ones reporting back to a worker, started by one, or carrying the task's tag — here or on another computer.
+ */
+function helpers(t: Task, all: (Session & { parent?: string; reportTo?: string })[]) {
+  if (t.owner !== "agent") return [];
+  const mine = new Set([t.session, ...(t.sessions ?? [])].filter(Boolean) as string[]);
+  return all.filter(
+    (x) =>
+      !mine.has(x.id) &&
+      (x.status === "running" || x.status === "starting" || x.status === "waiting") &&
+      ((x.reportTo && mine.has(x.reportTo)) || (x.parent && mine.has(x.parent)) || x.tags?.task === t.id),
+  );
 }
 
 function firstLine(text?: string) {

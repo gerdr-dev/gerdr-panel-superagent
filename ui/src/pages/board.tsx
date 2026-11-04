@@ -329,6 +329,8 @@ function chatPanel(t: Task, byId: Record<string, Task>): { label: string; action
           ? `它在下面等你${t.live.waiting ? `：${t.live.waiting}` : "审批或回答"}`
           : t.live?.status === "error"
             ? `出错了：${t.live.error ?? "看看最后的报错"}`
+            : t.helpers?.some((k) => k.status === "waiting")
+              ? `它派出去的「${t.helpers.find((k) => k.status === "waiting")!.title}」在等你：${t.helpers.find((k) => k.status === "waiting")!.waiting ?? "批准或回答"}（点卡片上的「等 …」去处理）`
             : t.question
               ? `它问你：${t.question}`
               : t.stopped
@@ -397,7 +399,7 @@ function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, T
           {(t.questions ?? []).filter((q) => !q.dropped).length > 1 && ` · 共 ${(t.questions ?? []).filter((q) => !q.dropped).length} 个`}
         </p>
       )}
-      {(t.repo || live || blockers.length > 0) && (
+      {(t.repo || live || blockers.length > 0 || !!t.helpers?.length) && (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
           {t.repo && <span>{t.repo.split("/").pop()}</span>}
           {(t.agent || t.model) && <span>· {[t.agent, t.model].filter(Boolean).join(" / ")}</span>}
@@ -420,6 +422,21 @@ function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, T
           {blockers.map((b) => (
             <span key={b} className="rounded-sm bg-warn/10 px-1 text-warn">
               等 {b}
+            </span>
+          ))}
+          {t.helpers?.map((k) => (
+            // A session its worker handed work to and waits on: a click opens it (a span: the card is a <button>)
+            <span
+              key={k.id}
+              role="link"
+              title={k.status === "waiting" ? `在等你：${k.waiting ?? "批准或回答"}` : "它派出去的会话，还在跑"}
+              onClick={(e) => {
+                e.stopPropagation();
+                openChat(k.id, t.id);
+              }}
+              className={clsx("max-w-full truncate rounded-sm px-1 hover:underline", k.status === "waiting" ? "bg-warn/10 text-warn" : "bg-brand/10 text-brand")}
+            >
+              等 {k.title || k.id}
             </span>
           ))}
         </div>
@@ -530,6 +547,8 @@ function liveText(t: Task) {
   if (l.status === "running") return `在跑 · ${since(l.turnStartedAt)}`;
   if (l.status === "waiting") return `等审批 / 回答 · ${since(l.waitingSince)}`;
   if (l.status === "error") return `出错：${l.error ?? ""}`;
+  // Its turn is over but a session it handed work to is still going: waiting on that, not stopped
+  if (t.helpers?.length) return `等它派出的会话 · ${since(l.updatedAt)}前`;
   return `停下 · ${since(l.updatedAt)}前`;
 }
 

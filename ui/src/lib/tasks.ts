@@ -34,6 +34,8 @@ export type Task = {
   /** handBack "questions": several decisions / values asked at once, each answered on its own (local/_store.ts). */
   /** Its worker stopped with nothing to wait on (tasks.ts list): under 等你, with what it last said. */
   stopped?: boolean;
+  /** Sessions its worker handed work to, still going: it waits on them. */
+  helpers?: { id: string; title: string; status: string; waiting?: string }[];
   said?: string;
   nudges?: number;
   questions?: { id: string; title: string; kind: "choice" | "value"; options?: string[]; label?: string; steps?: string; answer?: string; dropped?: string }[];
