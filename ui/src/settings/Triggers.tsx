@@ -1,0 +1,118 @@
+import { Loader2, Zap } from "lucide-react";
+import clsx from "clsx";
+import { useEffect, useState } from "react";
+import { Button } from "../components/Button";
+import { project, run } from "../lib/gerdr";
+import { since } from "../lib/tasks";
+
+// 触发器: which events become tasks. The choices are whatever Gerdr can deliver now (ctx.events.catalog: what the
+// installed add-ons emit, what came lately) — nothing here names Slack or Feishu, so someone without them sees
+// neither. Turning one on writes a Gerdr trigger file (triggers/inbox-*.json, local/inbox.ts); its runs come from
+// /api/work/triggers.
+
+type Source = { on: string; title?: string; description?: string; addon?: string; canReply?: boolean; seen?: number; enabled: boolean; key?: string };
+type TriggerInfo = { id: string; on: string; runs: number; last?: { startedAt: string; ok: boolean; error?: string } };
+
+export default function TriggersPage() {
+  const [list, setList] = useState<Source[] | null>(null);
+  const [runs, setRuns] = useState<Record<string, TriggerInfo>>({});
+  const [err, setErr] = useState("");
+  const load = () => {
+    run<Source[]>("inbox.sources").then(
+      (l) => (setList(l), setErr("")),
+      (e) => setErr(String(e.message || e)),
+    );
+    fetch(`/api/work/triggers?project=${encodeURIComponent(project)}`, { credentials: "same-origin", headers: { "X-Gerdr": "1" } })
+      .then((r) => (r.ok ? r.json() : { list: [] }))
+      .then((d: { list: TriggerInfo[] }) => setRuns(Object.fromEntries((d.list ?? []).map((t) => [t.on, t]))), () => {});
+  };
+  useEffect(() => {
+    load();
+    const t = setInterval(() => document.visibilityState === "visible" && load(), 15_000);
+    return () => clearInterval(t);
+  }, []);
+
+  return (
+    <div className="mx-auto max-w-4xl space-y-4 p-6 max-md:p-3">
+      <header>
+        <h1 className="text-[22px] font-semibold tracking-tight">触发器</h1>
+        <p className="mt-1 text-[13px] text-muted-foreground">
+          外面发生的事（私信、@ 你、告警……）自动变成看板上的任务，交给派活的对话安排。能选什么取决于装了哪些插件、有哪些事件来过；
+          来源支持回复的，建好任务、有了结果都会回到原来的对话里说一声。
+        </p>
+      </header>
+      {err && <p role="alert" className="text-[13px] text-bad">{err}</p>}
+      {!list && !err && <p className="p-8 text-center text-[13px] text-muted-foreground">正在加载…</p>}
+      {list?.length === 0 && (
+        <p className="rounded-xl border border-dashed p-6 text-center text-[13px] text-muted-foreground">
+          现在还没有可选的事件。装一个会发事件的插件（比如 Slack、飞书），或者让右边的助手写一个定时任务去轮询你关心的东西。
+        </p>
+      )}
+      <div className="space-y-3">
+        {list?.map((s) => (
+          <Row key={s.on} s={s} info={runs[s.on]} onSaved={load} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Row({ s, info, onSaved }: { s: Source; info?: TriggerInfo; onSaved: () => void }) {
+  const [key, setKey] = useState(s.key ?? "");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const save = async (enabled: boolean) => {
+    setBusy(true);
+    setErr("");
+    try {
+      await run("inbox.setSource", { on: s.on, enabled, key, title: s.title });
+      onSaved();
+    } catch (e: any) {
+      setErr(String(e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const last = info?.last;
+  return (
+    <article className="space-y-2 rounded-xl border bg-card p-4 max-md:p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="flex items-center gap-2 text-[14px] font-medium">
+            <Zap className={clsx("size-3.5", s.enabled ? "text-brand" : "text-muted-foreground")} />
+            {s.title || s.on}
+            {s.canReply && <span className="rounded-sm bg-muted px-1.5 text-[11px] font-normal text-muted-foreground">能回复</span>}
+          </h2>
+          <p className="mt-0.5 text-[12px] text-muted-foreground">
+            <span className="font-mono">{s.on}</span>
+            {s.addon && <> · 插件 {s.addon}</>}
+            {s.seen ? <> · 最近一条 {since(s.seen)}前</> : null}
+          </p>
+          {s.description && <p className="mt-1 text-[12px] text-muted-foreground">{s.description}</p>}
+        </div>
+        <label className="flex shrink-0 cursor-pointer items-center gap-2 text-[13px]">
+          {busy && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
+          <input type="checkbox" className="size-4 accent-[var(--brand)]" checked={s.enabled} disabled={busy} onChange={(e) => save(e.target.checked)} />
+          收到就建任务
+        </label>
+      </div>
+      {s.enabled && (
+        <div className="flex flex-wrap items-center gap-2 text-[12px]">
+          <span className="text-muted-foreground">只要这些（key，可用 *，空 = 全部）</span>
+          <input className="h-7 w-56 rounded-md border bg-background px-2 font-mono text-[12px]" value={key} placeholder="比如某个频道 id" onChange={(e) => setKey(e.target.value)} />
+          {key !== (s.key ?? "") && (
+            <Button disabled={busy} onClick={() => save(true)}>
+              保存
+            </Button>
+          )}
+          {info && (
+            <span className={clsx("ml-auto", last && !last.ok ? "text-bad" : "text-muted-foreground")}>
+              建过 {info.runs} 次{last ? ` · 上次${since(Date.parse(last.startedAt))}前${last.ok ? "" : `失败：${last.error}`}` : ""}
+            </span>
+          )}
+        </div>
+      )}
+      {err && <p className="text-[12px] text-bad">{err}</p>}
+    </article>
+  );
+}

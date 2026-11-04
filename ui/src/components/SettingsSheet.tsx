@@ -1,18 +1,20 @@
-import { ScrollText, Timer, X } from "lucide-react";
+import { ScrollText, Timer, X, Zap } from "lucide-react";
 import clsx from "clsx";
 import { Sheet, SheetContent, SheetTitle } from "./ui/sheet";
 import Flow from "../settings/Flow";
 import Schedules from "../settings/Schedules";
+import Triggers from "../settings/Triggers";
 import { Button } from "./Button";
 
 // The board's settings, in a shadcn Sheet over the board: how the user works (流程: their skill, with its variables) and what runs by
-// itself (定时任务: mrwatch and the rest). Not pages of their own: the panel is the board, these are its settings.
+// itself (定时任务: mrwatch and the rest), and which outside events become tasks (触发器: local/inbox.ts). Not pages of their own: the panel is the board, these are its settings.
 
-export type SettingsTab = "flow" | "schedules";
+export type SettingsTab = "flow" | "schedules" | "triggers";
 
 const TABS: { id: SettingsTab; label: string; icon: typeof Timer }[] = [
   { id: "flow", label: "流程", icon: ScrollText },
   { id: "schedules", label: "定时任务", icon: Timer },
+  { id: "triggers", label: "触发器", icon: Zap },
 ];
 
 export function SettingsSheet({ tab, onTab, onClose }: { tab: SettingsTab; onTab: (t: SettingsTab) => void; onClose: () => void }) {
@@ -36,7 +38,7 @@ export function SettingsSheet({ tab, onTab, onClose }: { tab: SettingsTab; onTab
           <X className="size-4" />
         </Button>
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto">{tab === "flow" ? <Flow /> : <Schedules />}</div>
+      <div className="min-h-0 flex-1 overflow-y-auto">{tab === "flow" ? <Flow /> : tab === "schedules" ? <Schedules /> : <Triggers />}</div>
       </SheetContent>
     </Sheet>
   );

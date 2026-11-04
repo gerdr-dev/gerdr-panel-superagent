@@ -18,6 +18,7 @@ export type Task = {
   model?: string;
   effort?: string;
   mentions?: string[];
+  origin?: { id: string; source: string; kind: string; key?: string; title?: string; url?: string; reply?: unknown };
   from?: string;
   worktree?: boolean;
   session?: string;
