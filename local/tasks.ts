@@ -480,7 +480,7 @@ type TreeNode = { id: string; title: string; agent: string; status: string; role
 /**
  * The conversations behind a task as a tree, any number of levels deep: its router and workers, and every session
  * they started (Gerdr records each session's parent), down to helpers of helpers. `up`: who handed out the task
- * itself (the chain above its router: the Work agent that called tasks.add, …). For the drawer's 来龙去脉.
+ * itself (the chain above its router: the Work agent that called tasks.add, …). For the drawer's 链路.
  */
 export function tree(input: { id: string }, ctx: Ctx) {
   const { store } = load(ctx);
@@ -531,7 +531,7 @@ async function closeRouters(ctx: Ctx, live: Record<string, any>) {
       if (r && r.status !== "idle" && r.status !== "error") continue; // still finishing its turn
       out.push(t.router);
       // Closed, not forgotten: t.router stays, so the task can always be traced back to the conversation that
-      // dispatched it (the drawer's 来龙去脉, tasks.trace) — for tuning the rules, and for a look back.
+      // dispatched it (the drawer's 链路, tasks.trace) — for tuning the rules, and for a look back.
       t.routerClosed = true;
     }
     return out;

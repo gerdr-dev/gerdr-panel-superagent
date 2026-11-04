@@ -26,7 +26,7 @@ export function ChatDrawer({
   onClose,
 }: {
   session: string;
-  /** Above the line and buttons: the board's 来龙去脉 (which conversations this task went through). */
+  /** Above the line and buttons: the board's 链路 (which conversations this task went through). */
   top?: React.ReactNode;
   label?: string;
   actions?: ChatAction[];

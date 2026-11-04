@@ -54,7 +54,7 @@ export default function BoardPage() {
   const routingNow = !!sel && sel.owner === "agent" && sel.status === "todo" && !!sel.routing && !!sel.router;
   const inChat = !!sel && sel.owner === "agent" && ((!!sel.session && sel.status !== "done" && sel.status !== "dropped") || routingNow);
   const primary = sel ? (routingNow ? sel.router : sel.session) : undefined;
-  // Another conversation of the same task picked in its 来龙去脉 (the router, an earlier worker, a helper): shown in the
+  // Another conversation of the same task picked in its 链路 (the router, an earlier worker, a helper): shown in the
   // same drawer; its buttons are the task's live conversation's only
   const [shown, setShown] = useState("");
   useEffect(() => setShown(""), [open]);
@@ -68,7 +68,7 @@ export default function BoardPage() {
           : chatPanel(sel, byId)
       : null;
   // A conversation opened from a panel ("回到 tN 的对话", a finished task's chat): the chat alone, over the panel,
-  // with its task's 来龙去脉 when it has one
+  // with its task's 链路 when it has one
   const [peek, setPeek] = useState<{ session: string; task?: string } | null>(null);
   // Opening a conversation from a task's panel closes the panel: it sat on top and hid the chat (on a phone, all of it)
   openChat = (session: string, task?: string) => {

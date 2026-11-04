@@ -3,7 +3,7 @@ import clsx from "clsx";
 import { useEffect, useState } from "react";
 import { run } from "../lib/gerdr";
 
-// 来龙去脉: where a task came from and every conversation behind it, as a tree of any depth — the event, who handed
+// 链路: where a task came from and every conversation behind it, as a tree of any depth — the event, who handed
 // it out, the router, its workers and whatever sessions they started in turn (Gerdr records each session's parent;
 // local/tasks.ts tree). In the task's drawer, not the Work agent's side: it belongs to the task. Picking a
 // conversation shows it in the same drawer; in the router's, a way to the rules it went by (流程), to tune them.
@@ -80,7 +80,7 @@ export function Trail({
       <button className="flex w-full items-center gap-1.5 py-0.5 text-left text-[12px] text-muted-foreground hover:text-foreground" onClick={() => setOpen(!open)}>
         {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
         <GitFork className="size-3.5" />
-        <span className="font-medium text-foreground">来龙去脉</span>
+        <span className="font-medium text-foreground">链路</span>
         <span className="min-w-0 flex-1 truncate">{summary}</span>
       </button>
       {open && (
