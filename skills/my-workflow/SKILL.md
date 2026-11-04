@@ -12,6 +12,8 @@ description: 用户本人的工作方式：派活怎么挑仓库和模型、代�
 
 | 参考 | 什么时候看 |
 |---|---|
+| [references/board.md](references/board.md) | 你是看板派出去的 worker 时：每次停下怎么汇报、你开的会话来问问题时怎么办 |
+| [references/dispatch.md](references/dispatch.md) | 你是 Superagent 的调度会话时：外面来的消息接不接、怎么派 |
 | [references/routing.md](references/routing.md) | 派活的时候：怎么挑仓库，什么时候换更强或更便宜的模型 |
 | [references/deliver.md](references/deliver.md) | 改完代码、要交付的时候：开 MR 还是直推，做完怎么汇报 |
 | [references/mr.md](references/mr.md) | MR 来了新的 review 意见、流水线挂了、有冲突的时候 |

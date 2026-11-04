@@ -36,7 +36,7 @@ const STEP = {
 export const tools = {
   task_update: {
     description:
-      "Report where your board task stands. Call it when that changes, not every turn. state: working (still at it; just update summary / links), done (finished, nothing for the user to judge), delivering (your change is out and waits on a process: give mr, the MR URL; a watcher then follows it and sends you review comments and failed pipelines), review (the result is for the user to judge: findings, a report). To have the user decide something, don't use this: ask with your own ask-question tool, which shows them a card and puts the task under needs-you until they answer. links are artifacts (MR, docs, pipelines): they're kept, so add new ones only.",
+      "Put where your board task stands on the board. state: working (still at it: summary / links), done (finished, nothing for the user to judge), delivering (your change is out and waits on a merge: give mr, the MR URL; a watcher follows it and sends you review comments and failed pipelines), review (the result is for the user to judge). links are artifacts (MR, docs, pipelines): kept, so add new ones only. When to report: the my-workflow skill, references/board.md.",
     input: {
       type: "object",
       properties: {
@@ -50,7 +50,7 @@ export const tools = {
   },
   ask_human: {
     description:
-      "Put something on the user's board that needs them: a step only they can do (sign in, approve, an account, a secret: give steps), or a decision (give options). They work from the board and may come back to it days later, so after asking, finish your turn with what you could do; don't wait in the chat. You get their answer / 'done' as a message. Decisions and values you ask while earlier ones are still unanswered go in one board item (the user answers them in one sitting): ask each as you find it, and you get all the answers together in one message once every one is answered. Take back ones that became moot with cancel_human. A session you started yourself that asks a question (Gerdr reports it to you) is asking you, not the user: answer what you can with gerdr session send; use ask_human only for what's the user's call, with the options and your recommendation, then send their answer on. (Only when the user is talking with you in this chat right now, a quick question can use your own ask-question tool instead.)",
+      "Put something on the user's board that needs them: a step only they can do (give steps), or a decision (give options). Their answer / 'done' comes to you as a message, maybe days later. Decisions and values asked while earlier ones are unanswered go in one board item: you get all the answers together once every one is answered. cancel_human takes one back. When and how to ask: the my-workflow skill, references/human.md and board.md.",
     input: STEP,
   },
   cancel_human: {

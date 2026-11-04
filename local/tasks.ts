@@ -19,10 +19,8 @@ export type { Task };
 export const WORKER_PROTOCOL = `
 
 ---
-This is task {id} on the user's Superagent board. They follow it there, not in this chat: report through the "work" tools
-(task_update, ask_human, cancel_human), and follow the skills from this panel for how they like things done. When you
-need the user to decide something, put it on the board with ask_human and its options, then end your turn: they may
-answer days later. Every time you stop, the board must say where things stand: a question only in this chat is never seen. Your own ask-question tool only while they're talking with you here.
+This is task {id} on the user's Superagent board: they follow it there, not in this chat. How to work on it (reporting
+with the "work" tools, asking them, sessions you start) is their my-workflow skill, references/board.md: read it first.
 `;
 
 /** The last ```gerdr-task``` block in a reply, parsed; null when there's none or it isn't JSON. */
