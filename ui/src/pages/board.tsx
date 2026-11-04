@@ -956,7 +956,7 @@ function NewTask({ onClose, act }: { onClose: () => void; act: Act }) {
             </button>
           ))}
         </div>
-        {owner === "human" && <input autoFocus className={input} placeholder="标题" value={f.title} onChange={set("title")} />}
+        {owner === "human" && <input autoFocus className={input} placeholder="标题" value={f.title} onChange={set("title")} onKeyDown={(e) => isSubmitEnter(e) && ok && !busy && void submit(false)} />}
         {owner === "agent" ? (
           <>
             <div className="space-y-2" onDrop={attach.onDrop} onDragOver={attach.onDragOver}>
@@ -965,8 +965,9 @@ function NewTask({ onClose, act }: { onClose: () => void; act: Act }) {
                 value={f.prompt}
                 onChange={(prompt) => setF({ ...f, prompt })}
                 onPaste={attach.onPaste}
+                onSubmit={() => ok && !busy && void submit(true)}
                 className={clsx(input, "h-40 resize-y py-2 leading-relaxed")}
-                placeholder="要它做什么：目标、范围、做完的标准（截图可以直接粘贴；输入 @ 点名 agent）"
+                placeholder="要它做什么：目标、范围、做完的标准（截图可以直接粘贴；输入 @ 点名 agent；回车派出，Shift+回车换行）"
               />
               {mentions.length > 0 && (
                 <p className="text-[12px] text-muted-foreground">
@@ -1064,12 +1065,15 @@ function MentionArea({
   value,
   onChange,
   onPaste,
+  onSubmit,
   className,
   placeholder,
 }: {
   agents: AgentInfo[];
   value: string;
   onChange: (v: string) => void;
+  /** Enter (not Shift+Enter, not an input method's): send. With the @ list open, Enter picks from it instead. */
+  onSubmit?: () => void;
   onPaste?: React.ClipboardEventHandler<HTMLTextAreaElement>;
   className?: string;
   placeholder?: string;
@@ -1108,7 +1112,13 @@ function MentionArea({
         onClick={(e) => look(e.currentTarget)}
         onBlur={() => setTimeout(() => setQ(null), 150)}
         onKeyDown={(e) => {
-          if (!found.length) return;
+          if (!found.length) {
+            if (onSubmit && isSubmitEnter(e)) {
+              e.preventDefault();
+              onSubmit();
+            }
+            return;
+          }
           if (e.key === "ArrowDown" || e.key === "ArrowUp") {
             e.preventDefault();
             setHi((h) => (h + (e.key === "ArrowDown" ? 1 : found.length - 1)) % found.length);
