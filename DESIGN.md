@@ -15,7 +15,7 @@
 
 ## 概念
 
-- **任务**（`data/tasks.json`，读写都走 `local/_store.ts`）：
+- **任务**（`user/data/tasks.json`，读写都走 `local/_store.ts`）：
   - **agent 任务**：派给一个 **worker**，也就是看板用 `ctx.sessions.start` 在某个仓库里开的会话。
   - **人工任务**：只有用户本人能做的事。分两种：
     - **步骤**：授权、建账号、交回密钥。
@@ -144,7 +144,7 @@ worker 拿到一组 Work 工具（`local/board.ts`，经 Gerdr 的 `gerdr work m
 | Decision：accept / stop / ignore / unavailable | 接（建任务派出）/ 停 / 不接（带理由，可回一句）/ 没判断成；另加「并进」（attach） |
 | Ticket / Assignment | 任务 / 任务的 worker 会话（`sessions`） |
 | Subscription | 任务的 `threads`：这段对话里的后续直接交给它，不再评估 |
-| Disposition（去向） | `data/superagent.json` 的 `items`，界面「去向」 |
+| Disposition（去向） | `user/data/superagent.json` 的 `items`，界面「去向」 |
 
 - **调度会话只分派、从不等待**：不做技术判断，不读代码（定不了仓库时才看一眼），不 sleep 不轮询，判断完就结束这一轮。
   它一卡住，后面的消息全堵着。忙的时候来的新东西用普通发送（不是立即发送），排到它下一个停顿，一批一起看。
@@ -223,14 +223,27 @@ agent 复盘也要整条链。所以：
 **被否掉的做法：用 Gerdr 内部的组件**（`@gerdr/core/ui`）。面板就跟着 Gerdr 的组件走了，Gerdr 改一次面板变一次，
 想按自己的意思改也改不了。面板是能单独发布、给别人装的东西，界面得自己说了算。
 
+## 个人的东西都在 `user/`
+
+面板是用 git 分享的，一个人用它产生和决定的东西不是：任务、去向记录、打开了哪些触发器（里面有 Slack ID）、
+改过的流程（仓库列表、GitLab 地址、合不合并）。这些全在 `user/`（Gerdr 的约定，它自己忽略自己），
+`_user.ts` 是这边的读写：
+- 数据：`user/data/`。
+- 触发器、定时任务、skill：`user/triggers/`、`user/schedules/`、`user/skills/` 里同一个路径的文件替换共享的那份，
+  Gerdr 按这个读（会话拿到的是合并后的 skill）。「流程」页保存时写你的那份，能「恢复默认」；改定时任务的时间也写你的那份。
+- 共享的 `skills/` 只放稳妥的默认值。
+- **被否掉的做法：每多一种个人文件就加一条忽略规则。** 用户的话：这是打补丁，以后东西多了管不过来。
+- 你改过某个流程文件之后，面板更新了这个文件的默认内容，你不会自动拿到；以后要像 dsh 那样标出「默认内容已更新」。
+
 ## 文件
 
 | 文件 | 内容 |
 |---|---|
 | `local/_store.ts` | 任务数据和读写（带 etag 重试） |
+| `local/_user.ts` | `user/`：个人副本优先的读法、旧 `data/` 的一次性迁移 |
 | `local/_apply.ts` | worker 汇报怎么落到任务上（工具和旧文字块共用） |
 | `local/tasks.ts` | 看板和 Work 助手调用的函数：list / add / start / accept / complete / deliver / redo / drop… |
-| `local/_main.ts` | Superagent 的核心：调度会话、订阅、交回、没判断成、事件的去向记录（`data/superagent.json`） |
+| `local/_main.ts` | Superagent 的核心：调度会话、订阅、交回、没判断成、事件的去向记录（`user/data/superagent.json`） |
 | `local/superagent.ts` | 调度会话的 `decide`，「去向」的 `log` / `retry` |
 | `local/inbox.ts` | 触发器的设置和 `onEvent`（准入 → 订阅 → 评估） |
 | `local/board.ts` | 给 worker 的 Work 工具 |
