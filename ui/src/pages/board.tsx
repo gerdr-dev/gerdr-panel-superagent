@@ -9,7 +9,8 @@ import { askSecret, secretNames } from "../lib/bridge";
 import { ChatDrawer, type ChatAction, type ChatItem } from "../components/ChatDrawer";
 import { Trail } from "../components/Trail";
 import { Linger } from "../lib/linger";
-import { SettingsSheet, type SettingsTab } from "../components/SettingsSheet";
+import { SettingsSheet, TABS, type SettingsTab } from "../components/SettingsSheet";
+import { phoneMenu, usePhoneMenu } from "../lib/phoneMenu";
 import { ago, day, since, type Task, useTasks, waitedSince } from "../lib/tasks";
 import { project, run } from "../lib/gerdr";
 import { onShowSession } from "@gerdr/core";
@@ -80,6 +81,8 @@ export default function BoardPage() {
   const { tasks, error, act } = useTasks();
   const [creating, setCreating] = useState(false);
   const [settings, setSettings] = useState<SettingsTab | null>(null);
+  // On a phone Gerdr's ☰ drawer holds what the header has no room for: the settings sheet's pages, one row each
+  usePhoneMenu(TABS.map((x) => ({ id: x.id, label: x.label, icon: <x.icon className="size-4" />, onSelect: () => setSettings(x.id) })))
   const [open, setOpen] = useState("");
   const [doneLimit, setDoneLimit] = useState(20);
   const byId = Object.fromEntries((tasks ?? []).map((t) => [t.id, t]));
@@ -215,11 +218,11 @@ export default function BoardPage() {
         </div>
         <div className="flex min-w-0 items-center gap-1 max-md:gap-0">
           <MainButton onOpen={(id) => (setOpen(""), setPeek({ session: id }))} />
-          <Button variant="ghost" size="sm" title="外面来的每条消息去了哪：交给了哪个任务、为什么没接" onClick={() => setSettings("log")}>
+          <Button variant="ghost" size="sm" className={clsx(phoneMenu && "max-md:hidden")} title="外面来的每条消息去了哪：交给了哪个任务、为什么没接" onClick={() => setSettings("log")}>
             <Inbox className="size-4" />
             <span className="max-md:hidden">去向</span>
           </Button>
-          <Button variant="ghost" size="icon" aria-label="设置" title="设置、流程、触发器、定时任务" onClick={() => setSettings("settings")}>
+          <Button variant="ghost" size="icon" className={clsx(phoneMenu && "max-md:hidden")} aria-label="设置" title="设置、流程、触发器、定时任务" onClick={() => setSettings("settings")}>
             <Settings className="size-4" />
           </Button>
           <Button onClick={() => setCreating(true)} aria-label="新任务">

@@ -16,7 +16,7 @@ import { Button } from "./Button";
 
 export type SettingsTab = "log" | "settings" | "flow" | "schedules" | "triggers";
 
-const TABS: { id: SettingsTab; label: string; icon: typeof Timer }[] = [
+export const TABS: { id: SettingsTab; label: string; icon: typeof Timer }[] = [
   { id: "log", label: "去向", icon: Inbox },
   { id: "settings", label: "设置", icon: SlidersHorizontal },
   { id: "flow", label: "流程", icon: ScrollText },
