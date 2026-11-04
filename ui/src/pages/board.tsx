@@ -29,6 +29,42 @@ const COLS: { id: Col; title: string; icon: React.ReactNode }[] = [
   { id: "done", title: "已完成", icon: <CheckCircle2 className="size-3.5 text-muted-foreground" /> },
 ];
 
+/** Most important first: what waits on the user, then results to judge, then what's going on. */
+const PHONE_ORDER: Col[] = ["you", "review", "active", "todo", "done"];
+
+/**
+ * The columns as tabs, on a phone only: colour and count on each, the ones with nothing in them dimmed. Sideways
+ * scrolling between columns was awkward on a phone (the user, 2026-11-05).
+ */
+function PhoneTabs({ cols, count, current, onPick }: { cols: typeof COLS; count: (c: Col) => number; current: Col; onPick: (c: Col) => void }) {
+  return (
+    <div role="tablist" className="sticky top-0 z-10 flex gap-1 overflow-x-auto border-b bg-background px-2 py-1.5 md:hidden">
+      {cols.map((c) => {
+        const n = count(c.id);
+        const on = c.id === current;
+        const loud = n > 0 && (c.id === "you" || c.id === "review");
+        return (
+          <button
+            key={c.id}
+            role="tab"
+            aria-selected={on}
+            onClick={() => onPick(c.id)}
+            className={clsx(
+              "flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[13px]",
+              on ? "bg-accent font-medium text-foreground" : n ? "text-foreground" : "text-muted-foreground/60",
+              loud && !on && (c.id === "you" ? "bg-warn/10" : "bg-ok/10"),
+            )}
+          >
+            {c.icon}
+            {c.title}
+            <span className={clsx("tabular-nums text-[11px]", n && c.id === "you" ? "rounded-full bg-warn px-1.5 font-medium text-background" : "text-muted-foreground")}>{n}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 /** The board's column: tasks.ts says you / review / active / done; "active" is split into not started yet and running. */
 function colOf(t: Task): Col {
   if (t.column === "active" && (t.status === "todo" || (t.owner === "human" && !t.ready))) return "todo";
@@ -49,6 +85,11 @@ export default function BoardPage() {
     if (c === "you") return l.sort((a, b) => waitedSince(b) - waitedSince(a));
     return l.sort((a, b) => b.updatedAt - a.updatedAt);
   };
+  // On a phone: one column, by tabs in order of what matters most to the user. It opens on the first of them that has
+  // anything in it (an empty 等你 is good news, not a page to land on), until they pick one themselves.
+  const [phoneTab, setPhoneTab] = useState<Col | null>(null);
+  const phoneCols = PHONE_ORDER.map((id) => COLS.find((c) => c.id === id)!);
+  const phoneCol: Col = phoneTab ?? PHONE_ORDER.find((c) => list(c).length > 0) ?? "you";
   const sel = open ? byId[open] : undefined;
   // An agent task with a worker opens as its conversation (Gerdr's chat in our drawer): the whole chat to decide
   // from, and its input box for the answer. Everything else (to do, human tasks, finished ones) in our own panel.
@@ -138,7 +179,8 @@ export default function BoardPage() {
       ) : (
         <>
         <Alerts onLog={() => setSettings("log")} />
-        <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto p-3 max-md:snap-x max-md:snap-mandatory">
+        <PhoneTabs cols={phoneCols} count={(c) => list(c).length} current={phoneCol} onPick={setPhoneTab} />
+        <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto p-3 max-md:overflow-visible">
           {COLS.map((c) => {
             const all = list(c.id);
             const shown = c.id === "done" ? all.slice(0, doneLimit) : all;
@@ -147,7 +189,9 @@ export default function BoardPage() {
               <section
                 key={c.id}
                 className={clsx(
-                  "flex min-w-60 flex-1 basis-0 flex-col rounded-xl max-md:w-[85vw] max-md:flex-none max-md:snap-start",
+                  "flex min-w-60 flex-1 basis-0 flex-col rounded-xl max-md:min-w-0",
+                  // On a phone one column at a time, picked with the tabs above (no sideways scrolling)
+                  c.id !== phoneCol && "max-md:hidden",
                   // What needs the user stands out in the board itself: 等你 with anything in it, 待验收 a little
                   c.id === "you" && all.length ? "bg-warn/10 ring-1 ring-warn/40" : c.id === "review" && all.length ? "bg-ok/5 ring-1 ring-ok/30" : "bg-muted/50",
                 )}
