@@ -124,7 +124,7 @@ export default function BoardPage() {
       : null;
   // A conversation opened from a panel ("回到 tN 的对话", a finished task's chat): the chat alone, over the panel,
   // with its task's 链路 when it has one
-  const [peek, setPeek] = useState<{ session: string; task?: string } | null>(null);
+  const [peek, setPeek] = useState<{ session: string; task?: string; sub?: string } | null>(null);
   // Opening a conversation from a task's panel closes the panel: it sat on top and hid the chat (on a phone, all of it)
   openChat = (session: string, task?: string) => {
     setOpen("");
@@ -208,7 +208,7 @@ export default function BoardPage() {
           </h1>
         </div>
         <div className="flex min-w-0 items-center gap-1 max-md:gap-0">
-          <WaitsButton tasks={tasks ?? []} onTask={(id) => (setPeek(null), setOpen(id))} onSession={(session, task) => (setOpen(""), setPeek({ session, task }))} />
+          <WaitsButton tasks={tasks ?? []} onTask={(id) => (setPeek(null), setOpen(id))} onSession={(session, task, sub) => (setOpen(""), setPeek({ session, task, sub }))} />
           <MainButton onOpen={(id) => (setOpen(""), setPeek({ session: id }))} />
           <Button variant="ghost" size="sm" title="外面来的每条消息去了哪：交给了哪个任务、为什么没接" onClick={() => setSettings("log")}>
             <Inbox className="size-4" />
@@ -259,6 +259,7 @@ export default function BoardPage() {
       {peek && (
         <ChatDrawer
           session={peek.session}
+          sub={peek.sub}
           top={
             peek.task && byId[peek.task] ? (
               <Trail
@@ -266,7 +267,7 @@ export default function BoardPage() {
                 version={byId[peek.task].updatedAt}
                 current={peek.session}
                 router={byId[peek.task].router}
-                onSession={(id) => setPeek({ ...peek, session: id })}
+                onSession={(id) => setPeek({ ...peek, session: id, sub: undefined })}
                 onTask={(id) => (setPeek(null), setOpen(id))}
                 onRules={() => setSettings("settings")}
               />
@@ -326,14 +327,14 @@ function Alerts({ onLog }: { onLog: () => void }) {
   );
 }
 
-const WAIT_ICON: Record<Wait["kind"], typeof Hourglass> = { reply: MessageSquare, check: SquareTerminal, time: AlarmClock, session: Bot, user: Hand, task: ListTodo };
+const WAIT_ICON: Record<Wait["kind"], typeof Hourglass> = { reply: MessageSquare, check: SquareTerminal, time: AlarmClock, session: Bot, agent: Bot, user: Hand, task: ListTodo };
 
 /**
  * 在等: everything every live task waits on, in one place — a colleague's reply, a time to look again, an MR to merge,
  * a session it handed work to, a step of the user's — each with what will end it. So "is anyone still on this?" has
  * one answer, instead of a worker's "I'll wait" that nothing follows (2026-11-04).
  */
-function WaitsButton({ tasks, onTask, onSession }: { tasks: Task[]; onTask: (id: string) => void; onSession: (session: string, task: string) => void }) {
+function WaitsButton({ tasks, onTask, onSession }: { tasks: Task[]; onTask: (id: string) => void; onSession: (session: string, task: string, sub?: string) => void }) {
   const [shown, setShown] = useState(false);
   const rows = tasks.flatMap((t) => (t.waits ?? []).map((w) => ({ t, w }))).sort((a, b) => Number(!!b.w.user) - Number(!!a.w.user) || (a.w.since ?? 0) - (b.w.since ?? 0));
   if (!rows.length) return null;
@@ -358,7 +359,7 @@ function WaitsButton({ tasks, onTask, onSession }: { tasks: Task[]; onTask: (id:
                     className={clsx("w-full space-y-0.5 rounded-lg border bg-card px-3 py-2 text-left hover:bg-accent", w.user && "border-warn/50")}
                     onClick={() => {
                       setShown(false);
-                      if (w.session) onSession(w.session, t.id);
+                      if (w.session) onSession(w.session, t.id, w.sub);
                       else onTask(w.item ?? t.id);
                     }}
                   >
@@ -689,6 +690,9 @@ function liveText(t: Task) {
   if (l.status === "error") return `出错：${l.error ?? ""}`;
   // Its turn is over but a session it handed work to is still going: waiting on that, not stopped
   if (t.helpers?.length) return `等它派出的会话 · ${ago(l.updatedAt)}`;
+  // Its turn is over but subagents / background commands it started still run: its own work going on
+  const bg = (t.waits ?? []).filter((w) => w.kind === "agent").length;
+  if (bg) return `${bg} 个后台任务在跑 · ${ago(l.updatedAt)}`;
   // It said what it waits on outside (wait_for): a reply in a conversation it follows, and / or a time to look again
   const out = t.status === "running" ? outside(t) : [];
   if (out.length) {

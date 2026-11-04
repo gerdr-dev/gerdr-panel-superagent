@@ -135,13 +135,15 @@ export function day(ms: number) {
 /** One thing a task waits on (local/_waits.ts): what, whether it's the user, what wakes it (wake: in words). */
 export type Wait = {
   id: string;
-  kind: "reply" | "check" | "time" | "session" | "user" | "task";
+  kind: "reply" | "check" | "time" | "session" | "agent" | "user" | "task";
   what: string;
   since: number;
   user?: boolean;
   where?: string;
   at?: number;
   session?: string;
+  /** agent: the subagent's toolCallId (its conversation) */
+  sub?: string;
   item?: string;
   url?: string;
   woke?: { how: string; at: number };

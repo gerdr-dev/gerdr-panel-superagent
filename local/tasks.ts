@@ -1,7 +1,7 @@
 import { workflow } from "./_config";
 import { blockersDone, find, load, newTask, note, update, type Question, type Store, type Task } from "./_store";
 import { applyBlock } from "./_apply";
-import { askUser, endQuestions, endWaits, isOutside, open, question, syncSessions, wakeText, type Wait } from "./_waits";
+import { askUser, endQuestions, endWaits, isOutside, open, question, syncAgents, syncSessions, wakeText, type Wait } from "./_waits";
 import { wake } from "./_wake";
 import { allAgents, mentionsIn } from "./_agents";
 import { isMain, routeTask, sweep } from "./_main";
@@ -72,6 +72,7 @@ export async function list(input: unknown, ctx: Ctx) {
     for (const t of s.tasks) {
       const sess = t.session && live[t.session];
       syncSessions(t, kids[t.id] ?? []);
+      syncAgents(t, t.session, (sess?.tasks ?? []) as any[]);
       if (sess?.status === "running") {
         // The worker is at it again — the user answered in its chat, something woke it, or it carried on. What it asked
         // the user before this turn, and what it waited on outside, are no longer the state of things; it asks or

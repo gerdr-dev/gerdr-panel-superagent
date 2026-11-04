@@ -20,7 +20,7 @@
 
 import type { Store, Task } from "./_store";
 
-export type WaitKind = "reply" | "check" | "time" | "session" | "user" | "task";
+export type WaitKind = "reply" | "check" | "time" | "session" | "agent" | "user" | "task";
 
 export type Wait = {
   id: string;
@@ -42,8 +42,10 @@ export type Wait = {
    * exit = not yet. last: the latest run, shown on the card. fails: runs in a row that broke (timeout, couldn't start).
    */
   check?: { command: string; cwd: string; every: number; next: number; last?: { at: number; code: number; out: string }; fails?: number };
-  /** session: the session it handed work to. */
+  /** session: the session it handed work to. agent: its worker's session, and `sub` the subagent / background command
+   * that worker started (its toolCallId, else the task id): SessionChat's sub shows a subagent's conversation. */
   session?: string;
+  sub?: string;
   /** user / task: the board item it's blocked by (the user's step, or another task); a user wait without one is a
    * question answered in the chat or on the card. */
   item?: string;
@@ -202,6 +204,25 @@ export function syncSessions(t: Task, kids: Kid[]) {
   }
 }
 
+type Bg = { id: string; type: string; description: string; subagent?: string; toolCallId?: string; parent?: string; status: string };
+
+/**
+ * What the worker itself started that runs on (Claude Code's subagents and background commands: ctx.sessions'
+ * tasks), as waits: its own work going on, not something outside — Claude Code wakes it when they finish, so no
+ * wait_for. Open while running; only the top-level ones (a subagent's own tasks are under it).
+ */
+export function syncAgents(t: Task, worker: string | undefined, bg: Bg[]) {
+  if (t.owner !== "agent" || t.status === "done" || t.status === "dropped") return;
+  const running = new Map(bg.filter((x) => x.status === "running" && !x.parent).map((x) => [x.toolCallId || x.id, x]));
+  endWaits(t, (w) => w.kind === "agent" && (w.session !== worker || !running.has(w.sub!)), "做完了");
+  for (const [sub, x] of running) {
+    const who = x.type === "local_agent" ? `子 agent${x.subagent ? `（${x.subagent}）` : ""}` : "后台命令";
+    const what = `它开的${who}：${x.description || sub}`;
+    const w = open(t).find((y) => y.kind === "agent" && y.sub === sub) ?? addWait(t, { kind: "agent", session: worker, sub, what });
+    w.what = what;
+  }
+}
+
 // ---- for people ----
 
 /** What will wake it, in words (the 在等 list, the chat card). */
@@ -214,6 +235,8 @@ export function wakeText(w: Wait): string {
     case "time":
       // The worker picked the interval (wait_for recheck): say it, not only the clock time it comes to
       return w.at ? `${Math.round((w.at - w.since) / 60000)} 分钟后（${hhmm(w.at)}）叫醒它回来看` : "到点叫醒它";
+    case "agent":
+      return "它自己的活，做完 Claude Code 会叫醒它";
     case "session":
       return "它做完会回报，Gerdr 把结果交给 worker";
     case "user":
