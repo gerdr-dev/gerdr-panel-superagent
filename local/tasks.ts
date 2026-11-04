@@ -1,3 +1,4 @@
+import { tellInbox } from "./_inbox";
 import { workflow } from "./_config";
 import { blockersDone, find, load, newTask, note, update, type Question, type Store, type Task } from "./_store";
 import { applyBlock } from "./_apply";
@@ -125,8 +126,7 @@ export async function list(input: unknown, ctx: Ctx) {
   for (const n of nudge) live[n.session] = ctx.sessions.get(n.session) ?? live[n.session];
   await closeRouters(ctx, live);
   sweep(ctx);
-  return {
-    tasks: s.tasks.map((t) => {
+  const tasks = s.tasks.map((t) => {
       const sess = t.session ? live[t.session] : null;
       const halted = stopped(t, sess);
       const said = halted ? String(sess?.reply ?? "").replace(/\s+/g, " ").trim() : "";
@@ -146,9 +146,10 @@ export async function list(input: unknown, ctx: Ctx) {
         stopped: halted || undefined,
         said: said ? [...said].slice(0, 200).join("") + ([...said].length > 200 ? "…" : "") : undefined,
       };
-    }),
-    at: Date.now(),
-  };
+    });
+  // What waits on the user, in Gerdr's inbox too (_inbox.ts)
+  tellInbox(ctx, tasks as any);
+  return { tasks, at: Date.now() };
 }
 
 /**
