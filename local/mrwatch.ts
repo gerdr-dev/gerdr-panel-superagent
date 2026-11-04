@@ -164,7 +164,7 @@ async function one(t: Task, me: string, ctx: Ctx): Promise<string> {
 
   const cfg = workflow(ctx).mr;
 
-  // 4. Behind the target: rebase (GitLab does it), once per head commit, if workflow.json says so
+  // 4. Behind the target: rebase (GitLab does it), once per head commit, if the settings say so
   if (state === "need_rebase") {
     if (d.rebased === mr.sha) return save({ detail: "变基中" }, "rebasing");
     if (cfg.rebase !== "auto") return save({ detail: cfg.rebase === "manual" ? "要变基（点「变基」）" : "要变基" }, "needs a rebase");
@@ -213,7 +213,7 @@ function rebaseNow(base: string, skipCI: boolean, ctx: Ctx) {
   return send("PUT", `${base}/rebase`, skipCI ? { skip_ci: "true" } : {}, ctx);
 }
 
-// ---- the user's buttons (the board's chat panel), whatever workflow.json says ----
+// ---- the user's buttons (the board's chat panel), whatever the settings say ----
 
 function deliveringTask(id: string, ctx: Ctx) {
   const t = find(load(ctx).store, id);
@@ -240,7 +240,7 @@ export async function mergeNow(input: { id: string }, ctx: Ctx) {
   return one(find(load(ctx).store, t.id), (await get("user", ctx)).username, ctx);
 }
 
-/** Rebases it now: { id, skipCI? } (skipCI defaults to workflow.json mr.rebaseSkipCI). */
+/** Rebases it now: { id, skipCI? } (skipCI defaults to the setting mr.rebaseSkipCI). */
 export async function rebase(input: { id: string; skipCI?: boolean }, ctx: Ctx) {
   const { t, base } = deliveringTask(input.id, ctx);
   const skip = input.skipCI ?? workflow(ctx).mr.rebaseSkipCI;

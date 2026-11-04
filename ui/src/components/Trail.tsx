@@ -6,7 +6,7 @@ import { run } from "../lib/gerdr";
 // 链路: where a task came from and every conversation behind it, as a tree of any depth — the event, who handed
 // it out, the router, its workers and whatever sessions they started in turn (Gerdr records each session's parent;
 // local/tasks.ts tree). In the task's drawer, not the panel's agent's side: it belongs to the task. Picking a
-// conversation shows it in the same drawer; in the router's, a way to the rules it went by (流程), to tune them.
+// conversation shows it in the same drawer; in the router's, a way to the settings and rules it went by (设置, 流程), to tune them.
 
 type Node = { id: string; title: string; agent: string; status: string; role: "router" | "worker" | "helper"; children: Node[] };
 type Tree = {
@@ -126,7 +126,7 @@ export function Trail({
       {current && router && current === router && onRules && (
         <button className="mb-1 inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground" onClick={onRules}>
           <Settings2 className="size-3.5" />
-          派得不对？改「流程」里的派活规则
+          派得不对？改仓库、模型或派活规则
         </button>
       )}
     </div>

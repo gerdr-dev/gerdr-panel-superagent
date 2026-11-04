@@ -147,7 +147,7 @@ export function edit(input: Partial<Task> & { id: string }, ctx: Ctx) {
 /**
  * Hands an agent task to a new worker session: in its repository (or a git worktree of it), told the task and the
  * reply protocol, reporting to the panel's agent. { id, prompt?, repo?, agent?, model?, effort?, worktree?, mode? }
- * Agent / model / effort not given: the task's, else the user's worker defaults (skills/…/models.md), else Gerdr's.
+ * Agent / model / effort not given: the task's, else the user's worker defaults (设置), else Gerdr's.
  */
 export async function start(
   input: { id: string; prompt?: string; repo?: string; agent?: string; model?: string; effort?: string; worktree?: boolean; mode?: string },
@@ -183,7 +183,7 @@ export async function start(
     ...who,
     mode: input.mode,
     title: t.title,
-    prompt: (prompt || "看附件，照里面的做。") + WORKER_PROTOCOL.split("{id}").join(t.id),
+    prompt: (prompt || "看附件，照里面的做。") + WORKER_PROTOCOL.split("{id}").join(t.id) + directNote(ctx, repo),
     attachments: (t.attachments ?? []).map((a) => a.path),
     tags: { task: t.id },
     // Followed on the board (its drawer shows the chat), not in Code: no tab of it appears there
@@ -202,7 +202,18 @@ export async function start(
 }
 
 /**
- * Which agent / model / effort a worker runs on. The defaults in models.md go with its agent: a model named there is
+ * The user marked this repository "small changes may be pushed straight" (设置 → 仓库): the worker is told, since
+ * the skill (deliver.md) says when to do so but not where; nothing else in its context would say.
+ */
+function directNote(ctx: Ctx, repo: string) {
+  const r = workflow(ctx).repos.find((x) => ctx.dirs.stat(x.path)?.path === repo);
+  return r?.direct
+    ? `In this repository the user allows small changes to be pushed straight to the target branch instead of an MR (see the delivery rules in their skill).\n`
+    : "";
+}
+
+/**
+ * Which agent / model / effort a worker runs on. The defaults (设置 → worker) go with their agent: a model named there is
  * that agent's (a claude model means nothing to codex), so a task on another agent only gets a model it names itself.
  */
 function workerOf(ctx: Ctx, t: Task, input: { agent?: string; model?: string; effort?: string }) {
@@ -498,7 +509,7 @@ export function status(input: { id: string }, ctx: Ctx) {
 }
 
 /**
- * Repositories to pick from: the user's own list (skills/my-workflow/references/repos.md, {{仓库}}), the board's data
+ * Repositories to pick from: the user's own list (设置 → 仓库, local/_config.ts), the board's data
  * source, not Code's workspaces. Until they've written one, recently used directories stand in, marked as suggestions.
  */
 export function repos(input: unknown, ctx: Ctx) {
@@ -509,7 +520,7 @@ export function repos(input: unknown, ctx: Ctx) {
     seen.add(p);
     out.push({ path: p, name: p.split("/").pop() || p, ...(suggested ? { suggested } : {}) });
   };
-  const mine = workflow(ctx).repos;
+  const mine = workflow(ctx).repos.map((r) => r.path);
   for (const p of mine) add(p);
   if (!mine.length) for (const d of ctx.dirs.recent()) add(d.path, true);
   return out.slice(0, 40);

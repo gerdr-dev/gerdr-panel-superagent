@@ -12,7 +12,7 @@
 
 import { workflow } from "./_config";
 import { allAgents } from "./_agents";
-import { fileWith } from "./_vars";
+import { textOf } from "./playbooks";
 import { DATA, migrate } from "./_user";
 import { find, load as loadTasks, note, update as updateTasks, type Task } from "./_store";
 
@@ -194,8 +194,17 @@ async function brief(ctx: Ctx): Promise<string> {
     .map((d) => d.path)
     .filter((p) => !p.includes("/.gerdr/"))
     .slice(0, 20);
-  const repoText = fileWith(ctx, ["仓库", "repos"]) || `（用户没写仓库列表）最近用过的目录：\n${recent.map((p) => `- ${p}`).join("\n")}`;
-  const modelText = fileWith(ctx, ["派活 agent", "干活 agent", "router agent", "worker agent"]);
+  const w = workflow(ctx);
+  const repoText = w.repos.length
+    ? w.repos.map((r) => `- ${r.path}${r.note ? `：${r.note}` : ""}${r.direct ? "（小改动可直推）" : ""}`).join("\n")
+    : `（用户没设仓库列表）最近用过的目录：\n${recent.map((p) => `- ${p}`).join("\n")}`;
+  const def = (x: { agent: string; model: string; effort: string }) =>
+    `${x.agent || "Gerdr 的默认 agent"}，模型 ${x.model || "它的默认"}，思考强度 ${x.effort || "它的默认"}`;
+  const modelText =
+    `worker 默认：${def(w.worker)}。parts 里不写 agent / model / effort 就用这个；换了别的 agent 而没写模型，用那个 agent 自己的默认。\n` +
+    `模型名要是那个 agent 的模型菜单里有的（claude：sonnet / haiku / fable 这类），写错了命令会报错并列出可选的。`;
+  // The user's own routing rules (how they pick a repository, when a stronger or cheaper model): their prose, whole
+  const rules = textOf(ctx, ROUTING);
   const ex = (o: unknown) => JSON.stringify(o);
   return [
     `你是 Superagent 的调度会话。要派的活都先到你这里：用户在看板上建的任务，和外面来的消息（私信、@、告警……）。` +
@@ -220,19 +229,24 @@ async function brief(ctx: Ctx): Promise<string> {
       `- 任务的标题是从内容第一行截的，不够好就加 "title"。\n` +
       `- 命令报错就按错误改了再发那几条。`,
     `## 可选的 agent\n${agentLines.join("\n")}`,
-    `## 仓库（用户自己写的）\n${repoText}`,
-    modelText && `## agent 和模型（用户自己写的）\n${modelText}`,
+    `## 仓库（用户的设置）\n${repoText}`,
+    `## agent 和模型\n${modelText}`,
+    rules && `## 怎么派（用户自己写的规则）\n${rules}`,
     proactiveText(ctx),
   ]
     .filter(Boolean)
     .join("\n\n");
 }
 
+/** The skill files the brief carries whole (the router doesn't read skills: DESIGN.md, 「派活要快」). */
+const ROUTING = "my-workflow/references/routing.md";
+const PROACTIVE = "my-workflow/references/proactive.md";
+
 /** The proactive rules for the brief, when proactive work is on at all. */
 function proactiveText(ctx: Ctx) {
   const mode = workflow(ctx).proactive;
   if (mode === "off") return "";
-  const rules = fileWith(ctx, ["主动工作", "proactive"]);
+  const rules = textOf(ctx, PROACTIVE);
   return (
     `## 不是找你的事：主动工作（用户自己写的规则）\n` +
     `标着「不是找你的」的 [消息 cN]：只有符合下面某条规则才 accept，并且在决定里写 "rule"（是哪一条，用规则原话的开头）；不符合任何一条就 ignore（reason 写「没有对应的规则」），不回复。` +

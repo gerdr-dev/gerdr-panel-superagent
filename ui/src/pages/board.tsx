@@ -62,7 +62,7 @@ export default function BoardPage() {
   const panel =
     sel && inChat && viewing
       ? viewing !== primary
-        ? { label: viewing === sel.router ? `Superagent 的调度会话：它派 ${sel.id} 时怎么判断的。以后都不想这样派，就改「流程」里的规则` : `${sel.id} 背后的另一个对话`, actions: [] }
+        ? { label: viewing === sel.router ? `Superagent 的调度会话：它派 ${sel.id} 时怎么判断的。以后都不想这样派，就改「设置」里的仓库、模型，或「流程」里的派活规则` : `${sel.id} 背后的另一个对话`, actions: [] }
         : routingNow
           ? { label: `Superagent 正在派 ${sel.id}：挑仓库、agent 和模型。看到不对直接在下面纠正`, actions: [{ id: "drop", label: "放弃", confirm: "确定放弃？" } as ChatAction] }
           : chatPanel(sel, byId)
@@ -122,7 +122,7 @@ export default function BoardPage() {
             <Inbox className="size-4" />
             去向
           </Button>
-          <Button variant="ghost" size="icon" aria-label="设置" title="设置：流程、触发器、定时任务" onClick={() => setSettings("flow")}>
+          <Button variant="ghost" size="icon" aria-label="设置" title="设置、流程、触发器、定时任务" onClick={() => setSettings("settings")}>
             <Settings className="size-4" />
           </Button>
           <Button onClick={() => setCreating(true)}>
@@ -181,7 +181,7 @@ export default function BoardPage() {
         <ChatDrawer
           session={viewing}
           {...panel}
-          top={<Trail task={sel.id} version={sel.updatedAt} current={viewing} router={sel.router} onSession={setShown} onTask={setOpen} onRules={() => setSettings("flow")} />}
+          top={<Trail task={sel.id} version={sel.updatedAt} current={viewing} router={sel.router} onSession={setShown} onTask={setOpen} onRules={() => setSettings("settings")} />}
           onAction={onAction}
           onClose={() => setOpen("")}
         />
@@ -198,7 +198,7 @@ export default function BoardPage() {
                 router={byId[peek.task].router}
                 onSession={(id) => setPeek({ ...peek, session: id })}
                 onTask={(id) => (setPeek(null), setOpen(id))}
-                onRules={() => setSettings("flow")}
+                onRules={() => setSettings("settings")}
               />
             ) : undefined
           }
@@ -881,8 +881,8 @@ function NewTask({ onClose, act }: { onClose: () => void; act: Act }) {
                   ))}
                 </datalist>
                 <div className="flex items-center gap-3">
-                  <input className={input} placeholder="agent（不填 = 流程里定的；claude / codex / 角色 id）" value={f.agent} onChange={set("agent")} />
-                  <input className={input} placeholder="模型（不填 = 流程里定的）" value={f.model} onChange={set("model")} />
+                  <input className={input} placeholder="agent（不填 = 设置里定的；claude / codex / 角色 id）" value={f.agent} onChange={set("agent")} />
+                  <input className={input} placeholder="模型（不填 = 设置里定的）" value={f.model} onChange={set("model")} />
                   <label className="flex shrink-0 items-center gap-1.5 text-[12px] text-muted-foreground">
                     <input type="checkbox" checked={f.worktree} onChange={set("worktree")} />
                     独立 worktree
@@ -891,7 +891,7 @@ function NewTask({ onClose, act }: { onClose: () => void; act: Act }) {
               </>
             ) : (
               <button className="self-start text-[12px] text-muted-foreground hover:text-foreground" onClick={() => setMore(true)}>
-                指定仓库 / agent / 模型（不填就照「流程」里的设置，仓库由助手来定）
+                指定仓库 / agent / 模型（不填就照「设置」里的，仓库由 Superagent 来定）
               </button>
             )}
           </>

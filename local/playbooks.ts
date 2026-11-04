@@ -1,11 +1,9 @@
-// The 流程 page: the user's skills (skills/<name>/SKILL.md + references/*.md, prose with {{variables}}), and the
-// pickers its variable editor needs (folders, files, agents). Nothing here interprets a skill: that's the code that
-// reads its values (_vars.ts) and the agents that read it as a skill.
+// The 流程 page: the user's skills (skills/<name>/SKILL.md + references/*.md), prose in their own words that the
+// agents read as a skill. Nothing here interprets it; values the code acts on are settings (local/settings.ts).
 
-import { parse } from "../ui/src/lib/vars";
-import { DIR } from "./_vars";
 import { effective, mine, overlay } from "./_user";
-import { allAgents } from "./_agents";
+
+export const DIR = "skills";
 
 // Paths inside skills/: a skill's SKILL.md or one of its references (my-workflow/references/mr.md). No "..".
 const PATH = /^[\w\u4e00-\u9fff-]+(\/[\w\u4e00-\u9fff.-]+)*\.md$/;
@@ -13,7 +11,7 @@ const ok = (p: string) => PATH.test(p) && !p.split("/").includes("..");
 
 /**
  * The skills' files as this person has them (their edits in user/skills/ over the panel's skills/): each skill's
- * SKILL.md (its index) first, then its references, with variable counts. `changed`: they edited the panel's file
+ * SKILL.md (its index) first, then its references. `changed`: they edited the panel's file
  * (reset brings the default back); `own`: a file only they have.
  */
 export function list(input: unknown, ctx: Ctx) {
@@ -21,9 +19,8 @@ export function list(input: unknown, ctx: Ctx) {
     .filter((f) => f.rel.endsWith(".md"))
     .map((f) => {
       const name = f.rel;
-      const vars = parse(ctx.fs.read(f.path));
       const [skill, ...rest] = name.split("/");
-      return { name, skill, index: rest.join("/") === "SKILL.md", vars: vars.length, errors: vars.filter((v) => v.error).length, changed: f.mine && f.shared, own: f.mine && !f.shared };
+      return { name, skill, index: rest.join("/") === "SKILL.md", changed: f.mine && f.shared, own: f.mine && !f.shared };
     })
     .sort((a, b) => a.skill.localeCompare(b.skill) || Number(b.index) - Number(a.index) || a.name.localeCompare(b.name));
 }
@@ -85,25 +82,8 @@ export function addReference(input: { skill: string; name: string; when: string 
   return { name: `${input.skill}/references/${name}.md` };
 }
 
-/** For a dir / file variable: { path? } → what's in it (folders first), plus the user's projects to start from. */
-export async function browse(input: { path?: string; files?: boolean }, ctx: Ctx) {
-  const recent = ctx.dirs.recent().slice(0, 12).map((d) => d.path);
-  // ~ expanded (dirs.stat does it; ls wouldn't)
-  const path = ctx.dirs.stat(input.path || ctx.dirs.home())?.path ?? ctx.dirs.home();
-  const dirs = ctx.dirs.list(path).map((d) => ({ name: d.name, path: d.path, dir: true }));
-  let files: { name: string; path: string; dir: boolean }[] = [];
-  if (input.files) {
-    const r = await ctx.exec("ls", ["-1Ap", path], { timeout: 10_000 });
-    if (r.code === 0)
-      files = r.stdout
-        .split("\n")
-        .filter((n) => n && !n.endsWith("/") && !n.startsWith("."))
-        .map((n) => ({ name: n, path: `${path.replace(/\/$/, "")}/${n}`, dir: false }));
-  }
-  return { path, home: ctx.dirs.home(), recent, entries: [...dirs, ...files] };
-}
-
-/** For an agent variable: the agents and roles set up in Gerdr. */
-export async function agents(input: unknown, ctx: Ctx) {
-  return (await allAgents(ctx)).map((a) => ({ id: a.id, name: a.name }));
+/** A skill file's text as this person has it ("" when there's none): for code that puts it in a message whole. */
+export function textOf(ctx: Ctx, name: string) {
+  const p = effective(ctx, `${DIR}/${name}`);
+  return p ? ctx.fs.read(p).trim() : "";
 }

@@ -1,21 +1,24 @@
-import { Inbox, ScrollText, Timer, X, Zap } from "lucide-react";
+import { Inbox, ScrollText, SlidersHorizontal, Timer, X, Zap } from "lucide-react";
 import clsx from "clsx";
 import { Sheet, SheetContent, SheetTitle } from "./ui/sheet";
 import Flow from "../settings/Flow";
+import Settings from "../settings/Settings";
 import Schedules from "../settings/Schedules";
 import Triggers from "../settings/Triggers";
 import Log from "../settings/Log";
 import { Button } from "./Button";
 
 // Everything behind the board, in a shadcn Sheet over it: where each outside message went (去向: the Superagent's
-// log, local/superagent.ts), how the user works (流程: their skill, with its variables), which outside events come in
-// (触发器: local/inbox.ts) and what runs by itself (定时任务: mrwatch and the rest). Not pages of their own: the panel
+// log, local/superagent.ts), the values the code acts on (设置: who routes and works, repositories, merging, proactive
+// work; local/settings.ts), how the user wants things done (流程: their skill, prose the agents read), which outside
+// events come in (触发器: local/inbox.ts) and what runs by itself (定时任务: mrwatch and the rest). Not pages of their own: the panel
 // is the board, these are what's behind it.
 
-export type SettingsTab = "log" | "flow" | "schedules" | "triggers";
+export type SettingsTab = "log" | "settings" | "flow" | "schedules" | "triggers";
 
 const TABS: { id: SettingsTab; label: string; icon: typeof Timer }[] = [
   { id: "log", label: "去向", icon: Inbox },
+  { id: "settings", label: "设置", icon: SlidersHorizontal },
   { id: "flow", label: "流程", icon: ScrollText },
   { id: "triggers", label: "触发器", icon: Zap },
   { id: "schedules", label: "定时任务", icon: Timer },
@@ -42,7 +45,7 @@ export function SettingsSheet({ tab, onTab, onClose, onTask }: { tab: SettingsTa
           <X className="size-4" />
         </Button>
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto">{tab === "log" ? <Log onTask={onTask} /> : tab === "flow" ? <Flow /> : tab === "schedules" ? <Schedules /> : <Triggers />}</div>
+      <div className="min-h-0 flex-1 overflow-y-auto">{tab === "log" ? <Log onTask={onTask} /> : tab === "settings" ? <Settings onFlow={() => onTab("flow")} /> : tab === "flow" ? <Flow /> : tab === "schedules" ? <Schedules /> : <Triggers />}</div>
       </SheetContent>
     </Sheet>
   );

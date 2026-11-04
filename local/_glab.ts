@@ -1,6 +1,6 @@
 import { workflow } from "./_config";
 
-/** The GitLab glab talks to: workflow.json gitlab.host (each user their own). */
+/** The GitLab glab talks to: 设置 → GitLab (each user their own). */
 export function host(ctx: any) {
   return workflow(ctx).gitlab.host;
 }

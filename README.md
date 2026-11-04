@@ -9,9 +9,10 @@
 - 外面来的活：设置 →「触发器」选收哪些事件（装了哪些插件就有哪些）、只收谁的。已有任务的对话里的后续直接交给那个任务；
   其余的由 Superagent 的调度会话判断：接（建任务派出）、并进已有任务、停掉某个任务、不接。每条去了哪，看「去向」。
 - MR 有人盯：新的 review 意见、挂掉的流水线作为 MR 上的新消息交给 worker，按你的规则变基、合并。
-- 主动工作：不是找你的事（频道闲聊、告警）只按你在「流程 → 主动工作」里写的规则接；默认只记录它本来会怎么做，看对了再放开。
+- 主动工作：不是找你的事（频道闲聊、告警）只按你在「流程 → proactive」里写的规则接；「设置 → 主动工作」默认只记录它本来会怎么做，看对了再放开。
 - 要你处理的在看板上突出：「等你」一列有东西就高亮，派不出去的卡片描黄边；Superagent 自己需要你看的（它在问你、没判断成的消息、主动工作记下的）在看板上方一行一条，正常时不占地方。
-- 你的做事方式写在 `skills/my-workflow/`（看板右上角的齿轮 → 流程）：仓库列表、MR 合不合、怎么合……默认都是手动的，按需改。
+- 看板右上角的齿轮：「设置」是代码照着做的值（谁派活、谁干活、仓库列表、MR 合不合、主动工作开不开），默认都是手动的，按需改；
+  「流程」是你用自己的话写的做事方式（`skills/my-workflow/`：怎么交付、review 意见怎么处理、怎么挑仓库），agent 读它。
 
 **安装**：Gerdr 设置 → 面板 → 从 GitHub 安装面板，填 `https://github.com/gerdr-dev/gerdr-panel-superagent`。
 更多面板：GitHub 上带 `gerdr-panel` 标签的仓库，见 https://github.com/topics/gerdr-panel 。
@@ -26,7 +27,7 @@
 改看板（`ui/src/pages/board.tsx`、`local/tasks.ts` `board.ts` `mrwatch.ts`）之前先读 `DESIGN.md`：为什么这么设计、哪些做法试过被否了。
 
 这个面板只有一页：任务看板。派给 agent 的任务和要用户亲手做的人工任务，按「待办 / 进行中 / 等你 / 待验收 / 已完成」排，
-数据在 `user/data/tasks.json`，读写都走 `local/tasks.ts`。看板右上角的齿轮是看板设置：「流程」（`ui/src/settings/Flow.tsx`，
+数据在 `user/data/tasks.json`，读写都走 `local/tasks.ts`。看板右上角的齿轮是看板设置：「设置」（`ui/src/settings/Settings.tsx`，`user/settings.json`）、「流程」（`ui/src/settings/Flow.tsx`，
 编辑 `skills/my-workflow/`）和「定时任务」（`ui/src/settings/Schedules.tsx`，`schedules/`）。
 
 ## 你（右边的面板助手）怎么派活
@@ -37,7 +38,7 @@
 - 派活一律走看板，不要直接 `gerdr session new`：
   `gerdr work run tasks.add '{"title":"…","prompt":"…","repo":"/绝对路径","agent":"codex","start":true}'`
   它会在那个仓库开 worker（带上回报格式、`task=<id>` 标签，回报给你），并在看板上出现。`worktree: true` 给它一个独立
-  worktree（同一个仓库同时有两个 worker 时用）。`agent` / `model` / `effort` 不填就用 `skills/my-workflow/references/models.md` 里给 worker 定的。
+  worktree（同一个仓库同时有两个 worker 时用）。`agent` / `model` / `effort` 不填就用「设置」里给 worker 定的。
 - 用户在看板上派活时不选仓库、外面来了消息：都交给 Superagent 的调度会话（标题「Superagent 调度」，一直开着，
   local/_main.ts）。它的第一条消息带齐了仓库、agent、模型规则，之后每条消息是一批 `[任务 tN]` / `[消息 cN]`，一条
   `gerdr work run superagent.decide '{"decisions":[…]}'` 给出全部决定。你不是它：你是陪用户说话的那个。
@@ -50,10 +51,12 @@
   （新冒出来的人工任务也是这时登记的），你不用手改任务状态。然后：
   用一两句话告诉用户发生了什么、需要他做什么（验收、回答问题、做人工任务），并指到看板。不要转贴 worker 的长回复。
 - 用户的工作方式是 `skills/my-workflow/` 这个 skill（「流程」页编辑）：你和你派出去的 worker 都有它，要用时自己读对应的参考
-  （怎么交付、MR 上的新情况怎么处理……）。用户说「以后都这样」「改一下规则」就改这个 skill，不要改代码。
+  （怎么交付、MR 上的新情况怎么处理……）。用户说「以后都这样」「改一下规则」：是做事方式就改这个 skill；是代码照着做的值
+  （模型、仓库、自动合并、变基、主动工作的模式）就改设置：`gerdr work run settings.set '{"mr":{"merge":"auto"}}'`
+  （只给要改的那部分；`settings.get` 看现在的）。都不改代码。
   worker 交结果分三种：`done`（做完、不用用户看）、`delivering`（开了 MR 在等合并）、`review`（要用户判断结论）。
   `delivering` 的任务由定时任务 `mrwatch` 盯（「定时任务」页）：新 review 意见、挂掉的流水线交给那个 worker，
-  变基、合并照 skill 里的设置自动做；合不了的（MR 被关、改了好几轮还没过）会变成「等你」。
+  变基、合并照「设置」自动做；合不了的（MR 被关、改了好几轮还没过）会变成「等你」。
 - 回复用户简短：一次不超过 100 字，只说结论和需要他做的事。
 - 用户在对话里说「通过 / 打回 / 那个问题选 A」，就替他调 `tasks.accept` / `tasks.reject {"id","feedback"}` /
   `tasks.answer {"id","answer"}`；人工任务做完是 `tasks.complete {"id","value"}`。改任务内容用 `tasks.edit`。

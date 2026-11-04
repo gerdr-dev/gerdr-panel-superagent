@@ -36,7 +36,7 @@ export type Task = {
   attachments?: { path: string; name: string; mime?: string }[];
   repo?: string;
   agent?: string;
-  /** The worker's model / thinking effort (the agent's own values); unset = skills/…/models.md, else Gerdr's default. */
+  /** The worker's model / thinking effort (the agent's own values); unset = the worker defaults in 设置, else Gerdr's default. */
   model?: string;
   effort?: string;
   /** Agents the user @-mentioned: the router hands the task to them (one part each, or as it sees fit). */
