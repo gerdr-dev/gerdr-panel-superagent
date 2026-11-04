@@ -89,7 +89,6 @@ async function one(t: Task, me: string, ctx: Ctx): Promise<string> {
   // had a prod release to run when the board marked it done and closed its chat). The MR wait ends; the task is back
   // in progress, and the merge goes to the worker as an event like a review comment.
   if (mr.state === "merged") {
-    const out = save({ merged: true, detail: "已合并" }, "merged");
     await act("emit merged", async () =>
       emit(ctx, d, {
         id: `gitlab:merged:${d.project}!${d.iid}`,
@@ -102,7 +101,7 @@ async function one(t: Task, me: string, ctx: Ctx): Promise<string> {
         url: d.url,
       }),
     );
-    return out;
+    return save({ merged: true, detail: "已合并" }, "merged");
   }
   if (mr.state === "closed") return save({ question: `${label} 被关掉了（没合并）。要重开、换个方案，还是放弃这个任务？`, detail: "MR 已关闭" }, "closed");
 
