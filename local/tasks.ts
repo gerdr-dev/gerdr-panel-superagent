@@ -541,7 +541,33 @@ export function trace(input: { id: string }, ctx: Ctx) {
   };
 }
 
-type TreeNode = { id: string; title: string; agent: string; status: string; role: "router" | "worker" | "helper"; children: TreeNode[] };
+type TreeNode = {
+  /** A session's id; a subagent's is "<session>#<toolCallId>" (SessionChat shows it with sub). */
+  id: string;
+  title: string;
+  agent: string;
+  status: string;
+  role: "router" | "worker" | "helper" | "subagent";
+  children: TreeNode[];
+};
+
+/** A session's subagents (Claude Code's, its tasks of type local_agent) as tree nodes, nested by who started whom. */
+function subagents(session: any): TreeNode[] {
+  const ts = ((session?.tasks ?? []) as any[]).filter((x) => x.type === "local_agent" && x.toolCallId);
+  const of = (parent?: string): TreeNode[] =>
+    ts
+      .filter((x) => (x.parent || undefined) === parent)
+      .sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0))
+      .map((x) => ({
+        id: `${session.id}#${x.toolCallId}`,
+        title: x.description || x.subagent || "子 agent",
+        agent: x.subagent ?? "",
+        status: x.status === "running" ? "running" : "idle",
+        role: "subagent" as const,
+        children: of(x.toolCallId),
+      }));
+  return of(undefined);
+}
 
 /**
  * The conversations behind a task as a tree, any number of levels deep: its router and workers, and every session
@@ -568,7 +594,8 @@ export function tree(input: { id: string }, ctx: Ctx) {
       .map((k) => node(k, depth + 1))
       .filter((n): n is TreeNode => !!n)
       .sort((a, b) => (byId.get(a.id)?.createdAt ?? 0) - (byId.get(b.id)?.createdAt ?? 0));
-    return { id, title: x?.title || id, agent: x?.agent ?? "", status: x?.status ?? "gone", role: id === t.router ? "router" : workers.has(id) ? "worker" : "helper", children };
+    // Its subagents first (the work it does itself, in parallel), then the sessions it handed work to
+    return { id, title: x?.title || id, agent: x?.agent ?? "", status: x?.status ?? "gone", role: id === t.router ? "router" : workers.has(id) ? "worker" : "helper", children: [...subagents(x), ...children] };
   };
   // Roots: the router, then any worker not under it (started by the board itself, re-dispatched by hand)
   const roots = [t.router, ...workers].filter((id): id is string => !!id).map((id) => node(id, 0)).filter((n): n is TreeNode => !!n);

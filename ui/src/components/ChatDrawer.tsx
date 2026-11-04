@@ -19,6 +19,7 @@ export type ChatItem = { text: string; jump?: string };
 export function ChatDrawer({
   session,
   sub,
+  onSub,
   label,
   actions,
   items,
@@ -27,8 +28,9 @@ export function ChatDrawer({
   onClose,
 }: {
   session: string;
-  /** One of its subagents' conversation instead (a toolCallId): what a 在等 row of it opens. */
+  /** One of its subagents' conversation instead (a toolCallId), and where 查看对话 / the way back go (null = main). */
   sub?: string;
+  onSub?: (toolCallId: string | null) => void;
   /** Above the line and buttons: the board's 链路 (which conversations this task went through). */
   top?: React.ReactNode;
   label?: string;
@@ -107,7 +109,7 @@ export function ChatDrawer({
           </div>
         )}
         <div className="min-h-0 flex-1">
-          <SessionChat id={session} focused jump={jump} sendNow sub={sub} />
+          <SessionChat id={session} focused jump={jump} sendNow sub={sub} onSub={onSub} />
         </div>
       </SheetContent>
     </Sheet>

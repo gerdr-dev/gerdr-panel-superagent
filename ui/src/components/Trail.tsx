@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronRight, ExternalLink, GitFork, Settings2 } from "lucide-react";
 import clsx from "clsx";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { run } from "../lib/gerdr";
 
 // 链路: where a task came from and every conversation behind it, as a tree of any depth — the event, who handed
@@ -8,7 +8,8 @@ import { run } from "../lib/gerdr";
 // local/tasks.ts tree). In the task's drawer, not the panel's agent's side: it belongs to the task. Picking a
 // conversation shows it in the same drawer; in the router's, a way to the settings and rules it went by (设置, 流程), to tune them.
 
-type Node = { id: string; title: string; agent: string; status: string; role: "router" | "worker" | "helper"; children: Node[] };
+/** id: a session's, or a subagent's "<session>#<toolCallId>" (lib/convo.ts) — picking either shows it in the drawer. */
+type Node = { id: string; title: string; agent: string; status: string; role: "router" | "worker" | "helper" | "subagent"; children: Node[] };
 type Tree = {
   origin?: { source: string; kind: string; title?: string; url?: string };
   from?: { id: string; title: string };
@@ -17,7 +18,7 @@ type Tree = {
   roots: Node[];
 };
 
-const ROLE = { router: "调度", worker: "worker", helper: "子会话" };
+const ROLE = { router: "调度", worker: "worker", helper: "子会话", subagent: "子 agent" };
 
 function count(n: Node[]): number {
   return n.reduce((k, x) => k + 1 + count(x.children), 0);
@@ -43,6 +44,12 @@ export function Trail({
 }) {
   const [tree, setTree] = useState<Tree | null>(null);
   const [open, setOpen] = useState(false);
+  // Gone to another conversation (a subagent from 在等 or its chat card, a helper asking): the list opens, so it's clear
+  // where in the task this is and how to get back. Not on the drawer's first showing
+  const first = useRef(current);
+  useEffect(() => {
+    if (current !== first.current) setOpen(true);
+  }, [current]);
   useEffect(() => {
     run<Tree>("tasks.tree", { id: task }).then(setTree, () => setTree(null));
   }, [task, version]);
@@ -84,7 +91,7 @@ export function Trail({
         <span className="min-w-0 flex-1 truncate">{summary}</span>
       </button>
       {open && (
-        <div className="max-h-72 space-y-0.5 overflow-y-auto pt-1 pb-1.5">
+        <div className="max-h-[200px] space-y-0.5 overflow-y-auto pt-1 pb-1.5">
           {tree.origin &&
             (tree.origin.url ? (
               <a className={clsx(row, "text-muted-foreground hover:bg-accent/60 hover:text-foreground")} href={tree.origin.url} target="_blank" rel="noreferrer" title={tree.origin.title}>

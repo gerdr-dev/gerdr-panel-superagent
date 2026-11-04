@@ -15,6 +15,7 @@ import { onShowSession } from "@gerdr/core";
 import { isSubmitEnter } from "../lib/utils";
 import { Md } from "../lib/markdown";
 import { usePhone, useSwipePages } from "../lib/swipe";
+import { convo, parseConvo } from "../lib/convo";
 import { usePoll } from "../lib/visible";
 
 // The task board: columns left to right (to do, running, needs you, to review, done), small cards, details in a side
@@ -111,13 +112,22 @@ export default function BoardPage() {
   const primary = sel ? (routingNow ? sel.router : asking ? asking.id : sel.session) : undefined;
   // Another conversation of the same task picked in its 链路 (the router, an earlier worker, a helper): shown in the
   // same drawer; its buttons are the task's live conversation's only
+  // A conversation key (lib/convo): a session, or one of its subagents
   const [shown, setShown] = useState("");
-  useEffect(() => setShown(""), [open]);
+  // Opening a task straight at one of its conversations (a subagent from 在等): kept for the reset below
+  const want = useRef("");
+  useEffect(() => {
+    setShown(want.current);
+    want.current = "";
+  }, [open]);
   const viewing = shown || primary;
+  const view = viewing ? parseConvo(viewing) : undefined;
   const panel =
     sel && inChat && viewing
       ? viewing !== primary
-        ? { label: viewing === sel.router ? `Superagent 的调度会话：它派 ${sel.id} 时怎么判断的。以后都不想这样派，就改「设置」里的仓库、模型，或「流程」里的派活规则` : `${sel.id} 背后的另一个对话`, actions: [] }
+        ? view?.sub
+          ? { label: `${sel.id} 的 worker 开的子 agent（只读）：它自己的活，做完会叫醒 worker`, actions: [] }
+          : { label: viewing === sel.router ? `Superagent 的调度会话：它派 ${sel.id} 时怎么判断的。以后都不想这样派，就改「设置」里的仓库、模型，或「流程」里的派活规则` : `${sel.id} 背后的另一个对话`, actions: [] }
         : routingNow
           ? { label: `Superagent 正在派 ${sel.id}：挑仓库、agent 和模型。看到不对直接在下面纠正`, actions: [{ id: "drop", label: "放弃", confirm: "确定放弃？" } as ChatAction] }
           : chatPanel(sel, byId)
@@ -129,6 +139,19 @@ export default function BoardPage() {
   openChat = (session: string, task?: string) => {
     setOpen("");
     setPeek({ session, task });
+  };
+  // One of a task's conversations (a helper, a subagent) from 在等: in the task's own drawer when it has one live, its
+  // 链路 open on it; else on its own
+  const openConvo = (task: string, key: string) => {
+    const t = byId[task];
+    if (t && t.owner === "agent" && !!t.session && t.status !== "done" && t.status !== "dropped") {
+      setPeek(null);
+      if (open === task) setShown(key);
+      else {
+        want.current = key;
+        setOpen(task);
+      }
+    } else setPeek({ ...parseConvo(key), task });
   };
   // A worker's conversation brought up from elsewhere in Gerdr (a notification, the inbox): it's this board's, so it
   // opens here, as its task's drawer (or just the chat when no task has it)
@@ -208,7 +231,7 @@ export default function BoardPage() {
           </h1>
         </div>
         <div className="flex min-w-0 items-center gap-1 max-md:gap-0">
-          <WaitsButton tasks={tasks ?? []} onTask={(id) => (setPeek(null), setOpen(id))} onSession={(session, task, sub) => (setOpen(""), setPeek({ session, task, sub }))} />
+          <WaitsButton tasks={tasks ?? []} onTask={(id) => (setPeek(null), setOpen(id))} onSession={(session, task, sub) => openConvo(task, convo(session, sub))} />
           <MainButton onOpen={(id) => (setOpen(""), setPeek({ session: id }))} />
           <Button variant="ghost" size="sm" title="外面来的每条消息去了哪：交给了哪个任务、为什么没接" onClick={() => setSettings("log")}>
             <Inbox className="size-4" />
@@ -247,9 +270,11 @@ export default function BoardPage() {
         </>
       )}
       {sel && !inChat && <Drawer t={sel} byId={byId} act={act} onClose={() => setOpen("")} onGo={setOpen} />}
-      {panel && sel && viewing && !peek && (
+      {panel && sel && viewing && view && !peek && (
         <ChatDrawer
-          session={viewing}
+          session={view.session}
+          sub={view.sub}
+          onSub={(tc) => setShown(convo(view.session, tc))}
           {...panel}
           top={<Trail task={sel.id} version={sel.updatedAt} current={viewing} router={sel.router} onSession={setShown} onTask={setOpen} onRules={() => setSettings("settings")} />}
           onAction={onAction}
@@ -260,14 +285,15 @@ export default function BoardPage() {
         <ChatDrawer
           session={peek.session}
           sub={peek.sub}
+          onSub={(tc) => setPeek({ ...peek, sub: tc ?? undefined })}
           top={
             peek.task && byId[peek.task] ? (
               <Trail
                 task={peek.task}
                 version={byId[peek.task].updatedAt}
-                current={peek.session}
+                current={convo(peek.session, peek.sub)}
                 router={byId[peek.task].router}
-                onSession={(id) => setPeek({ ...peek, session: id, sub: undefined })}
+                onSession={(id) => setPeek({ ...peek, ...parseConvo(id), sub: parseConvo(id).sub })}
                 onTask={(id) => (setPeek(null), setOpen(id))}
                 onRules={() => setSettings("settings")}
               />
