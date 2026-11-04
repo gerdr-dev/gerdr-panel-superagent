@@ -1,5 +1,6 @@
 import { get, text } from "./_glab";
 import { load, type Task } from "./_store";
+import { open } from "./_waits";
 import { DATA } from "./_user";
 
 // A source of events for the MRs tasks follow — nothing more. An MR is a way of working (the worker's skill, mr.md:
@@ -62,12 +63,16 @@ function followed(tasks: Task[]): string[] {
 
 // dry: say what would be emitted instead of emitting (check)
 let dry = false;
+let waited = new Set<string>();
 const would: string[] = [];
 
 /** One pass over every MR a live task follows. Returns what it emitted, per MR (the run log shows it). */
 export async function tick(input: unknown, ctx: Ctx) {
   dry = false;
-  const keys = followed(load(ctx).store.tasks);
+  const tasks = load(ctx).store.tasks;
+  const keys = followed(tasks);
+  // MRs a worker is waiting on now (wait_for): news from them is told even when it's from before the first look
+  waited = new Set(tasks.flatMap((t) => open(t).filter((w) => w.on?.source === "gitlab").map((w) => w.on!.key)));
   const st = readState(ctx);
   const out: Record<string, string> = {};
   for (const key of keys) {
@@ -106,8 +111,14 @@ async function one(key: string, st: State, ctx: Ctx): Promise<string> {
   const [, project, iidS] = KEY.exec(key)!;
   const iid = Number(iidS);
   const base = `projects/${encodeURIComponent(project)}/merge_requests/${iid}`;
+  const first = !st[key];
   const seen: Seen = (st[key] ??= { since: Date.now(), notes: [] });
   const mr = await get(base, ctx);
+  // Merged / closed before this watcher ever looked, and nobody waits on it: old news (a task's earlier MR), not told
+  if (first && (mr.state === "merged" || mr.state === "closed") && !waited.has(key) && !dry) {
+    seen.ended = mr.state;
+    return `${mr.state} before the first look, nobody waiting: not told`;
+  }
   const label = `MR !${iid}`;
   const url: string = mr.web_url;
   const state: string = mr.detailed_merge_status ?? mr.merge_status ?? "";
