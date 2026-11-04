@@ -12,6 +12,7 @@ import { SettingsSheet, type SettingsTab } from "../components/SettingsSheet";
 import { day, since, type Task, useTasks } from "../lib/tasks";
 import { project, run } from "../lib/gerdr";
 import { onShowSession } from "@gerdr/core";
+import { isSubmitEnter } from "../lib/utils";
 
 // The task board: columns left to right (to do, running, needs you, to review, done), small cards, details in a side
 // panel. Columns are worked out from facts (task status, the worker session's state, blockers), never dragged: a
@@ -742,12 +743,19 @@ function Questions({ t, byId, act, onGo }: { t: Task; byId: Record<string, Task>
                       </button>
                     ))}
                   <div className="flex gap-2">
-                    <input
+                    {/* A textarea: an answer can be a few sentences. Enter sends, Shift+Enter is a new line, an input
+                        method's Enter (picking a word) sends nothing */}
+                    <textarea
+                      rows={1}
                       value={draft[q.id] ?? ""}
                       onChange={(e) => setDraft((d) => ({ ...d, [q.id]: e.target.value }))}
-                      placeholder={q.kind === "choice" ? "其他，自己写…" : `交回：${q.label || "一个值"}（不要填密码）`}
-                      className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]"
-                      onKeyDown={(e) => e.key === "Enter" && draft[q.id]?.trim() && answer(q, draft[q.id])}
+                      placeholder={q.kind === "choice" ? "其他，自己写…（Shift+Enter 换行）" : `交回：${q.label || "一个值"}（不要填密码）`}
+                      className="field-sizing-content max-h-40 min-h-8 min-w-0 flex-1 resize-none rounded-md border bg-background px-2 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]"
+                      onKeyDown={(e) => {
+                        if (!isSubmitEnter(e)) return;
+                        e.preventDefault();
+                        if (draft[q.id]?.trim()) answer(q, draft[q.id]);
+                      }}
                     />
                     <Button disabled={!!busy || !draft[q.id]?.trim()} onClick={() => answer(q, draft[q.id])}>
                       {busy === `q${q.id}` ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
@@ -806,7 +814,7 @@ function Decision({ t, byId, busy, err, onPick, onDrop, onGo }: { t: Task; byId:
           </button>
         ))}
         <div className="flex gap-2">
-          <input value={own} onChange={(e) => setOwn(e.target.value)} placeholder="其他，自己写…" onKeyDown={(e) => e.key === "Enter" && own.trim() && onPick(own.trim())} className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]" />
+          <input value={own} onChange={(e) => setOwn(e.target.value)} placeholder="其他，自己写…" onKeyDown={(e) => isSubmitEnter(e) && own.trim() && onPick(own.trim())} className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]" />
           <Button disabled={!own.trim() || !!busy} onClick={() => onPick(own.trim())}>
             {busy === "complete" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}就这样定
           </Button>
@@ -1104,7 +1112,7 @@ function MentionArea({
           if (e.key === "ArrowDown" || e.key === "ArrowUp") {
             e.preventDefault();
             setHi((h) => (h + (e.key === "ArrowDown" ? 1 : found.length - 1)) % found.length);
-          } else if (e.key === "Enter" || e.key === "Tab") {
+          } else if ((e.key === "Enter" && !e.nativeEvent.isComposing && e.keyCode !== 229) || e.key === "Tab") {
             e.preventDefault();
             pick(found[hi]);
           } else if (e.key === "Escape") {

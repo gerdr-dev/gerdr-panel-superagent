@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Button } from "../components/Button";
 import { project, run } from "../lib/gerdr";
 import { since } from "../lib/tasks";
+import { isSubmitEnter } from "../lib/utils";
 
 // 定时任务: schedules/<id>.json, what this panel does by itself on time (Gerdr runs them with the App closed too).
 // The list and its runs come from Gerdr's /api/work/schedules; changing when one runs rewrites its file
@@ -110,7 +111,7 @@ function Row({ s, onOp, onSaved }: { s: Item; onOp: (w: "run" | "pause" | "resum
           <option value="every">每隔</option>
           <option value="at">每天</option>
         </select>
-        <input className="h-8 w-36 rounded-md border bg-background px-2 font-mono text-[13px]" value={val} placeholder={mode === "at" ? "09:00,16:00" : "30s、5m、1h"} onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => e.key === "Enter" && changed && save()} />
+        <input className="h-8 w-36 rounded-md border bg-background px-2 font-mono text-[13px]" value={val} placeholder={mode === "at" ? "09:00,16:00" : "30s、5m、1h"} onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => isSubmitEnter(e) && changed && save()} />
         {mode === "every" &&
           ["30s", "1m", "5m", "15m", "1h", "1d"].map((d) => (
             <button key={d} onClick={() => setVal(d)} className={clsx("rounded-sm px-1.5 text-[12px]", d === val ? "bg-brand/15 text-brand" : "text-muted-foreground hover:bg-accent")}>

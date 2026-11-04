@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Button } from "../components/Button";
 import { input } from "../components/pickers";
 import { run } from "../lib/gerdr";
+import { isSubmitEnter } from "../lib/utils";
 
 // 流程: the user's skills (skills/<name>/SKILL.md + references/). Prose in their own words, which Gerdr gives the panel
 // agent and every session the panel starts as a skill (they read what they need). Only prose: values the code acts
@@ -168,7 +169,7 @@ function NewRef({ skill, onCreate }: { skill: string; onCreate: (name: string, w
   return (
     <div className="space-y-1.5 rounded-md border p-2">
       <input autoFocus className={input} placeholder="名字（比如 weekly）" value={n} onChange={(e) => setN(e.target.value)} />
-      <input className={input} placeholder="什么时候看（写进索引）" value={when} onChange={(e) => setWhen(e.target.value)} onKeyDown={(e) => e.key === "Enter" && n.trim() && go()} />
+      <input className={input} placeholder="什么时候看（写进索引）" value={when} onChange={(e) => setWhen(e.target.value)} onKeyDown={(e) => isSubmitEnter(e) && n.trim() && go()} />
       {err && <p className="text-[11px] text-bad">{err}</p>}
       <div className="flex justify-end gap-1">
         <Button variant="ghost" onClick={() => setOpen(false)}>
