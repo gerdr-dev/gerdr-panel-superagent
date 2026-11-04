@@ -1,5 +1,6 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
+import { useLeaving } from "@/lib/linger"
 import { XIcon } from "lucide-react"
 import { Dialog as DialogPrimitive } from "radix-ui"
 
@@ -7,9 +8,12 @@ import { Button } from "@/components/ui/button"
 import { usePortalContainer } from "../../lib/portal"
 
 function Dialog({
+  open,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Root>) {
-  return <DialogPrimitive.Root data-slot="dialog" {...props} />
+  // Closing inside a <Linger> (lib/linger.tsx): still drawn, animating out
+  const leaving = useLeaving()
+  return <DialogPrimitive.Root data-slot="dialog" open={leaving ? false : open} {...props} />
 }
 
 function DialogTrigger({

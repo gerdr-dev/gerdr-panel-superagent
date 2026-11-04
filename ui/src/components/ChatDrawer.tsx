@@ -67,7 +67,7 @@ export function ChatDrawer({
     </Button>
   );
   const header = (toggle: ReactNode) => (
-    <div className="flex h-10 shrink-0 items-center gap-1 border-b px-3">
+    <div className="relative z-30 flex h-10 shrink-0 items-center gap-1 border-b px-3">
       <span className={clsx("mr-1 size-2 shrink-0 rounded-full", s?.status === "running" ? "bg-ok" : s?.status === "waiting" || s?.status === "error" ? "bg-warn" : "bg-muted-foreground/40")} />
       <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{s?.title || session}</span>
       {toggle}

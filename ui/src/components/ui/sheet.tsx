@@ -1,5 +1,6 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
+import { useLeaving } from "@/lib/linger"
 import { XIcon } from "lucide-react"
 import { Dialog as SheetPrimitive } from "radix-ui"
 import { keepLayer } from "@/components/ui/dialog"
@@ -8,8 +9,10 @@ import { usePortalContainer } from "../../lib/portal"
 // shadcn/ui's Sheet (a Radix Dialog sliding in from an edge). The animate-in / slide-in-from-* classes come from
 // src/animate.css (tw-animate-css); index.css precompiles them so the first frame is already off-screen.
 
-function Sheet({ ...props }: React.ComponentProps<typeof SheetPrimitive.Root>) {
-  return <SheetPrimitive.Root data-slot="sheet" {...props} />
+function Sheet({ open, ...props }: React.ComponentProps<typeof SheetPrimitive.Root>) {
+  // Closing inside a <Linger> (lib/linger.tsx): still drawn, animating out
+  const leaving = useLeaving()
+  return <SheetPrimitive.Root data-slot="sheet" open={leaving ? false : open} {...props} />
 }
 
 function SheetTrigger({ ...props }: React.ComponentProps<typeof SheetPrimitive.Trigger>) {

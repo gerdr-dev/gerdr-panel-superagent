@@ -8,6 +8,7 @@ import { AttachmentBar, useAttach, type Attachment } from "../components/Attachm
 import { askSecret, secretNames } from "../lib/bridge";
 import { ChatDrawer, type ChatAction, type ChatItem } from "../components/ChatDrawer";
 import { Trail } from "../components/Trail";
+import { Linger } from "../lib/linger";
 import { SettingsSheet, type SettingsTab } from "../components/SettingsSheet";
 import { ago, day, since, type Task, type Wait, useTasks, waitedSince } from "../lib/tasks";
 import { project, run } from "../lib/gerdr";
@@ -269,8 +270,8 @@ export default function BoardPage() {
         )}
         </>
       )}
-      {sel && !inChat && <Drawer t={sel} byId={byId} act={act} onClose={() => setOpen("")} onGo={setOpen} />}
-      {panel && sel && viewing && view && !peek && (
+      <Linger>{sel && !inChat && <Drawer t={sel} byId={byId} act={act} onClose={() => setOpen("")} onGo={setOpen} />}</Linger>
+      <Linger>{panel && sel && viewing && view && !peek && (
         <ChatDrawer
           session={view.session}
           sub={view.sub}
@@ -280,8 +281,8 @@ export default function BoardPage() {
           onAction={onAction}
           onClose={() => setOpen("")}
         />
-      )}
-      {peek && (
+      )}</Linger>
+      <Linger>{peek && (
         <ChatDrawer
           session={peek.session}
           sub={peek.sub}
@@ -301,9 +302,9 @@ export default function BoardPage() {
           }
           onClose={() => setPeek(null)}
         />
-      )}
-      {creating && <NewTask onClose={() => setCreating(false)} act={act} />}
-      {settings && <SettingsSheet tab={settings} onTab={setSettings} onClose={() => setSettings(null)} onTask={(id) => (setSettings(null), setOpen(id))} />}
+      )}</Linger>
+      <Linger>{creating && <NewTask onClose={() => setCreating(false)} act={act} />}</Linger>
+      <Linger>{settings && <SettingsSheet tab={settings} onTab={setSettings} onClose={() => setSettings(null)} onTask={(id) => (setSettings(null), setOpen(id))} />}</Linger>
     </div>
   );
 }
