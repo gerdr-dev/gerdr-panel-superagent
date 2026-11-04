@@ -119,6 +119,22 @@ export function since(ms?: number) {
   return `${Math.floor(h / 24)} 天`;
 }
 
+/** "3 分钟前", or just "刚刚" (since() + "前" would read "刚刚前"). */
+export function ago(ms?: number) {
+  const s = since(ms);
+  return s === "刚刚" || !s ? s : `${s}前`;
+}
+
+/**
+ * Since when a card in 等你 has been waiting on the user: a human item since it was asked, an agent task since its
+ * worker started waiting / stopped. The card shows this time and the column is sorted by it, so the two agree.
+ */
+export function waitedSince(t: Task) {
+  if (t.owner === "human") return t.createdAt;
+  const l = t.live;
+  return (l?.status === "waiting" ? l.waitingSince : l?.updatedAt) ?? t.updatedAt;
+}
+
 export function day(ms: number) {
   return new Date(ms).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric", weekday: "short" });
 }

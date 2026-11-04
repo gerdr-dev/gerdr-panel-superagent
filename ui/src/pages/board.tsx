@@ -9,7 +9,7 @@ import { askSecret, secretNames } from "../lib/bridge";
 import { ChatDrawer, type ChatAction, type ChatItem } from "../components/ChatDrawer";
 import { Trail } from "../components/Trail";
 import { SettingsSheet, type SettingsTab } from "../components/SettingsSheet";
-import { day, since, type Task, useTasks } from "../lib/tasks";
+import { ago, day, since, type Task, useTasks, waitedSince } from "../lib/tasks";
 import { project, run } from "../lib/gerdr";
 import { onShowSession } from "@gerdr/core";
 import { isSubmitEnter } from "../lib/utils";
@@ -45,7 +45,8 @@ export default function BoardPage() {
   const list = (c: Col) => {
     const l = (tasks ?? []).filter((t) => colOf(t) === c);
     if (c === "done") return l.sort((a, b) => Number(a.status === "dropped") - Number(b.status === "dropped") || (b.doneAt ?? 0) - (a.doneAt ?? 0));
-    if (c === "you") return l.sort((a, b) => Number(!!b.urgent) - Number(!!a.urgent) || a.updatedAt - b.updatedAt);
+    // Newest first, like the other columns, by the time each card shows
+    if (c === "you") return l.sort((a, b) => waitedSince(b) - waitedSince(a));
     return l.sort((a, b) => b.updatedAt - a.updatedAt);
   };
   const sel = open ? byId[open] : undefined;
@@ -363,6 +364,9 @@ function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, T
   // A human step / question: the agent task that asked for it, when its conversation can be opened
   const by = t.owner === "human" ? (t.askedBy && byId[t.askedBy]) || Object.values(byId).find((x) => x.owner === "agent" && x.blockedBy?.includes(t.id)) : undefined;
   const asker = by?.session ? by : undefined;
+  // When a human item came in, so every card under 等你 carries a time (an agent card has it in its live text)
+  const open = t.status !== "done" && t.status !== "dropped";
+  const asked = t.owner === "human" && open ? `${ago(t.createdAt)}${t.handBack?.kind === "choice" || t.questions ? "问的" : "交给你"}` : "";
   return (
     <button onClick={onOpen} className={clsx("block w-full space-y-1.5 rounded-lg border bg-card p-3 text-left shadow-xs transition-[border-color,box-shadow,transform] duration-150 hover:border-ring/50 hover:shadow-sm active:scale-[0.99]", active ? "border-ring" : notDispatched(t) && "border-warn/60")}>
       <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
@@ -416,9 +420,10 @@ function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, T
           {(t.questions ?? []).filter((q) => !q.dropped).length > 1 && ` · 共 ${(t.questions ?? []).filter((q) => !q.dropped).length} 个`}
         </p>
       )}
-      {(t.repo || live || blockers.length > 0 || !!t.helpers?.length) && (
+      {(t.repo || live || asked || blockers.length > 0 || !!t.helpers?.length) && (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
           {t.repo && <span>{t.repo.split("/").pop()}</span>}
+          {asked && <span>{asked}</span>}
           {(t.agent || t.model) && <span>· {[t.agent, t.model].filter(Boolean).join(" / ")}</span>}
         {t.from && <span>· 拆自 {t.from}</span>}
           {t.status === "delivering" && t.delivery ? (
@@ -560,13 +565,13 @@ function liveTone(t: Task) {
 
 function liveText(t: Task) {
   const l = t.live;
-  if (!l) return t.status === "todo" ? (t.routing ? "Superagent 在派" : "还没派出去") : t.session ? "会话已关闭" : "";
+  if (!l) return t.status === "todo" ? (t.routing ? "Superagent 在派" : "还没派出去") : t.session ? `会话已关闭 · ${ago(t.updatedAt)}` : "";
   if (l.status === "running") return `在跑 · ${since(l.turnStartedAt)}`;
   if (l.status === "waiting") return `等审批 / 回答 · ${since(l.waitingSince)}`;
   if (l.status === "error") return `出错：${l.error ?? ""}`;
   // Its turn is over but a session it handed work to is still going: waiting on that, not stopped
-  if (t.helpers?.length) return `等它派出的会话 · ${since(l.updatedAt)}前`;
-  return `停下 · ${since(l.updatedAt)}前`;
+  if (t.helpers?.length) return `等它派出的会话 · ${ago(l.updatedAt)}`;
+  return `停下 · ${ago(l.updatedAt)}`;
 }
 
 function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act: Act }) {
