@@ -7,7 +7,7 @@
 // (ctx.events.reply): "taken as tN" here, results from _store.ts tellOrigins.
 
 import { add } from "./tasks";
-import { load, type Task } from "./_store";
+import { find, load, note, update, type Task } from "./_store";
 
 const DIR = "triggers";
 const PREFIX = "inbox-";
@@ -66,18 +66,40 @@ export function setSource(input: { on: string; enabled: boolean; key?: string; t
   return { on: input.on, enabled: true, key: t.key };
 }
 
+// A conversation goes on with its task for this long after the task is done; later, the same conversation starts a
+// new task (the old worker's context is stale by then: DESIGN.md, "隔了很久再提起旧任务").
+const FOLLOW_MS = 24 * 3600_000;
+
 /**
- * A trigger's run: the event becomes a task, handed out like one typed on the board (no repository: the router
- * picks, the attachments go along), and the sender hears it was taken. The same event twice (a source re-sending)
- * makes one task.
+ * The task a follow-up belongs to: the latest from the same conversation (source and key — the source decides what
+ * a conversation is: a Slack DM, a thread) that's still going or was done less than a day ago.
+ */
+function conversationTask(tasks: Task[], e: GerdrEvent): Task | undefined {
+  if (!e.key) return undefined;
+  const now = Date.now();
+  return tasks
+    .filter((t) => t.origin?.source === e.source && t.origin?.key === e.key && t.status !== "dropped")
+    .filter((t) => t.status !== "done" || now - (t.doneAt ?? t.updatedAt ?? 0) < FOLLOW_MS)
+    .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))[0];
+}
+
+/**
+ * A trigger's run. A message in a conversation that already has a task goes on with it, like deva kept one agent per
+ * DM / thread: not dispatched yet → added to what the router will hand out; with a worker → sent to it right away
+ * (reopened if it was done, so its next result is answered again). Otherwise the event becomes a new task, handed out
+ * like one typed on the board (no repository: the router picks, attachments go along), and the sender hears it was
+ * taken. The same event twice (a source re-sending) is handled once.
  */
 export async function onEvent(input: { event: GerdrEvent; trigger?: string }, ctx: Ctx) {
   const e = input?.event;
   if (!e?.id) throw new Error("没有事件（这个函数由 triggers/inbox-*.json 调用）");
-  const dup = load(ctx).store.tasks.find((t) => t.origin?.id === e.id);
+  const { store } = load(ctx);
+  const dup = store.tasks.find((t) => t.origin?.id === e.id || t.followups?.includes(e.id));
   if (dup) return { task: dup.id, duplicate: true };
   const text = (e.text ?? "").trim() || e.title || "";
   const files = Array.isArray(e.data?.files) ? e.data.files.filter((f: any) => f?.path) : [];
+  const prev = conversationTask(store.tasks, e);
+  if (prev) return followUp(ctx, prev.id, e, text, files);
   const from = [e.data?.userName && `来自 ${e.data.userName}`, `${e.source}/${e.kind}`].filter(Boolean).join("，");
   const prompt = `${text}\n\n（${from}${e.url ? `：${e.url}` : ""}）`;
   const t = (await add(
@@ -103,4 +125,31 @@ export async function onEvent(input: { event: GerdrEvent; trigger?: string }, ct
 function firstLine(text: string) {
   const line = text.split("\n")[0].trim();
   return [...line].length > 40 ? [...line].slice(0, 40).join("") + "…" : line;
+}
+
+async function followUp(ctx: Ctx, id: string, e: GerdrEvent, text: string, files: any[]) {
+  const who = e.data?.userName ? `${e.data.userName} ` : "";
+  const t = update(ctx, (s) => {
+    const x = find(s, id);
+    x.followups = [...(x.followups ?? []), e.id];
+    note(x, `${who}接着说：${text}`);
+    if (!x.session) {
+      // Still with the router: what it hands out is the task's prompt, so the follow-up goes in there
+      x.prompt = `${x.prompt ?? ""}\n\n${who}接着说：${text}`;
+      if (files.length) x.attachments = [...(x.attachments ?? []), ...files.map((f) => ({ path: f.path, name: f.name ?? f.path.split("/").pop(), mime: f.mimetype }))];
+    } else if (x.status === "done" || x.status === "review") {
+      // Reopened: it's being worked on again, and its next result goes back to the conversation (tellOrigins)
+      Object.assign(x, { status: "running", question: undefined });
+      x.doneAt = undefined;
+    }
+    x.updatedAt = Date.now();
+    return x;
+  });
+  if (t.session) {
+    await ctx.sessions.send(t.session, `[${e.source} 上${who}接着说]（任务 ${t.id}）\n\n${text}\n\n做完照常用 task_update 汇报，结果会转回给他。`, {
+      now: true,
+      attachments: files.map((f) => f.path),
+    });
+  }
+  return { task: t.id, followUp: true };
 }

@@ -38,6 +38,8 @@ export type Task = {
    * The event it came from (a chat message, through the 触发器 settings: local/inbox.ts), with its reply address:
    * the board answers there when the task is taken, and again when it reaches a result (tellOrigins below).
    */
+  /** Later messages of the same conversation handled as follow-ups (event ids), so a re-sent one isn't handled twice. */
+  followups?: string[];
   origin?: { id: string; source: string; kind: string; key?: string; title?: string; url?: string; reply?: { kind: string; data?: unknown } };
   /** Split off this task by the router (one of several parts run in parallel). */
   from?: string;
