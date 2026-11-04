@@ -14,6 +14,7 @@ import { project, run } from "../lib/gerdr";
 import { onShowSession } from "@gerdr/core";
 import { isSubmitEnter } from "../lib/utils";
 import { Md } from "../lib/markdown";
+import { usePhone, useSwipePages } from "../lib/swipe";
 import { usePoll } from "../lib/visible";
 
 // The task board: columns left to right (to do, running, needs you, to review, done), small cards, details in a side
@@ -35,7 +36,8 @@ const PHONE_ORDER: Col[] = ["you", "review", "active", "todo", "done"];
 
 /**
  * The columns as tabs, on a phone only: colour and count on each, the ones with nothing in them dimmed. Sideways
- * scrolling between columns was awkward on a phone (the user, 2026-11-05).
+ * scrolling between columns was awkward on a phone (the user, 2026-11-05); a swipe on the column turns to the next
+ * tab, like Gerdr's own phone overview (lib/swipe.ts).
  */
 function PhoneTabs({ cols, count, current, onPick }: { cols: typeof COLS; count: (c: Col) => number; current: Col; onPick: (c: Col) => void }) {
   return (
@@ -91,6 +93,10 @@ export default function BoardPage() {
   const [phoneTab, setPhoneTab] = useState<Col | null>(null);
   const phoneCols = PHONE_ORDER.map((id) => COLS.find((c) => c.id === id)!);
   const phoneCol: Col = phoneTab ?? PHONE_ORDER.find((c) => list(c).length > 0) ?? "you";
+  const phone = usePhone();
+  const pagerView = useRef<HTMLDivElement>(null);
+  const pagerTrack = useRef<HTMLDivElement>(null);
+  useSwipePages(pagerView, pagerTrack, PHONE_ORDER.indexOf(phoneCol), phone ? PHONE_ORDER.length : 0, (i) => setPhoneTab(PHONE_ORDER[i]));
   const sel = open ? byId[open] : undefined;
   // An agent task with a worker opens as its conversation (Gerdr's chat in our drawer): the whole chat to decide
   // from, and its input box for the answer. Everything else (to do, human tasks, finished ones) in our own panel.
@@ -149,6 +155,42 @@ export default function BoardPage() {
     if (action.startsWith("human:")) return setOpen(action.slice(6));
   };
 
+  const column = (c: (typeof COLS)[number]) => {
+    const all = list(c.id);
+    const shown = c.id === "done" ? all.slice(0, doneLimit) : all;
+    const minutes = c.id === "you" ? all.filter((t) => t.owner === "human").reduce((n, t) => n + (t.minutes ?? 0), 0) : 0;
+    return (
+      <section
+        key={c.id}
+        className={clsx(
+          "flex min-w-60 flex-1 basis-0 flex-col rounded-xl max-md:min-w-0",
+          // What needs the user stands out in the board itself: 等你 with anything in it, 待验收 a little
+          c.id === "you" && all.length ? "bg-warn/10 ring-1 ring-warn/40" : c.id === "review" && all.length ? "bg-ok/5 ring-1 ring-ok/30" : "bg-muted/50",
+        )}
+      >
+        <h2 className="flex items-center gap-2 px-3 pt-3 pb-2 text-[13px] font-medium">
+          {c.icon}
+          {c.title}
+          <span className={clsx("text-[12px] tabular-nums", c.id === "you" && all.length ? "rounded-full bg-warn px-1.5 font-medium text-background" : "font-normal text-muted-foreground")}>{all.length}</span>
+          {minutes > 0 && <span className="text-[11px] font-normal text-muted-foreground">· 约 {minutes} 分钟</span>}
+          {c.id === "todo" && (
+            <button aria-label="新任务" className="ml-auto rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => setCreating(true)}>
+              <Plus className="size-3.5" />
+            </button>
+          )}
+        </h2>
+        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-2 pb-2">
+          {shown.length ? shown.map((t) => <MiniCard key={t.id} t={t} byId={byId} active={t.id === open} onOpen={() => (setPeek(null), setOpen(t.id))} />) : <p className="py-6 text-center text-[12px] text-muted-foreground">无任务</p>}
+          {all.length > shown.length && (
+            <button className="w-full py-2 text-[12px] text-muted-foreground hover:text-foreground" onClick={() => setDoneLimit(doneLimit + 50)}>
+              再显示 {Math.min(50, all.length - shown.length)} 个
+            </button>
+          )}
+        </div>
+      </section>
+    );
+  };
+
   return (
     // clip, not hidden: nothing may widen the page sideways on a phone, and hidden would break the sticky tabs
     <div className="flex h-full min-h-0 flex-col [overflow-wrap:anywhere] max-md:h-auto max-md:overflow-x-clip md:relative">
@@ -184,45 +226,20 @@ export default function BoardPage() {
         <>
         <Alerts onLog={() => setSettings("log")} />
         <PhoneTabs cols={phoneCols} count={(c) => list(c).length} current={phoneCol} onPick={setPhoneTab} />
-        <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto p-3 max-md:overflow-visible">
-          {COLS.map((c) => {
-            const all = list(c.id);
-            const shown = c.id === "done" ? all.slice(0, doneLimit) : all;
-            const minutes = c.id === "you" ? all.filter((t) => t.owner === "human").reduce((n, t) => n + (t.minutes ?? 0), 0) : 0;
-            return (
-              <section
-                key={c.id}
-                className={clsx(
-                  "flex min-w-60 flex-1 basis-0 flex-col rounded-xl max-md:min-w-0",
-                  // On a phone one column at a time, picked with the tabs above (no sideways scrolling)
-                  c.id !== phoneCol && "max-md:hidden",
-                  // What needs the user stands out in the board itself: 等你 with anything in it, 待验收 a little
-                  c.id === "you" && all.length ? "bg-warn/10 ring-1 ring-warn/40" : c.id === "review" && all.length ? "bg-ok/5 ring-1 ring-ok/30" : "bg-muted/50",
-                )}
-              >
-                <h2 className="flex items-center gap-2 px-3 pt-3 pb-2 text-[13px] font-medium">
-                  {c.icon}
-                  {c.title}
-                  <span className={clsx("text-[12px] tabular-nums", c.id === "you" && all.length ? "rounded-full bg-warn px-1.5 font-medium text-background" : "font-normal text-muted-foreground")}>{all.length}</span>
-                  {minutes > 0 && <span className="text-[11px] font-normal text-muted-foreground">· 约 {minutes} 分钟</span>}
-                  {c.id === "todo" && (
-                    <button aria-label="新任务" className="ml-auto rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => setCreating(true)}>
-                      <Plus className="size-3.5" />
-                    </button>
-                  )}
-                </h2>
-                <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-2 pb-2">
-                  {shown.length ? shown.map((t) => <MiniCard key={t.id} t={t} byId={byId} active={t.id === open} onOpen={() => (setPeek(null), setOpen(t.id))} />) : <p className="py-6 text-center text-[12px] text-muted-foreground">无任务</p>}
-                  {all.length > shown.length && (
-                    <button className="w-full py-2 text-[12px] text-muted-foreground hover:text-foreground" onClick={() => setDoneLimit(doneLimit + 50)}>
-                      再显示 {Math.min(50, all.length - shown.length)} 个
-                    </button>
-                  )}
+        {phone ? (
+          // A phone: one column at a time, the tabs above or a swipe to the next (lib/swipe.ts)
+          <div ref={pagerView} className="overflow-hidden">
+            <div ref={pagerTrack} className="flex items-start">
+              {phoneCols.map((c) => (
+                <div key={c.id} className="w-full shrink-0 p-3">
+                  {column(c)}
                 </div>
-              </section>
-            );
-          })}
-        </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto p-3">{COLS.map(column)}</div>
+        )}
         </>
       )}
       {sel && !inChat && <Drawer t={sel} byId={byId} act={act} onClose={() => setOpen("")} onGo={setOpen} />}
