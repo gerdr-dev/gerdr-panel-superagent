@@ -96,7 +96,8 @@ export default function BoardPage() {
   const phone = usePhone();
   const pagerView = useRef<HTMLDivElement>(null);
   const pagerTrack = useRef<HTMLDivElement>(null);
-  useSwipePages(pagerView, pagerTrack, PHONE_ORDER.indexOf(phoneCol), phone ? PHONE_ORDER.length : 0, (i) => setPhoneTab(PHONE_ORDER[i]));
+  const pageRoot = useRef<HTMLDivElement>(null);
+  useSwipePages(pagerView, pagerTrack, PHONE_ORDER.indexOf(phoneCol), phone ? PHONE_ORDER.length : 0, (i) => setPhoneTab(PHONE_ORDER[i]), pageRoot);
   const sel = open ? byId[open] : undefined;
   // An agent task with a worker opens as its conversation (Gerdr's chat in our drawer): the whole chat to decide
   // from, and its input box for the answer. Everything else (to do, human tasks, finished ones) in our own panel.
@@ -196,7 +197,7 @@ export default function BoardPage() {
 
   return (
     // clip, not hidden: nothing may widen the page sideways on a phone, and hidden would break the sticky tabs
-    <div className="flex h-full min-h-0 flex-col [overflow-wrap:anywhere] max-md:h-auto max-md:overflow-x-clip md:relative">
+    <div ref={pageRoot} className="flex h-full min-h-0 flex-col [overflow-wrap:anywhere] max-md:h-auto max-md:min-h-full max-md:overflow-x-clip md:relative">
       {/* On a phone the buttons are icons only (their words would push the header wider than the screen and squeeze
           the title into a column of letters); the counts stay */}
       <header className="flex min-w-0 items-center justify-between gap-3 border-b px-4 py-2.5 max-md:gap-1 max-md:px-3">

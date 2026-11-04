@@ -27,10 +27,18 @@ export function usePhone() {
 
 /**
  * The pager: `view` clips, `track` holds the pages side by side (each its full width). `index` shows; a swipe calls
- * `onIndex` with the neighbour's. The view's height follows the page shown, so a short column leaves no blank page
+ * `onIndex` with the neighbour's. A swipe may start anywhere in `area` (the empty space below a short column too). The view's height follows the page shown, so a short column leaves no blank page
  * to scroll below it.
  */
-export function useSwipePages(view: RefObject<HTMLDivElement | null>, track: RefObject<HTMLDivElement | null>, index: number, count: number, onIndex: (i: number) => void) {
+export function useSwipePages(
+  view: RefObject<HTMLDivElement | null>,
+  track: RefObject<HTMLDivElement | null>,
+  index: number,
+  count: number,
+  onIndex: (i: number) => void,
+  /** Where a swipe may start: the whole page, not only the column (it's short when it has few cards). Default: view. */
+  area?: RefObject<HTMLElement | null>,
+) {
   const at = useRef(index);
   const turn = useRef(onIndex);
   turn.current = onIndex;
@@ -80,8 +88,9 @@ export function useSwipePages(view: RefObject<HTMLDivElement | null>, track: Ref
   }, []);
 
   useEffect(() => {
-    const el = view.current;
-    if (!el) return;
+    // The panel's whole area in Gerdr (its mount), when there is one: below a short column is Gerdr's space, not ours
+    const el = (area?.current?.closest("[data-gerdr-mount]") as HTMLElement | null) ?? area?.current ?? view.current;
+    if (!el || !count) return;
     let g: { x: number; y: number; mode: "wait" | "swipe" | "off"; off: number; trail: { x: number; t: number }[] } | null = null;
     const has = (step: number) => at.current + step >= 0 && at.current + step < count;
     // 1:1 towards a neighbour, rubber-band past the first / last page
@@ -155,9 +164,10 @@ export function useSwipePages(view: RefObject<HTMLDivElement | null>, track: Ref
   }, [count]);
 }
 
-/** A touch that belongs to something under it: a text box, something that scrolls sideways, [data-no-swipe]. */
+/** A touch that belongs to something under it: a text box, a drawer, something that scrolls sideways, [data-no-swipe]. */
 function skip(t: Element, root: Element) {
-  if (t.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], [data-no-swipe]")) return true;
+  // A drawer or dialog over the board (portaled into the same mount): its own touches, not the board's columns
+  if (t.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], [data-no-swipe], [role='dialog']")) return true;
   for (let n: Element | null = t; n && n !== root; n = n.parentElement) {
     if (n.scrollWidth <= n.clientWidth + 1) continue;
     const ox = getComputedStyle(n).overflowX;
