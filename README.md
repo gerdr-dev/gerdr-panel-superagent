@@ -45,7 +45,9 @@
   可选的仓库用 `gerdr work run tasks.repos` 看。你自己派活（`tasks.add`）时也可以不给 `repo`，但你本来就知道该去哪，直接给上。
 - 用户要亲手做的步骤（网页后台点开关、准备账号、审批）记成人工任务：
   `gerdr work run tasks.add '{"title":"…","owner":"human","steps":"带直达链接的步骤","handBack":{"kind":"none|value|secret","label":"…","name":"SECRET_NAME"},"verify":"agent 怎么核验","minutes":5,"blockedBy":[]}'`
-  依赖它的 agent 任务写 `"blockedBy":["t3"]`。密码 / token 只能用 `secret`，永远不要让用户在对话里贴。
+  依赖它的 agent 任务写 `"blockedBy":["t3"]`。密码 / token 永远不要让用户在对话里贴：给 worker 写的代码用的
+  （API key、测试账号）用 `none`，步骤里写清楚放进哪个仓库的哪个文件（`.env` 这类）、变量名；`secret` 只给面板函数
+  （`ctx.secrets.get`）用，worker 和它的代码都读不到。
 - 看板派出去的 worker 不再给你发「Gerdr 回报」：用户看的是看板，worker 用 work 工具直接更新看板。你自己用
   `gerdr session new --report-to self` 派的才会回报给你。以前的说明：worker 每次停下你会收到「Gerdr 回报」。先跑一次 `gerdr work run tasks.list`：它从 worker 的回复里读出结果、更新看板
   （新冒出来的人工任务也是这时登记的），你不用手改任务状态。然后：

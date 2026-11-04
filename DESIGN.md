@@ -71,6 +71,11 @@ worker 拿到一组 面板工具（`local/board.ts`，经 Gerdr 的 `gerdr work 
   最后一个答完，worker 一次收到全部答案。对话里每个问题仍有自己的卡片（ref `tN#2`），各自能答。要你亲手做的步骤
   （授权、密钥）还是单独一项。
   **被否掉的做法：一个问题一个任务。** 用户：「同一个事情，让我做的决定，非要分好几个 task？」
+- **要交回的密钥按谁用来分**：worker 自己的代码 / 命令要用的（TTS、第三方 API key、测试账号），登记成步骤
+  （`handBack: none`），步骤里写清放进哪个仓库的哪个不进 git 的文件（`.env`）、变量名；只有面板函数
+  （`ctx.secrets.get`）要用的才是 `handBack: secret`。
+  **被否掉的做法：密码 / token 一律 `secret`。** 面板密钥只有面板函数读得到，worker 和它写的代码都读不到：
+  用户在做 TTS 功能时去申请了 key，照规则存成面板密钥，结果那段代码根本拿不到。
 - **答错了能改**：卡片上「撤销」只在发出前几秒有效；发出以后，已处理的那一行有「改答案」，看板上的问题也能改。
   答完之前改，没人照旧答案做过事；答完之后改，worker 会收到原来是什么、现在是什么（`tasks.answerQuestion` / `reanswer`）。
 - **抽屉、弹窗挂在面板自己的区域里**（`ui/src/lib/portal.ts`，Gerdr 的 `usePortalContainer`）：Gerdr 切到别的面板或 Code 时

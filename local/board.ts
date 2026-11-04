@@ -19,7 +19,7 @@ const STEP = {
     steps: { type: "string", description: "Numbered steps the user can follow without reading your chat: direct links, codes, values to paste" },
     handBack: {
       type: "object",
-      description: "What the user gives back when done. kind none (just mark done) / value (a non-secret value) / secret (stored as a panel secret named name, never shown to anyone)",
+      description: "What the user gives back when done. kind none (just mark done) / value (a non-secret value) / secret (stored as a panel secret named name, never shown to anyone; only panel functions can read it through ctx.secrets.get, not you or the code you write). A key your own code / commands need (an API key, a test password): kind none, and the steps say which file to put it in (a git-ignored one like .env, with its absolute path) and under what name; never ask for it in the chat",
       properties: { kind: { type: "string", enum: ["none", "value", "secret"] }, label: { type: "string" }, name: { type: "string" } },
     },
     verify: { type: "string", description: "How you will check it once the user says it's done" },
