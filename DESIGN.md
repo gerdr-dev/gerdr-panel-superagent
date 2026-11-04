@@ -123,7 +123,9 @@ worker 拿到一组 面板工具（`local/board.ts`，经 Gerdr 的 `gerdr work 
 5. 需要变基：自己变基。
 6. GitLab 说可以合并、批准数也够：自己合并。
 
-合并后任务完成；MR 被关了、改了好几轮还没过，就交给用户。
+合并了：也只是一件事，发给 worker（`gitlab/mr.merged`），任务回到进行中，由 worker 判断完没完：合并后可能还要发布、
+到线上验证、告诉谁。完成只由 worker 报（或你标）；规则从不替它判完成——t30 合并后还要发 prod，看板却把它标完成、关了对话（2026-11-04）。
+MR 被关了、改了好几轮还没过，就交给用户。
 交给 worker 的消息只说发生了什么，处理规则让 worker 自己去读 skill。最早的版本把整份规则粘进消息里，worker 收到一堆跟它无关的东西。
 
 自动还是手动合并 / 变基、变基时跑不跑流水线、至少几个人批准、最多几轮，都是用户的选择，在「设置 → MR 合并」，
@@ -196,7 +198,7 @@ worker 拿到一组 面板工具（`local/board.ts`，经 Gerdr 的 `gerdr work 
 - **MR 是任务的一段对话**：worker 报 `delivering` 带上 MR，任务就订阅 `gitlab` / `group/repo!34`（`_apply.ts`）。
   mrwatch 只当来源：新意见、流水线挂了、有冲突都发成事件（`gitlab/mr.review` 等），面板自己的 `triggers/mr.json`
   收进来，按订阅交给 worker，和 Slack 的追问走同一条路：「去向」里看得到，不归它的也能 `hand_back`。
-  变基、合并、合并后完成、MR 被关、改太多轮问人，仍然是 mrwatch 按「设置」直接做。
+  变基、合并、MR 被关、改太多轮问人，仍然是 mrwatch 按「设置」直接做；合并之后的事归 worker。
   **被否掉的做法：mrwatch 自己 `sessions.send` 给 worker。** 另一条路：看不到记录，worker 也交不回。
 - **主动工作**（dsh 的 inferred + observe）：触发器里把一个来源设成「不是找我的」（频道闲聊、告警），它的事件只按
   `skills/my-workflow/references/proactive.md` 里用户自己写的规则接，接的时候写明是哪条规则，worker 只做那条允许的，

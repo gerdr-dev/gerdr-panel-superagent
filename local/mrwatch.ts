@@ -12,8 +12,8 @@ import { askUser, endWaits, open } from "./_waits";
 // inbox.onEvent delivers it to the worker like any follow-up — logged in 去向, given back with hand_back if it isn't
 // that task's. dsh-superagent's GitHub source works the same way for pull requests. The handling rules are in the
 // user's skill (the worker has it; this only says what happened). Rebasing and merging follow
-// the values in that skill (_config.ts): automatic, or waiting for the user's button (rebase / mergeNow below). Merged → the task is done and
-// its worker parked. A closed MR, or more review rounds than mr.maxRounds, goes to the user (the task's question:
+// the values in that skill (_config.ts): automatic, or waiting for the user's button (rebase / mergeNow below). Merged → an event for the worker
+// (gitlab/mr.merged): the task goes back to running, and the worker says when it's done. A closed MR, or more review rounds than mr.maxRounds, goes to the user (the task's question:
 // the board's "needs you").
 //
 // It never hands the same thing twice: notes already handed, the pipeline and the sha already acted on are kept on
@@ -21,7 +21,7 @@ import { askUser, endWaits, open } from "./_waits";
 
 const NOTE_MAX = 1500;
 
-type Change = Partial<Delivery> & { question?: string; done?: boolean; summary?: string };
+type Change = Partial<Delivery> & { question?: string; merged?: boolean };
 
 /** One pass over every delivering task. Returns what it did, per task (the run log shows it). */
 export async function tick(input: { dry?: boolean } | undefined, ctx: Ctx) {
@@ -84,9 +84,25 @@ async function one(t: Task, me: string, ctx: Ctx): Promise<string> {
     return what;
   };
 
+  // Merged: news for the worker, not the end of the task. What comes after a merge (a release, checking it in
+  // production, telling someone) is the worker's to know, and only it says the task is done (t30 on 2026-11-04 still
+  // had a prod release to run when the board marked it done and closed its chat). The MR wait ends; the task is back
+  // in progress, and the merge goes to the worker as an event like a review comment.
   if (mr.state === "merged") {
-    if (t.session) await act("close the worker", () => ctx.sessions.close(t.session!).catch(() => {}));
-    return save({ done: true, summary: t.summary }, "merged");
+    const out = save({ merged: true, detail: "已合并" }, "merged");
+    await act("emit merged", async () =>
+      emit(ctx, d, {
+        id: `gitlab:merged:${d.project}!${d.iid}`,
+        kind: "mr.merged",
+        actor: mr.merged_by?.username,
+        title: `${label} 合并了`,
+        text:
+          `${label} 合并进 ${mr.target_branch} 了${mr.merged_by?.username ? `（${mr.merged_by.username} 合的）` : ""}${mr.merge_commit_sha ? `，merge commit ${String(mr.merge_commit_sha).slice(0, 10)}` : ""}。\n` +
+          `合并之后还有要做的（发布、到线上验证、告诉谁），照你的工作流程接着做；都做完了用 task_update 报 done，结论要用户看就报 review。`,
+        url: d.url,
+      }),
+    );
+    return out;
   }
   if (mr.state === "closed") return save({ question: `${label} 被关掉了（没合并）。要重开、换个方案，还是放弃这个任务？`, detail: "MR 已关闭" }, "closed");
 
@@ -284,16 +300,16 @@ function apply(id: string, c: Change, ctx: Ctx) {
   update(ctx, (s) => {
     const t = find(s, id);
     if (t.status !== "delivering" || !t.delivery) return; // accepted / dropped meanwhile
-    const { question, done, summary, ...d } = c;
+    const { question, merged, ...d } = c;
     Object.assign(t.delivery, d);
     if (question && !open(t).some((w) => w.kind === "user" && w.what === question)) {
       askUser(t, question);
       note(t, question);
     }
-    if (done) {
-      endWaits(t, () => true, `MR !${t.delivery.iid} 合并了`);
-      Object.assign(t, { status: "done", doneAt: Date.now() });
-      note(t, `MR !${t.delivery.iid} 已合并`);
+    if (merged) {
+      endWaits(t, (w) => w.kind === "mr", `MR !${t.delivery.iid} 合并了`);
+      t.status = "running";
+      note(t, `MR !${t.delivery.iid} 已合并，交给 worker 接着做`);
     }
     t.updatedAt = Date.now();
   });
