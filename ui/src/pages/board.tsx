@@ -179,7 +179,10 @@ export default function BoardPage() {
             </button>
           )}
         </h2>
-        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-2 pb-2">
+        {/* Scrolls on its own only on a wide screen: on a phone the page scrolls, and a scroller here (overflow-y makes it
+            one sideways too) made every touch on the column look like one on something that scrolls sideways, so the
+            swipe between columns left it alone (lib/swipe.ts skip) */}
+        <div className="min-h-0 flex-1 space-y-2 px-2 pb-2 md:overflow-y-auto">
           {shown.length ? shown.map((t) => <MiniCard key={t.id} t={t} byId={byId} active={t.id === open} onOpen={() => (setPeek(null), setOpen(t.id))} />) : <p className="py-6 text-center text-[12px] text-muted-foreground">无任务</p>}
           {all.length > shown.length && (
             <button className="w-full py-2 text-[12px] text-muted-foreground hover:text-foreground" onClick={() => setDoneLimit(doneLimit + 50)}>
@@ -464,7 +467,7 @@ function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, T
   const asked = t.owner === "human" && open ? `${ago(t.createdAt)}${t.handBack?.kind === "choice" || t.questions ? "问的" : "交给你"}` : "";
   return (
     <button data-task-card="" onClick={onOpen} className={clsx("block w-full space-y-1.5 rounded-lg border bg-card p-3 text-left shadow-xs transition-[border-color,box-shadow,transform] duration-150 hover:border-ring/50 hover:shadow-sm active:scale-[0.99]", active ? "border-ring" : notDispatched(t) && "border-warn/60")}>
-      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+      <div className="flex min-w-0 items-center gap-1.5 overflow-hidden text-[11px] text-muted-foreground">
         {t.owner === "human" ? t.handBack?.kind === "choice" ? <CircleHelp className="size-3 shrink-0" /> : <Hand className="size-3 shrink-0" /> : <Bot className="size-3 shrink-0" />}
         {/* Never squeezed: a long "asked by" beside it truncates instead of wrapping the id onto two lines */}
         <span className="shrink-0 font-mono whitespace-nowrap">{t.id}</span>
