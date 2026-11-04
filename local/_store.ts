@@ -59,6 +59,12 @@ export type Task = {
    * one goes straight to this task's worker, without Eval (_main.ts subscribers). Unset on older tasks: the origin's.
    */
   threads?: { source: string; key: string }[];
+  /**
+   * What its worker waits on from outside, having ended its turn (board tool wait_for, waits.ts): a person's reply in a
+   * conversation (source + key: the message wakes it) and / or a time to look again (recheckAt). Under 进行中 meanwhile,
+   * never "stopped"; cleared when the reply or the time comes, or the worker reports anything else.
+   */
+  waiting?: { what: string; since: number; source?: string; key?: string; recheckAt?: number };
   origin?: { id: string; source: string; kind: string; key?: string; title?: string; url?: string; reply?: { kind: string; data?: unknown } };
   /** Split off this task by the router (one of several parts run in parallel). */
   from?: string;

@@ -400,6 +400,7 @@ function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, T
       <p className={clsx("line-clamp-2 text-[13px] font-medium", t.status === "dropped" && "text-muted-foreground line-through")}>{t.title}</p>
       {t.question && colOf(t) === "you" && <p className="line-clamp-2 text-[12px] text-warn">{t.question}</p>}
       {!t.question && t.stopped && <p className="line-clamp-2 text-[12px] text-warn">停下了{t.said ? `：${t.said}` : "，没说接下来要什么"}</p>}
+      {!t.question && t.waiting && t.status === "running" && <p className="line-clamp-2 text-[12px] text-muted-foreground">等：{t.waiting.what}</p>}
       {!t.question &&
         t.helpers
           ?.filter((k) => k.status === "waiting")
@@ -581,6 +582,9 @@ function liveText(t: Task) {
   if (l.status === "error") return `出错：${l.error ?? ""}`;
   // Its turn is over but a session it handed work to is still going: waiting on that, not stopped
   if (t.helpers?.length) return `等它派出的会话 · ${ago(l.updatedAt)}`;
+  // It said what it waits on outside (wait_for): a reply in a conversation it follows, and / or a time to look again
+  if (t.waiting && t.status === "running")
+    return t.waiting.recheckAt && t.waiting.recheckAt > Date.now() ? `等外面 · ${Math.max(1, Math.round((t.waiting.recheckAt - Date.now()) / 60000))} 分钟后回来看` : `等回复 · ${ago(t.waiting.since)}`;
   return `停下 · ${ago(l.updatedAt)}`;
 }
 

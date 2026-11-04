@@ -36,6 +36,8 @@ export type Task = {
   steps?: string;
   handBack?: { kind: "none" | "value" | "secret" | "choice" | "questions"; name?: string; label?: string; options?: string[] };
   /** handBack "questions": several decisions / values asked at once, each answered on its own (local/_store.ts). */
+  /** Its worker ended its turn waiting on someone / something outside (wait_for, local/waits.ts): still 进行中. */
+  waiting?: { what: string; since: number; source?: string; key?: string; recheckAt?: number };
   /** Its worker stopped with nothing to wait on (tasks.ts list): under 等你, with what it last said. */
   stopped?: boolean;
   /** Sessions its worker handed work to, still going: it waits on them. */

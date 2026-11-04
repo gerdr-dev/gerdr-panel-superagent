@@ -70,7 +70,7 @@ export const tools = {
 };
 
 /** The task whose worker is the calling conversation. */
-function mine(s: Store, ctx: Ctx): Task {
+export function mine(s: Store, ctx: Ctx): Task {
   const who = ctx.caller.session;
   const t = who && s.tasks.find((x) => x.owner === "agent" && (x.session === who || x.sessions?.includes(who)));
   if (!t) throw new Error("这个对话不是看板上任何任务的 worker（只有看板派出去的会话能用这些工具）");
@@ -86,7 +86,10 @@ export function task_update(input: { state: string; summary?: string; links?: { 
     // Answering the user's own question in the chat: they read it there; don't move the task to "come and look"
     if (state === "review" && sess?.byPerson && t.status === "running") state = undefined;
     applyBlock(s, t, { ...input, state });
-    Object.assign(t, { viaTools: true, synced: undefined, reportedAt: Date.now(), nudges: 0, updatedAt: Date.now() });
+    // "working" says nothing about what's next: it doesn't reset the reminder count, or a worker that answers each
+    // reminder with "still working" and stops would be reminded forever (tasks.ts silentStop)
+    Object.assign(t, { viaTools: true, synced: undefined, reportedAt: Date.now(), updatedAt: Date.now() });
+    if (state) Object.assign(t, { nudges: 0, waiting: undefined });
     return { id: t.id, status: t.status, column: t.question ? "等你" : t.status };
   });
 }
@@ -97,7 +100,7 @@ export function ask_human(input: any, ctx: Ctx) {
     const decision = Array.isArray(input.options) && input.options.length > 0;
     const human = decision ? { ...input, steps: input.steps ?? "", handBack: { kind: "choice", options: input.options.map(String), label: "你的决定" } } : input;
     const h = applyBlock(s, t, { state: "blocked", human, replace: false })!;
-    Object.assign(t, { viaTools: true, reportedAt: Date.now(), nudges: 0, updatedAt: Date.now() });
+    Object.assign(t, { viaTools: true, reportedAt: Date.now(), nudges: 0, waiting: undefined, updatedAt: Date.now() });
     if (h.handBack?.kind === "questions") return questionCard(h, ctx);
     if (decision) h.urgent = false; // a decision can wait: no warning mark, it just sits under 等你
     // gerdrCard: Gerdr draws this result as a card in the chat, so the user sees the step where they are too

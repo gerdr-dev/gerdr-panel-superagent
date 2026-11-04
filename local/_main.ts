@@ -159,6 +159,7 @@ export async function followUp(ctx: Ctx, id: string, e: Ev) {
   const t = updateTasks(ctx, (s) => {
     const x = find(s, id);
     x.followups = [...(x.followups ?? []), e.id];
+    x.waiting = undefined; // what it waited on came (or something else did: it looks again either way)
     note(x, `${by}接着说：${text}`);
     if (!x.session) {
       x.prompt = `${x.prompt ?? ""}\n\n${by}接着说：${text}`;

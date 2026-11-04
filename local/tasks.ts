@@ -63,6 +63,9 @@ export async function list(input: unknown, ctx: Ctx) {
         if (t.question) note(t, `问：${t.question}\n（在对话里回复了）`);
         Object.assign(t, { question: undefined, status: t.status === "review" ? "running" : t.status, updatedAt: Date.now() });
       }
+      // Running again since it said what it waits on (woken by the reply / the time, or the user wrote to it): that
+      // wait is over; it calls wait_for again if it still waits
+      if (t.waiting && sess?.status === "running" && (sess.turnStartedAt ?? 0) > t.waiting.since) t.waiting = undefined;
       if (!sess || (sess.status !== "idle" && sess.status !== "error")) continue;
       if (t.synced === sess.updatedAt) continue;
       const prevStop = t.synced ?? 0;
@@ -98,7 +101,8 @@ export async function list(input: unknown, ctx: Ctx) {
         `[看板] 你这一轮停下了，但没在看板上汇报（任务 ${n.id}）。用户看的是看板，不看聊天：\n` +
           `- 要用户决定 / 给东西：用 ask_human 登记（决定带 options），然后结束这一轮；\n` +
           `- 做完了、交付了、要用户验收：用 task_update 报对应的 state；\n` +
-          `- 还在做：用 task_update（working）写一句进展。\n` +
+          `- 在等别人（同事回话、job / 发布跑完）：用 wait_for 说等什么、在哪个对话等回复或几分钟后回来看，然后结束这一轮；\n` +
+          `- 还有能做的：接着做，别停。\n` +
           `只补汇报，别重复聊天里说过的话。`,
       )
       .catch(() => {});
@@ -135,7 +139,10 @@ export async function list(input: unknown, ctx: Ctx) {
  */
 function silentStop(s: Store, t: Task, sess: any, prevStop: number) {
   if (!t.viaTools) return false;
-  if ((t.reportedAt ?? 0) > prevStop) return false;
+  // Waiting on someone outside with wait_for is waiting. A "working" report is not: t30 (2026-11-04) reported
+  // working mid-turn, ended with "I'll rerun it next" and sat stopped — so whether it reported doesn't matter, only
+  // that it stopped with the task still running and nothing to wait on
+  if (t.waiting) return false;
   const waiting = s.tasks.some((h) => h.owner === "human" && h.status === "todo" && (h.askedBy === t.id || t.blockedBy?.includes(h.id)));
   return !waiting;
 }
@@ -180,6 +187,7 @@ function stopped(s: Store, t: Task, sess: any, kids: Session[] = []) {
   if (t.owner !== "agent" || t.status !== "running") return false;
   if (sess && (sess.status === "running" || sess.status === "starting")) return false;
   if (kids.length) return false;
+  if (t.waiting) return false; // wait_for: a reply or a time will wake it (waits.ts)
   return blockersDone(s, t);
 }
 
