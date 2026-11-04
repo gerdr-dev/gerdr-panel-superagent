@@ -44,7 +44,8 @@ worker 拿到一组 面板工具（`local/board.ts`，经 Gerdr 的 `gerdr work 
 
 | 工具 | 用途 |
 |---|---|
-| `task_update` | 更新状态（working / done / delivering / review）、摘要、产物；开了 MR 就带上 `mr` |
+| `task_update` | 更新状态（working / done / review）、摘要、产物 |
+| `wait_for` | 结束这一轮去等：一个对话里的新消息（私信、MR）和 / 或几分钟后回来看；对话里出现「在等」卡片 |
 | `ask_human` | 登记人工任务；带 `options` 就是待决定 |
 | `cancel_human` | 撤回自己登记过的人工任务（用户在对话里答了 / 换了做法），要写原因 |
 | `my_task` | 查自己的任务现在是什么样 |
@@ -76,7 +77,7 @@ worker 拿到一组 面板工具（`local/board.ts`，经 Gerdr 的 `gerdr work 
   （`ctx.secrets.get`）要用的才是 `handBack: secret`。
   **被否掉的做法：密码 / token 一律 `secret`。** 面板密钥只有面板函数读得到，worker 和它写的代码都读不到：
   用户在做 TTS 功能时去申请了 key，照规则存成面板密钥，结果那段代码根本拿不到。
-- **「进行中」只有两种：在跑的，和明确在等的**（等 MR 合并、等用户的步骤 / 问题）。worker 停了又没在等什么，
+- **「进行中」只有两种：在跑的，和明确在等的**（`wait_for` 等的别人、等用户的步骤 / 问题，见「交付和等待」）。worker 停了又没在等什么，
   当场就算「等你」（`tasks.ts` 的 `stopped`），卡片上写它最后说的话；不靠它汇报、也不靠提醒。用户的原话：
   「从根本上避免『进行中 · 已停止』的状态」。「在等」也包括 worker 派出去、还在跑的会话（回报给它的 `reportTo`、它开的 `parent`、带
   这个任务标签的，本机或别的电脑上的）：t3 停下来等它在 gerdrhomemac 上开的配乐会话，不该算「等你」。那个会话
@@ -104,32 +105,41 @@ worker 拿到一组 面板工具（`local/board.ts`，经 Gerdr 的 `gerdr work 
   - 同一个 worker 用文字块重新登记的，会自动取代它之前的那些；
   - 用工具登记的不自动取代：worker 自己用 `cancel_human` 撤。
 
-## 交付：按「还差什么」，不按「有没有 MR」
+## 交付和等待：一份「在等」，MR 不是特殊流程
 
 用户的规则在 `skills/my-workflow/references/deliver.md`：有的仓库开 MR，有的可以直推。
-所以不能拿「有没有 MR」来判断做没做完。worker 汇报的是还差什么：
+所以不能拿「有没有 MR」来判断做没做完。worker 汇报的是现在怎样：
 
-- `done`：做完了，不用看（比如照规则直推了，CI 也绿了）。
-- `delivering` + `mr`：交出去了，在等 MR 合并。任务留在「进行中」，卡片上写 MR 卡在哪一步。
+- `done`：做完了，不用看。**只有 worker 或用户说完成才算完成**，没有任何规则替它判：MR 合并了、流水线过了，
+  都只是发给 worker 的消息。起因：t30 的 MR 合并后还要发 prod，看板却把它标完成、关了对话（2026-11-04）。
 - `review`：要用户判断结论。
+- 在等别人：`wait_for`（下面）。
 
-**mrwatch**（`local/mrwatch.ts`，由 `schedules/mrwatch.json` 定时跑）盯着所有 `delivering` 的任务，全部是确定性的代码，只按 GitLab 的字段走。
-每次按顺序只做第一件符合的事：
+**任务在等什么，只有一份记录**（`local/_waits.ts`，任务的 `waits`）。每条写清等什么、是不是等用户、什么会叫醒它，
+结束时记下怎么结束的。看板的列只看它：有直接等用户的（问题、子会话要批准）→ 等你；worker 在跑、或还有在等的 → 进行中；
+都没有 → 停下了，算等你。等用户在看板上的某一项（有自己卡片的步骤 / 问题）时，任务留在进行中，那一项在「等你」。
 
-1. 有新的 review 意见：交给 worker。
-2. 流水线挂了：交给 worker，附上失败 job 的日志末尾。
-3. 有冲突：交给 worker。
-4. worker 正在改：这次不动。
-5. 需要变基：自己变基。
-6. GitLab 说可以合并、批准数也够：自己合并。
+- worker 自己登记的：`wait_for`（一个对话里的新消息，和 / 或一个时间）、`ask_human` 的问题。
+- 跟着别处同步的：它被挡住的看板项（`blockedBy`）、它派出去还在跑的会话。
+- 叫醒只有一条路（`local/_wake.ts`）：对话里来了消息（同事回私信、MR 上的事）、到点了、用户答了 / 做完了，都结束对应的等待、告诉 worker。
+  子会话的回报由 Gerdr 直接交给 worker，那条等待在会话结束时结束。
 
-合并了：也只是一件事，发给 worker（`gitlab/mr.merged`），任务回到进行中，由 worker 判断完没完：合并后可能还要发布、
-到线上验证、告诉谁。完成只由 worker 报（或你标）；规则从不替它判完成——t30 合并后还要发 prod，看板却把它标完成、关了对话（2026-11-04）。
-MR 被关了、改了好几轮还没过，就交给用户。
-交给 worker 的消息只说发生了什么，处理规则让 worker 自己去读 skill。最早的版本把整份规则粘进消息里，worker 收到一堆跟它无关的东西。
+**被否掉的做法：每种等待一个字段、一套规则。** 问题在 `question`、`wait_for` 在 `waiting`、MR 在 `delivery`、
+用户的步骤在 `blockedBy`，「停没停」要在 `column` / `stopped` / `silentStop` 三处各判一遍；每出一种新等待就漏一处：
+worker 说「我在等」却没东西叫醒它（t29），报一句 working 就停了（t30），等 MR 在对话里看不到。
 
-自动还是手动合并 / 变基、变基时跑不跑流水线、至少几个人批准、最多几轮，都是用户的选择，在「设置 → MR 合并」，
-代码里的默认值是保守的（都手动）。只有 mrwatch 照它们做，worker 不读：worker 照 `mr.md` 处理意见、流水线、冲突，从不合并。
+**MR 只是一种工作方式加一个事件来源**，没有自己的状态、按钮和规则：
+
+- 工作方式在 `mr.md`：开完 MR 用 `wait_for` 盯着它；review、流水线、冲突怎么处理；**谁来合**按仓库写在一张表里
+  （worker 直接合 / 先问用户 / 找第三个人合，再 `wait_for` 等他）；合并之后接着做（发布、验证），做完再报 `done`。
+  所以「等合并」算不算「等你」，看 worker 是 `ask_human` 问用户，还是在等别人。
+- 事件来源是 mrwatch（`local/mrwatch.ts`，`schedules/mrwatch.json` 定时跑）：盯着所有还没完的任务跟着的 MR，
+  每件事发一次事件：`mr.review`、`pipeline.failed` / `pipeline.passed`、`mr.conflict`、`mr.need_rebase`、`mr.mergeable`、
+  `mr.merged`、`mr.closed`。它不变基、不合并、不问人、不判完成。发过什么记在 `user/data/mrwatch.json`。
+- **被否掉的做法：mrwatch 是一套流程**（任务进 `delivering`，它按「设置 → MR 合并」自己变基、合并，改太多轮问人，
+  合并了就标完成；抽屉里有「立即合并」「立即检查」）。用户：「不要把 MR 当做一个固定的、特殊的流程，它只是一个工作方式 + 事件」。
+  原来的设置值（自动合并、变基、跳过流水线、批准人数、轮数）第一次读时写进各人自己的 `mr.md`（`_config.ts` `mrToSkill`）。
+  交给 worker 的消息只说发生了什么，处理规则让 worker 自己去读 skill。
 
 ## 派活
 
@@ -195,10 +205,10 @@ MR 被关了、改了好几轮还没过，就交给用户。
 - **订阅先于准入**：跟着某段对话的任务，那段对话里谁说话都交给它（MR 上 reviewer 的意见、流水线），这只是已经允许的
   活的上下文，不给新权限（dsh 同样）。没人跟的才过准入、去评估。
 - **只有人能把结束的任务叫回来**：事件有 `actor`（有人做的）才会重新打开最近结束的任务；流水线、机器人（没有 actor）不会。
-- **MR 是任务的一段对话**：worker 报 `delivering` 带上 MR，任务就订阅 `gitlab` / `group/repo!34`（`_apply.ts`）。
+- **MR 是任务的一段对话**：worker `wait_for` 一个 MR，任务就订阅 `gitlab` / `group/repo!34`。
   mrwatch 只当来源：新意见、流水线挂了、有冲突都发成事件（`gitlab/mr.review` 等），面板自己的 `triggers/mr.json`
   收进来，按订阅交给 worker，和 Slack 的追问走同一条路：「去向」里看得到，不归它的也能 `hand_back`。
-  变基、合并、MR 被关、改太多轮问人，仍然是 mrwatch 按「设置」直接做；合并之后的事归 worker。
+  变基、合并、合并之后的事都归 worker（照 `mr.md`）。
   **被否掉的做法：mrwatch 自己 `sessions.send` 给 worker。** 另一条路：看不到记录，worker 也交不回。
 - **主动工作**（dsh 的 inferred + observe）：触发器里把一个来源设成「不是找我的」（频道闲聊、告警），它的事件只按
   `skills/my-workflow/references/proactive.md` 里用户自己写的规则接，接的时候写明是哪条规则，worker 只做那条允许的，
@@ -217,7 +227,7 @@ MR 被关了、改了好几轮还没过，就交给用户。
 用户的选择分两种，按**谁照着它做**分：
 
 - **只有代码照着做的值**是「设置」（`user/settings.json`，结构和默认值在 `ui/src/lib/settings.ts`）：调度会话和 worker
-  用哪个 agent / 模型、仓库列表、GitLab 地址、mrwatch 怎么合并和变基、主动工作的模式。
+  用哪个 agent / 模型、仓库列表、GitLab 地址、主动工作的模式。
   有类型、能校验；为什么这么选写在页面上每一项的说明里。只存和默认不同的那些，以后改了默认值，没选过的人能拿到。
 - **agent 拿来判断的**是「流程」，用户自己的话（`skills/my-workflow/`）：怎么交付、review 意见怎么处理、怎么挑仓库、
   主动工作的规则、要用户亲手做的事怎么交给他。
@@ -310,7 +320,8 @@ worker 在看板上怎么做（每次停下要汇报、自己开的会话来问�
 | `local/superagent.ts` | 调度会话的 `decide`，「去向」的 `log` / `retry` |
 | `local/inbox.ts` | 触发器的设置和 `onEvent`（准入 → 订阅 → 评估） |
 | `local/board.ts` | 给 worker 的 面板工具 |
-| `local/mrwatch.ts` | 盯 MR |
+| `local/mrwatch.ts` | MR 的事件来源 |
+| `local/_waits.ts` / `_wake.ts` / `waits.ts` | 任务在等什么、怎么叫醒、`wait_for` |
 | `ui/src/lib/settings.ts` | 设置的结构、默认值、校验（页面和 local 共用） |
 | `local/_config.ts`、`local/settings.ts` | 设置的读（只存和默认不同的，一次性从旧的 `{{变量}}` 迁移）、页面和助手的读写 |
 | `local/playbooks.ts`、`local/schedules.ts` | 「流程」「定时任务」的读写 |

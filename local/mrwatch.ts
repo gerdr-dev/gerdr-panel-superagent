@@ -1,315 +1,204 @@
-import { get, send, text } from "./_glab";
-import { find, load, note, update, type Delivery, type Task } from "./_store";
-import { workflow } from "./_config";
-import { mrThread } from "./_apply";
-import { askUser, endWaits, open } from "./_waits";
+import { get, text } from "./_glab";
+import { load, type Task } from "./_store";
+import { DATA } from "./_user";
 
-// Follows the MRs that board tasks went out in (status "delivering", see tasks.ts) until they're merged. Run on a
-// schedule (schedules/mrwatch.json), all deterministic: it reads GitLab and decides by its fields. What needs
-// judgement (new review comments, a failed pipeline, conflicts) it doesn't hand to anyone itself: it's a source, and
-// emits it as an event (gitlab/mr.review, gitlab/pipeline.failed, gitlab/mr.conflict, key group/repo!34). The task
-// follows its MR's conversation (threads, set when it reported delivering: _apply.ts), so triggers/mr.json →
-// inbox.onEvent delivers it to the worker like any follow-up — logged in 去向, given back with hand_back if it isn't
-// that task's. dsh-superagent's GitHub source works the same way for pull requests. The handling rules are in the
-// user's skill (the worker has it; this only says what happened). Rebasing and merging follow
-// the values in that skill (_config.ts): automatic, or waiting for the user's button (rebase / mergeNow below). Merged → an event for the worker
-// (gitlab/mr.merged): the task goes back to running, and the worker says when it's done. A closed MR, or more review rounds than mr.maxRounds, goes to the user (the task's question:
-// the board's "needs you").
+// A source of events for the MRs tasks follow — nothing more. An MR is a way of working (the worker's skill, mr.md:
+// how to answer a review, when to rebase, when it may merge) plus what happens on it; neither is the board's to decide.
+// Until 2026-11-04 this watcher was a process of its own: tasks went "delivering", it rebased and merged by settings,
+// asked the user after too many rounds, and marked the task done when the MR merged — t30 still had a prod release to
+// run when it did. Now it only says what happened, and the worker, woken by it, decides.
 //
-// It never hands the same thing twice: notes already handed, the pipeline and the sha already acted on are kept on
-// the task (delivery.seen / pipeline / conflict / rebased).
+// Run on a schedule (schedules/mrwatch.json). Which MRs: every one a live task follows (its threads: a worker that
+// opened an MR waits on it with wait_for, so the task follows gitlab / group/repo!34). What it emits, each once, as
+// events of that conversation (source gitlab, key group/repo!34): mr.review (new comments by others), pipeline.failed,
+// pipeline.passed, mr.conflict, mr.need_rebase, mr.mergeable (GitLab says it can be merged now), mr.merged, mr.closed.
+// triggers/mr.json → inbox.onEvent delivers them to the task's worker like any follow-up (去向 logs it; hand_back if
+// it isn't that task's). What it already emitted is kept in user/data/mrwatch.json.
 
+const STATE = `${DATA}/mrwatch.json`;
 const NOTE_MAX = 1500;
 
-type Change = Partial<Delivery> & { question?: string; merged?: boolean };
+type Seen = {
+  /** When this watcher first saw it: comments before then were the worker's to see already. */
+  since: number;
+  notes: number[];
+  /** "<pipeline id>:<status>" already told; the head sha a conflict / rebase / mergeable was told for. */
+  pipeline?: string;
+  conflict?: string;
+  rebase?: string;
+  mergeable?: string;
+  /** merged / closed told: nothing more comes from it. */
+  ended?: string;
+  checked?: number;
+  /** GitLab's last word on it (for the dry run and the log). */
+  state?: string;
+};
+type State = Record<string, Seen>;
 
-/** One pass over every delivering task. Returns what it did, per task (the run log shows it). */
-export async function tick(input: { dry?: boolean } | undefined, ctx: Ctx) {
-  dry = !!input?.dry;
-  const tasks = load(ctx).store.tasks.filter((t) => t.status === "delivering" && t.delivery?.kind === "mr");
-  if (!tasks.length) return { watched: 0 };
-  if (!dry) follow(tasks, ctx);
-  const me = (await get("user", ctx)).username as string;
-  const out: Record<string, string> = {};
+function readState(ctx: Ctx): State {
+  try {
+    return ctx.fs.stat(STATE) ? JSON.parse(ctx.fs.read(STATE)) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeState(ctx: Ctx, s: State) {
+  ctx.fs.mkdir(DATA);
+  ctx.fs.write(STATE, JSON.stringify(s, null, 2) + "\n");
+}
+
+const KEY = /^(.+)!(\d+)$/;
+
+/** The MRs live tasks follow: gitlab conversations named group/repo!34. */
+function followed(tasks: Task[]): string[] {
+  const out = new Set<string>();
   for (const t of tasks) {
-    try {
-      out[t.id] = await one(t, me, ctx);
-    } catch (e: any) {
-      out[t.id] = `error: ${e.message || e}`;
-      ctx.log.warn(`${t.id}: ${e.message || e}`);
-    }
+    if (t.status === "done" || t.status === "dropped") continue;
+    for (const th of t.threads ?? []) if (th.source === "gitlab" && KEY.test(th.key)) out.add(th.key);
   }
-  return { watched: tasks.length, did: out };
+  return [...out];
 }
 
-/**
- * The same for one task now: { id }. With { url, dry: true } it reads any MR and says what it would do, changing
- * nothing (no rebase, merge, message or write): for trying the rules on a real MR.
- */
-export async function check(input: { id?: string; url?: string; dry?: boolean }, ctx: Ctx) {
-  dry = !!input.dry;
-  let t: Task;
-  if (input.url) {
-    const m = /^(https?:\/\/[^/]+)\/(.+?)\/-\/merge_requests\/(\d+)/.exec(input.url);
-    if (!m || !dry) throw new Error("url 要是 MR 地址，而且只能和 dry: true 一起用");
-    t = { id: "dry", title: "dry", owner: "agent", status: "delivering", session: undefined, createdAt: 0, updatedAt: 0, delivery: { kind: "mr", url: m[0], project: m[2], iid: Number(m[3]), since: 0, seen: [] } } as Task;
-  } else {
-    t = find(load(ctx).store, input.id ?? "");
-    if (t.status !== "delivering" || !t.delivery) throw new Error(`${t.id} 没有在等合并的 MR`);
-  }
-  return one(t, (await get("user", ctx)).username, ctx);
-}
-
-// dry: say what would be done instead of doing it (check({ dry: true }))
+// dry: say what would be emitted instead of emitting (check)
 let dry = false;
 const would: string[] = [];
-async function act<T>(what: string, fn: () => Promise<T>): Promise<T | undefined> {
-  if (dry) {
-    would.push(what);
-    return undefined;
+
+/** One pass over every MR a live task follows. Returns what it emitted, per MR (the run log shows it). */
+export async function tick(input: unknown, ctx: Ctx) {
+  dry = false;
+  const keys = followed(load(ctx).store.tasks);
+  const st = readState(ctx);
+  const out: Record<string, string> = {};
+  for (const key of keys) {
+    if (st[key]?.ended) continue;
+    try {
+      out[key] = await one(key, st, ctx);
+    } catch (e: any) {
+      out[key] = `error: ${e.message || e}`;
+      ctx.log(`${key}: ${e.message || e}`);
+    }
   }
-  return fn();
+  // Forget MRs nobody follows any more
+  for (const k of Object.keys(st)) if (!keys.includes(k)) delete st[k];
+  writeState(ctx, st);
+  return { watched: keys.length, did: out };
 }
 
-async function one(t: Task, me: string, ctx: Ctx): Promise<string> {
-  const d = t.delivery!;
-  const base = `projects/${encodeURIComponent(d.project)}/merge_requests/${d.iid}`;
+/** What it would emit for one MR now, changing nothing: { url } (any MR) — for trying it on a real one. */
+export async function check(input: { url: string }, ctx: Ctx) {
+  const m = /^https?:\/\/[^/]+\/(.+?)\/-\/merge_requests\/(\d+)/.exec(input?.url ?? "");
+  if (!m) throw new Error("url 要是 MR 地址");
+  dry = true;
+  const key = `${m[1]}!${m[2]}`;
+  const cur = readState(ctx)[key];
+  const copy: State = { [key]: cur ? { ...cur } : { since: Date.now() - 86_400_000, notes: [] } };
+  try {
+    return await one(key, copy, ctx);
+  } finally {
+    dry = false;
+  }
+}
+
+type Out = { id: string; kind: string; actor?: string; title: string; text: string; url?: string };
+
+async function one(key: string, st: State, ctx: Ctx): Promise<string> {
+  const [, project, iidS] = KEY.exec(key)!;
+  const iid = Number(iidS);
+  const base = `projects/${encodeURIComponent(project)}/merge_requests/${iid}`;
+  const seen: Seen = (st[key] ??= { since: Date.now(), notes: [] });
   const mr = await get(base, ctx);
+  const label = `MR !${iid}`;
+  const url: string = mr.web_url;
   const state: string = mr.detailed_merge_status ?? mr.merge_status ?? "";
   const pipe = mr.head_pipeline as { id: number; status: string; web_url: string } | null;
-  const label = `MR !${d.iid}`;
-  const save = (c: Change, what: string) => {
-    if (dry) return `${what} — would: ${would.splice(0).join("; ") || "nothing"} (state ${state}, pipeline ${pipe?.status ?? "none"}, card: ${c.detail ?? c.question ?? ""})`;
-    apply(t.id, { state, checked: Date.now(), ...c }, ctx);
-    return what;
+  seen.checked = Date.now();
+  seen.state = `${mr.state} / ${state}${pipe ? ` / pipeline ${pipe.status}` : ""}`;
+  const said: string[] = [];
+  const say = (e: Out) => {
+    said.push(e.kind);
+    if (dry) return void would.push(`${e.kind}: ${e.title}`);
+    ctx.events.emit({ ...e, source: "gitlab", key, data: { project, iid, mr: url, state, pipeline: pipe?.status } });
   };
+  const done = () => (dry ? `would: ${would.splice(0).join("; ") || "nothing"} (${seen.state})` : said.join(", ") || "nothing new");
 
-  // Merged: news for the worker, not the end of the task. What comes after a merge (a release, checking it in
-  // production, telling someone) is the worker's to know, and only it says the task is done (t30 on 2026-11-04 still
-  // had a prod release to run when the board marked it done and closed its chat). The MR wait ends; the task is back
-  // in progress, and the merge goes to the worker as an event like a review comment.
   if (mr.state === "merged") {
-    await act("emit merged", async () =>
-      emit(ctx, d, {
-        id: `gitlab:merged:${d.project}!${d.iid}`,
-        kind: "mr.merged",
-        actor: mr.merged_by?.username,
-        title: `${label} 合并了`,
-        text:
-          `${label} 合并进 ${mr.target_branch} 了${mr.merged_by?.username ? `（${mr.merged_by.username} 合的）` : ""}${mr.merge_commit_sha ? `，merge commit ${String(mr.merge_commit_sha).slice(0, 10)}` : ""}。\n` +
-          `合并之后还有要做的（发布、到线上验证、告诉谁），照你的工作流程接着做；都做完了用 task_update 报 done，结论要用户看就报 review。`,
-        url: d.url,
-      }),
-    );
-    return save({ merged: true, detail: "已合并" }, "merged");
+    say({
+      id: `gitlab:merged:${key}`,
+      kind: "mr.merged",
+      actor: mr.merged_by?.username,
+      title: `${label} 合并了`,
+      text: `${label} 合并进 ${mr.target_branch} 了${mr.merged_by?.username ? `（${mr.merged_by.username} 合的）` : ""}${mr.merge_commit_sha ? `，merge commit ${String(mr.merge_commit_sha).slice(0, 10)}` : ""}。${url}`,
+      url,
+    });
+    seen.ended = "merged";
+    return done();
   }
-  if (mr.state === "closed") return save({ question: `${label} 被关掉了（没合并）。要重开、换个方案，还是放弃这个任务？`, detail: "MR 已关闭" }, "closed");
+  if (mr.state === "closed") {
+    say({ id: `gitlab:closed:${key}`, kind: "mr.closed", actor: mr.closed_by?.username, title: `${label} 被关掉了（没合并）`, text: `${label} 被关掉了，没有合并。${url}`, url });
+    seen.ended = "closed";
+    return done();
+  }
 
-  const sess = t.session ? ctx.sessions.get(t.session) : null;
-  const busy = sess?.status === "running" || sess?.status === "starting";
-
-  // 1. New review comments, by others, since it was handed over
+  // New comments by others since it was first seen
+  const me = (await get("user", ctx)).username as string;
   const discussions: any[] = await get(`${base}/discussions?per_page=100`, ctx);
-  const seen = new Set(d.seen ?? []);
+  const known = new Set(seen.notes);
   const fresh = discussions
     .flatMap((x) => (x.notes ?? []).map((n: any) => ({ ...n, thread: x.id })))
-    .filter((n) => !n.system && n.author?.username !== me && !seen.has(n.id) && Date.parse(n.created_at) >= d.since - 60_000);
+    .filter((n) => !n.system && n.author?.username !== me && !known.has(n.id) && Date.parse(n.created_at) >= seen.since - 60_000);
   if (fresh.length) {
-    const ids = [...seen, ...fresh.map((n) => n.id)];
-    const rounds = (d.rounds ?? 0) + 1;
-    const max = workflow(ctx).mr.maxRounds;
-    if (rounds > max)
-      return save({ seen: ids, question: `${label} 已经改了 ${max} 轮，又来了 ${fresh.length} 条意见。还要它接着改，还是你来看看？（${d.url}）`, detail: "改了几轮还没过" }, "too many rounds");
     const lines = fresh.map((n, i) => {
       const where = n.position?.new_path ? ` 在 ${n.position.new_path}${n.position.new_line ? `:${n.position.new_line}` : ""}` : "";
-      const body = String(n.body ?? "").slice(0, NOTE_MAX);
-      return `${i + 1}. @${n.author?.username}${where}${n.resolvable ? (n.resolved ? "（已解决）" : "（未解决）") : ""}：\n${body}\n${d.url}#note_${n.id}`;
+      return `${i + 1}. @${n.author?.username}${where}${n.resolvable ? (n.resolved ? "（已解决）" : "（未解决）") : ""}：\n${String(n.body ?? "").slice(0, NOTE_MAX)}\n${url}#note_${n.id}`;
     });
-    const first = fresh[0];
-    await act(`emit ${fresh.length} notes: ${fresh.map((n) => n.id).join(",")}`, async () =>
-      emit(ctx, d, {
-        id: `gitlab:review:${d.project}!${d.iid}:${fresh.map((n) => n.id).join(",")}`,
-        kind: "mr.review",
-        actor: first.author?.username,
-        title: `${label} 有 ${fresh.length} 条新意见`,
-        text: `${lines.join("\n\n")}\n\n${playbook(ctx)}`,
-        url: `${d.url}#note_${first.id}`,
-      }),
-    );
-    return save({ seen: ids, rounds, detail: `${fresh.length} 条新意见已交给 worker` }, `handed ${fresh.length} notes`);
+    say({
+      id: `gitlab:review:${key}:${fresh.map((n) => n.id).join(",")}`,
+      kind: "mr.review",
+      actor: fresh[0].author?.username,
+      title: `${label} 有 ${fresh.length} 条新意见`,
+      text: lines.join("\n\n"),
+      url: `${url}#note_${fresh[0].id}`,
+    });
+    if (!dry) seen.notes = [...seen.notes, ...fresh.map((n) => n.id)];
   }
 
-  // 2. The pipeline of the current head failed
-  if (pipe?.status === "failed" && d.pipeline !== pipe.id) {
-    const jobs: any[] = await get(`projects/${encodeURIComponent(d.project)}/pipelines/${pipe.id}/jobs?scope[]=failed&per_page=20`, ctx);
-    const logs: string[] = [];
-    for (const j of jobs.slice(0, 2)) {
-      const trace = await text(`projects/${encodeURIComponent(d.project)}/jobs/${j.id}/trace`, ctx).catch(() => "");
-      logs.push(`### ${j.name}（job ${j.id}，${j.web_url}）\n\`\`\`\n${trace.split("\n").slice(-60).join("\n")}\n\`\`\``);
+  // The head pipeline finished: failed (with the end of the failed jobs' logs) or passed
+  const pkey = pipe ? `${pipe.id}:${pipe.status}` : "";
+  if (pipe && (pipe.status === "failed" || pipe.status === "success") && seen.pipeline !== pkey) {
+    if (pipe.status === "failed") {
+      const jobs: any[] = await get(`projects/${encodeURIComponent(project)}/pipelines/${pipe.id}/jobs?scope[]=failed&per_page=20`, ctx);
+      const logs: string[] = [];
+      for (const j of jobs.slice(0, 2)) {
+        const trace = await text(`projects/${encodeURIComponent(project)}/jobs/${j.id}/trace`, ctx).catch(() => "");
+        logs.push(`### ${j.name}（job ${j.id}，${j.web_url}）\n\`\`\`\n${trace.split("\n").slice(-60).join("\n")}\n\`\`\``);
+      }
+      const names = jobs.map((j) => j.name).join("、") || "（没拿到 job）";
+      say({ id: `gitlab:pipeline:${project}:${pipe.id}:failed`, kind: "pipeline.failed", title: `${label} 的流水线挂了`, text: `失败的 job：${names}。${pipe.web_url}\n\n${logs.join("\n\n")}`, url: pipe.web_url });
+    } else {
+      say({ id: `gitlab:pipeline:${project}:${pipe.id}:success`, kind: "pipeline.passed", title: `${label} 的流水线过了`, text: `${label} 的流水线过了。${pipe.web_url}`, url: pipe.web_url });
     }
-    const names = jobs.map((j) => j.name).join("、") || "（没拿到 job）";
-    await act(`emit failed pipeline ${pipe.id}`, async () =>
-      emit(ctx, d, {
-        id: `gitlab:pipeline:${d.project}:${pipe.id}`,
-        kind: "pipeline.failed",
-        title: `${label} 的流水线挂了`,
-        text: `失败的 job：${names}。${pipe.web_url}\n\n${logs.join("\n\n")}\n\n${playbook(ctx)}`,
-        url: pipe.web_url,
-      }),
-    );
-    return save({ pipeline: pipe.id, detail: `流水线挂了（${names}），已交给 worker` }, "handed failed pipeline");
+    if (!dry) seen.pipeline = pkey;
   }
 
-  // 3. Conflicts: the worker resolves them (once per head commit)
-  if (mr.has_conflicts || state === "conflict") {
-    if (d.conflict === mr.sha) return save({ detail: "有冲突，worker 在处理" }, "conflict (handed)");
-    await act("emit the conflict", async () =>
-      emit(ctx, d, {
-        id: `gitlab:conflict:${d.project}!${d.iid}:${mr.sha}`,
-        kind: "mr.conflict",
-        title: `${label} 和 ${mr.target_branch} 有冲突`,
-        text: `把 ${mr.target_branch} 合进来或者变基，解决冲突再推。\n\n${playbook(ctx)}`,
-        url: d.url,
-      }),
-    );
-    return save({ conflict: mr.sha, detail: "有冲突，已交给 worker" }, "handed conflict");
+  // Once per head commit: conflicts, behind the target, mergeable
+  if ((mr.has_conflicts || state === "conflict") && seen.conflict !== mr.sha) {
+    say({ id: `gitlab:conflict:${key}:${mr.sha}`, kind: "mr.conflict", title: `${label} 和 ${mr.target_branch} 有冲突`, text: `${label} 和 ${mr.target_branch} 有冲突。${url}`, url });
+    if (!dry) seen.conflict = mr.sha;
+  } else if (state === "need_rebase" && seen.rebase !== mr.sha) {
+    say({ id: `gitlab:need_rebase:${key}:${mr.sha}`, kind: "mr.need_rebase", title: `${label} 要变基`, text: `${label} 落后 ${mr.target_branch}，GitLab 要先变基才能合。${url}`, url });
+    if (!dry) seen.rebase = mr.sha;
+  } else if (state === "mergeable" && seen.mergeable !== mr.sha) {
+    const ap = await get(`${base}/approvals`, ctx).catch(() => null);
+    const by = (ap?.approved_by ?? []).map((a: any) => a.user?.username).filter(Boolean);
+    say({
+      id: `gitlab:mergeable:${key}:${mr.sha}`,
+      kind: "mr.mergeable",
+      title: `${label} 可以合并了`,
+      text: `GitLab 说 ${label} 现在可以合并（流水线、讨论、它自己的批准规则都满足了）。批准的人：${by.length ? by.join("、") : "没有"}。${url}`,
+      url,
+    });
+    if (!dry) seen.mergeable = mr.sha;
   }
-
-  // The worker is changing it: don't rebase or merge under it
-  if (busy) return save({ detail: "worker 在改" }, "worker busy");
-
-  const cfg = workflow(ctx).mr;
-
-  // 4. Behind the target: rebase (GitLab does it), once per head commit, if the settings say so
-  if (state === "need_rebase") {
-    if (d.rebased === mr.sha) return save({ detail: "变基中" }, "rebasing");
-    if (cfg.rebase !== "auto") return save({ detail: cfg.rebase === "manual" ? "要变基（点「变基」）" : "要变基" }, "needs a rebase");
-    await act(`rebase${cfg.rebaseSkipCI ? " skip_ci" : ""} (PUT /rebase)`, () => rebaseNow(base, cfg.rebaseSkipCI, ctx));
-    return save({ rebased: mr.sha, detail: cfg.rebaseSkipCI ? "变基中（跳过流水线）" : "变基中" }, "rebase requested");
-  }
-
-  // 5. Mergeable (GitLab's verdict: pipeline, discussions, its approval rules) with enough approvals: merge, if auto
-  if (state === "mergeable") {
-    const ap = await get(`${base}/approvals`, ctx);
-    if ((ap.approved_by ?? []).length < cfg.minApprovals) return save({ detail: `等人批准（要 ${cfg.minApprovals} 个）` }, "needs approvals");
-    if (cfg.merge !== "auto") return save({ detail: "可以合并（点「立即合并」）" }, "mergeable, waiting for the user");
-    await act(`merge at ${mr.sha} (PUT /merge)`, () => send("PUT", `${base}/merge`, { sha: mr.sha }, ctx));
-    return save({ merging: Date.now(), detail: "合并中" }, "merge requested");
-  }
-
-  return save({ detail: describe(state, pipe?.status) }, state);
-}
-
-/** What happened on an MR, as an event of its conversation (gitlab, group/repo!34): the task following it gets it. */
-function emit(ctx: Ctx, d: Delivery, e: { id: string; kind: string; actor?: string; title: string; text: string; url?: string }) {
-  const { key } = mrThread(d.project, d.iid);
-  return ctx.events.emit({ ...e, source: "gitlab", key, data: { project: d.project, iid: d.iid, mr: d.url } });
-}
-
-/**
- * Tasks that went delivering before tasks followed their MR (threads): made to follow it now, so what this emits
- * reaches them.
- */
-function follow(tasks: Task[], ctx: Ctx) {
-  const missing = (t: Task) => {
-    const th = mrThread(t.delivery!.project, t.delivery!.iid);
-    return !(t.threads ?? []).some((x) => x.source === th.source && x.key === th.key);
-  };
-  if (!tasks.some(missing)) return;
-  update(ctx, (s) => {
-    for (const x of s.tasks) {
-      if (x.status !== "delivering" || x.delivery?.kind !== "mr" || !missing(x)) continue;
-      const cur = x.threads ?? (x.origin?.key ? [{ source: x.origin.source, key: x.origin.key }] : []);
-      x.threads = [...cur, mrThread(x.delivery.project, x.delivery.iid)];
-    }
-  });
-}
-
-function rebaseNow(base: string, skipCI: boolean, ctx: Ctx) {
-  return send("PUT", `${base}/rebase`, skipCI ? { skip_ci: "true" } : {}, ctx);
-}
-
-// ---- the user's buttons (the board's chat panel), whatever the settings say ----
-
-function deliveringTask(id: string, ctx: Ctx) {
-  const t = find(load(ctx).store, id);
-  if (t.status !== "delivering" || !t.delivery) throw new Error(`${t.id} 没有在等合并的 MR`);
-  return { t, base: `projects/${encodeURIComponent(t.delivery.project)}/merge_requests/${t.delivery.iid}` };
-}
-
-/**
- * Merges it now: { id }. No waiting for this watcher's own rules (approvals, auto); GitLab's still apply, so a project
- * that requires a green pipeline refuses while one runs, and the error says so.
- */
-export async function mergeNow(input: { id: string }, ctx: Ctx) {
-  const { t, base } = deliveringTask(input.id, ctx);
-  const mr = await get(base, ctx);
-  if (mr.state !== "opened") throw new Error(`MR !${t.delivery!.iid} 已经是 ${mr.state}`);
-  try {
-    await send("PUT", `${base}/merge`, { sha: mr.sha }, ctx);
-  } catch (e: any) {
-    const why = `GitLab 不让合并（${mr.detailed_merge_status}）：${String(e.message || e).slice(0, 200)}`;
-    apply(t.id, { detail: `合并失败：${why}`, checked: Date.now() }, ctx);
-    throw new Error(why);
-  }
-  apply(t.id, { state: mr.detailed_merge_status, merging: Date.now(), detail: "合并中（你点的）", checked: Date.now() }, ctx);
-  return one(find(load(ctx).store, t.id), (await get("user", ctx)).username, ctx);
-}
-
-/** Rebases it now: { id, skipCI? } (skipCI defaults to the setting mr.rebaseSkipCI). */
-export async function rebase(input: { id: string; skipCI?: boolean }, ctx: Ctx) {
-  const { t, base } = deliveringTask(input.id, ctx);
-  const skip = input.skipCI ?? workflow(ctx).mr.rebaseSkipCI;
-  const mr = await get(base, ctx);
-  try {
-    await rebaseNow(base, skip, ctx);
-  } catch (e: any) {
-    apply(t.id, { detail: `变基失败：${String(e.message || e).slice(0, 200)}`, checked: Date.now() }, ctx);
-    throw e;
-  }
-  apply(t.id, { rebased: mr.sha, detail: skip ? "变基中（跳过流水线）" : "变基中", checked: Date.now() }, ctx);
-  return { ok: true, skipCI: skip };
-}
-
-function describe(state: string, pipeline?: string) {
-  const ci = pipeline ? `流水线 ${pipeline}` : "流水线";
-  return (
-    {
-      not_approved: "等 review / 批准",
-      discussions_not_resolved: "有讨论没解决",
-      ci_still_running: `${ci}，等它跑完`,
-      ci_must_pass: `${ci}，要过了才能合`,
-      draft_status: "还是草稿",
-      checking: "GitLab 检查中",
-      unchecked: "GitLab 检查中",
-      blocked_status: "被别的 MR 挡着",
-      jira_association_missing: "缺 Jira 关联",
-      requested_changes: "reviewer 要求修改",
-    } as Record<string, string>
-  )[state] ?? (state || "等待中");
-}
-
-// The handling rules are the user's skill, which the worker has: say which situation it is, not paste the rules
-function playbook(ctx: Ctx) {
-  return "照你的工作流程 skill 处理（MR 那份参考），处理完用 task_update 汇报（delivering，同一个 mr）。";
-}
-
-/** Writes what this pass saw onto the task (re-read under the write: the board may have changed it meanwhile). */
-function apply(id: string, c: Change, ctx: Ctx) {
-  update(ctx, (s) => {
-    const t = find(s, id);
-    if (t.status !== "delivering" || !t.delivery) return; // accepted / dropped meanwhile
-    const { question, merged, ...d } = c;
-    Object.assign(t.delivery, d);
-    if (question && !open(t).some((w) => w.kind === "user" && w.what === question)) {
-      askUser(t, question);
-      note(t, question);
-    }
-    if (merged) {
-      endWaits(t, (w) => w.kind === "mr", `MR !${t.delivery.iid} 合并了`);
-      t.status = "running";
-      note(t, `MR !${t.delivery.iid} 已合并，交给 worker 接着做`);
-    }
-    t.updatedAt = Date.now();
-  });
+  return done();
 }

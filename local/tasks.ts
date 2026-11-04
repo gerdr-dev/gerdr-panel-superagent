@@ -87,7 +87,7 @@ export async function list(input: unknown, ctx: Ctx) {
       const b = lastBlock(sess.reply ?? "");
       // The user asked it something in its chat and it answered: they're reading that answer and will carry on, so
       // "review" (come and look) means nothing here; the task stays where it is with the new summary. done /
-      // delivering / question / blocked still apply: they say something changed or is needed.
+      // question / blocked still apply: they say something changed or is needed.
       if (b && sess.byPerson && b.state === "review" && t.status === "running") applyBlock(s, t, { ...b, state: undefined });
       else if (b) applyBlock(s, t, b);
       else if (t.status === "running" && sess.status === "idle" && !t.viaTools) askUser(t, "Worker 停下了，但没在看板上汇报进展：去对话里看看它说了什么，让它接着做，或者直接「标为完成」");
@@ -133,7 +133,7 @@ export async function list(input: unknown, ctx: Ctx) {
       return {
         ...t,
         // The open waits, each with what wakes it in words (the 在等 list, the card); ended ones stay in t.waits
-        waits: open(t).length ? open(t).map((w) => ({ ...w, wake: wakeText(w, t) })) : undefined,
+        waits: open(t).length ? open(t).map((w) => ({ ...w, wake: wakeText(w) })) : undefined,
         // The open question to the user, for the card (a wait too: _waits.ts question)
         question: question(t),
         // The sessions it handed work to, for the card's chips (each is a wait as well)
@@ -356,29 +356,6 @@ export async function accept(input: { id: string }, ctx: Ctx) {
   return t;
 }
 
-/**
- * Hands a task's MR to the watcher (mrwatch.ts): from now on review comments and failed pipelines go to its worker
- * and it's merged once it can be. { id, mr? } — mr defaults to the task's MR link. For a task that ended in "review"
- * with an MR (before workers reported "delivering"), or one the user opened the MR for by hand. Comments made before
- * now aren't handed over (the worker has seen them, or they predate the hand-over).
- */
-export function deliver(input: { id: string; mr?: string }, ctx: Ctx) {
-  return update(ctx, (s) => {
-    const t = find(s, input.id);
-    const url = input.mr ?? (t.links ?? []).map((l) => l.url).find((u) => MR_RE.test(u));
-    const m = url ? MR_RE.exec(url) : null;
-    if (!m) throw new Error(`${t.id} 没有 MR 链接：给 mr（MR 地址）`);
-    if (!t.session) throw new Error(`${t.id} 没有 worker 会话，没人处理 review 意见`);
-    if (!(t.links ?? []).some((l) => l.url === m[0])) t.links = [...(t.links ?? []), { label: `MR !${m[3]}`, url: m[0], at: Date.now() }];
-    t.delivery = { kind: "mr", url: m[0], project: m[2], iid: Number(m[3]), since: Date.now(), seen: [], rounds: 0 };
-    Object.assign(t, { status: "delivering", updatedAt: Date.now() });
-    endQuestions(t, "交给 mrwatch 了");
-    note(t, `交给 mrwatch：等 MR !${m[3]} 合并`);
-    return t;
-  });
-}
-
-const MR_RE = /^(https?:\/\/[^/]+)\/(.+?)\/-\/merge_requests\/(\d+)/;
 
 /** Sends it back with what's wrong. { id, feedback } */
 export async function reject(input: { id: string; feedback: string }, ctx: Ctx) {

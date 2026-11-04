@@ -1,4 +1,4 @@
-import { AlarmClock, AlertTriangle, Bot, Hourglass, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ListTodo, ExternalLink, GitPullRequest, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Send, Settings, Undo2, X } from "lucide-react";
+import { AlarmClock, AlertTriangle, Bot, Hourglass, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ListTodo, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Send, Settings, Undo2, X } from "lucide-react";
 import clsx from "clsx";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "../components/Button";
@@ -105,12 +105,6 @@ export default function BoardPage() {
     if (action === "accept" || action === "drop") void act(action, { id: t.id }).then(() => setOpen(""));
     // A human step it's waiting for: leave the chat for that task's own panel (its steps, what to hand back)
     if (action.startsWith("human:")) return setOpen(action.slice(6));
-    if (action === "deliver") void act("deliver", { id: t.id }).then(() => run("mrwatch.check", { id: t.id }).then(() => act("list", {})));
-    // GitLab can refuse (a required pipeline still running): mrwatch writes why into the task, and the panel's line shows it
-    const after = () => act("list", {});
-    if (action === "merge") void run("mrwatch.mergeNow", { id: t.id }).then(after, after);
-    if (action === "rebase") void run("mrwatch.rebase", { id: t.id, skipCI: true }).then(after, after);
-    if (action === "check") void run("mrwatch.check", { id: t.id }).then(() => act("list", {}));
   };
 
   return (
@@ -268,7 +262,7 @@ function Alerts({ onLog }: { onLog: () => void }) {
   );
 }
 
-const WAIT_ICON: Record<Wait["kind"], typeof Hourglass> = { reply: MessageSquare, time: AlarmClock, mr: GitPullRequest, session: Bot, user: Hand, task: ListTodo };
+const WAIT_ICON: Record<Wait["kind"], typeof Hourglass> = { reply: MessageSquare, time: AlarmClock, session: Bot, user: Hand, task: ListTodo };
 
 /**
  * 在等: everything every live task waits on, in one place — a colleague's reply, a time to look again, an MR to merge,
@@ -373,13 +367,6 @@ function chatPanel(t: Task, byId: Record<string, Task>): { label: string; action
       }),
     };
   if (c === "review") {
-    const mr = (t.links ?? []).find((l) => /\/-\/merge_requests\/\d+/.test(l.url));
-    // A result with an MR isn't finished until it's merged: hand it to the watcher instead of accepting it
-    if (mr)
-      return {
-        label: `${t.id} · 待验收：结果里有 ${mr.label}。没问题就交给定时任务盯着合并（review 意见、流水线会交给它处理）；要改直接在下面说`,
-        actions: [drop, { id: "accept", label: "直接完成", confirm: "确定完成？" }, { id: "deliver", label: "等它合并", kind: "primary", confirm: "确定？会自动变基、合进去" }],
-      };
     return { label: `${t.id} · 待验收：没问题就通过；要改直接在下面说，它会接着改`, actions: [drop, { id: "accept", label: "通过", kind: "primary" }] };
   }
   if (c === "you")
@@ -400,18 +387,9 @@ function chatPanel(t: Task, byId: Record<string, Task>): { label: string; action
       }`,
       actions: [drop, done],
     };
-  if (t.status === "delivering" && t.delivery)
-    return {
-      label: `${t.id} · 等 MR !${t.delivery.iid} 合并：${t.delivery.detail ?? "还没查过"}${t.delivery.checked ? `（${since(t.delivery.checked)}前查的）` : ""}。review 意见和挂掉的流水线会自动交给它，能合就自动合`,
-      actions: [
-        drop,
-        { ...done, label: "标为完成（不等合并）" },
-        { id: "check", label: "立即检查" },
-        ...(t.delivery.state === "need_rebase" ? [{ id: "rebase", label: "变基（跳过流水线）", confirm: "确定？不跑新流水线" }] : []),
-        { id: "merge", label: "立即合并", kind: "primary" as const, confirm: "确定合进去？" },
-      ],
-    };
-  return { label: `${t.id} · 进行中`, actions: [drop, done] };
+  // In progress: what it waits on, if anything, and what will wake it — the same words as the 在等 list
+  const w = (t.waits ?? []).find((x) => !x.user);
+  return { label: `${t.id} · 进行中${w ? ` · 在等：${w.what}（${w.wake ?? ""}）` : ""}`, actions: [drop, done] };
 }
 
 /** A task as a small card in its column: what it is, where, and how it's doing. Click for everything else. */
@@ -484,21 +462,24 @@ function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, T
           {asked && <span>{asked}</span>}
           {(t.agent || t.model) && <span>· {[t.agent, t.model].filter(Boolean).join(" / ")}</span>}
         {t.from && <span>· 拆自 {t.from}</span>}
-          {t.status === "delivering" && t.delivery ? (
-            // A span, not <a>: the card is a <button> and can't hold a link
-            <span
-              role="link"
-              onClick={(e) => {
-                e.stopPropagation();
-                window.open(t.delivery!.url, "_blank", "noreferrer");
-              }}
-              className="inline-flex items-center gap-1 rounded-sm bg-brand/10 px-1 text-brand hover:underline"
-            >
-              <GitPullRequest className="size-3" />!{t.delivery.iid} {t.delivery.detail ?? "等合并"}
-            </span>
-          ) : (
-            live && t.status !== "done" && t.status !== "dropped" && <span className={clsx("inline-flex items-center gap-1", liveTone(t))}>· {live}</span>
-          )}
+          {live && t.status !== "done" && t.status !== "dropped" && <span className={clsx("inline-flex items-center gap-1", liveTone(t))}>· {live}</span>}
+          {outside(t)
+            .filter((w) => w.url)
+            .map((w) => (
+              // What it waits on, when that has a page (an MR): a span, not <a> — the card is a <button>
+              <span
+                key={w.id}
+                role="link"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  window.open(w.url, "_blank", "noreferrer");
+                }}
+                className="inline-flex items-center gap-1 rounded-sm bg-brand/10 px-1 text-brand hover:underline"
+              >
+                <ExternalLink className="size-3" />
+                {w.where ?? "打开"}
+              </span>
+            ))}
           {blockers.map((b) => (
             <span key={b} className="rounded-sm bg-warn/10 px-1 text-warn">
               等 {b}

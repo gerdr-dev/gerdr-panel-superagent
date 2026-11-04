@@ -11,6 +11,7 @@ export const FILE = `${USER}/settings.json`;
 /** What this person set (only that: the rest stays the default), with its etag. */
 export function stored(ctx: Ctx): { raw: any; etag?: string; broken?: boolean } {
   migrate(ctx);
+  mrToSkill(ctx);
   const st = ctx.fs.stat(FILE);
   if (!st) return { raw: {} };
   try {
@@ -77,13 +78,6 @@ function migrate(ctx: Ctx) {
     // 直推仓库 named repositories by path or by group/name: matched on the path's last part
     repos: list(v("仓库", "repos")).map((path) => ({ path, direct: direct.some((d) => path === d || path.endsWith(`/${d.split("/").pop()}`)) })),
     gitlab: { host: v("GitLab", "gitlab") },
-    mr: {
-      merge: said(v("合并", "merge"), { auto: ["自动", "auto"], manual: ["手动", "manual"] }),
-      minApprovals: num(v("批准人数", "approvals")),
-      rebase: said(v("变基", "rebase"), { auto: ["自动", "auto"], manual: ["手动", "manual"], off: ["不做", "off", "no"] }),
-      rebaseSkipCI: said(v("变基跑流水线", "rebase pipeline"), { run: ["跑", "run", "yes"], skip: ["跳过", "skip", "no"] }) === "skip" || undefined,
-      maxRounds: num(v("最多轮数", "max rounds")),
-    },
     proactive: said(v("主动工作", "proactive"), { off: ["关", "off"], observe: ["只记录", "observe"], on: ["照做", "on"] }),
   };
   ctx.fs.write(FILE, JSON.stringify(diff(normalize(raw)), null, 2) + "\n");
@@ -98,4 +92,46 @@ function migrate(ctx: Ctx) {
     const plain = text.replace(VAR, (_, _name, value) => String(value).trim());
     if (plain !== text) ctx.fs.write(f.path, plain);
   }
+}
+
+// ---- once: the MR settings into this person's skill ----
+
+const MR = "skills/my-workflow/references/mr.md";
+
+/**
+ * How MRs are merged and rebased used to be settings (user/settings.json mr), when the MR watcher did it. The worker
+ * does it now, following the skill (mr.md): someone who had chosen values gets their own copy of mr.md saying the
+ * same, and the setting goes. Untouched defaults say what the shared mr.md says already: nothing to copy.
+ */
+function mrToSkill(ctx: Ctx) {
+  if (!ctx.fs.stat(FILE)) return;
+  let raw: any;
+  try {
+    raw = JSON.parse(ctx.fs.read(FILE));
+  } catch {
+    return;
+  }
+  if (!raw?.mr) return;
+  const m = raw.mr;
+  const from = effective(ctx, MR);
+  if (from && !ctx.fs.stat(mine(MR))) {
+    let text = ctx.fs.read(from);
+    const n = typeof m.minApprovals === "number" ? m.minApprovals : 1;
+    if (m.merge === "auto") text = text.replace("| 其他仓库 | 先问我 |", "| 其他仓库 | 你直接合 |");
+    if (n !== 1) text = text.replace("至少 1 个人批准过", n === 0 ? "不用等人批准" : `至少 ${n} 个人批准过`);
+    if (typeof m.maxRounds === "number") text = text.replace("改了 3 轮", `改了 ${m.maxRounds} 轮`);
+    const rebase =
+      m.rebase === "auto"
+        ? `- 只是落后、没有冲突：直接变基（\`glab mr rebase${m.rebaseSkipCI ? " --skip-ci" : ""}\`）${m.rebaseSkipCI ? "，变基时跳过流水线" : "，变基时跑流水线"}。`
+        : m.rebase === "off"
+          ? "- 只是落后、没有冲突：不用变基，等 GitLab 说能合再说。"
+          : `- 只是落后、没有冲突：先问我要不要变基（\`ask_human\`）；我说变就变，变基时${m.rebaseSkipCI ? "跳过" : "跑"}流水线。`;
+    text = text.replace(/^- 只是落后、没有冲突：.*$/m, rebase);
+    if (text !== ctx.fs.read(from)) {
+      ctx.fs.mkdir(mine(MR).slice(0, mine(MR).lastIndexOf("/")));
+      ctx.fs.write(mine(MR), text);
+    }
+  }
+  delete raw.mr;
+  ctx.fs.write(FILE, JSON.stringify(raw, null, 2) + "\n");
 }

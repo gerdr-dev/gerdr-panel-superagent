@@ -12,9 +12,7 @@ export type Task = {
   id: string;
   title: string;
   owner: "agent" | "human";
-  status: "todo" | "running" | "review" | "delivering" | "done" | "dropped";
-  /** While delivering: the MR and what the watcher last saw (local/_store.ts Delivery). */
-  delivery?: { kind: "mr"; url: string; iid: number; state?: string; detail?: string; checked?: number; rounds?: number };
+  status: "todo" | "running" | "review" | "done" | "dropped";
   routing?: number;
   router?: string;
   routerClosed?: boolean;
@@ -144,7 +142,7 @@ export function day(ms: number) {
 /** One thing a task waits on (local/_waits.ts): what, whether it's the user, what wakes it (wake: in words). */
 export type Wait = {
   id: string;
-  kind: "reply" | "time" | "mr" | "session" | "user" | "task";
+  kind: "reply" | "time" | "session" | "user" | "task";
   what: string;
   since: number;
   user?: boolean;

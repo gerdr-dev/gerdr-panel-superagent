@@ -7,7 +7,7 @@ import { applyBlock } from "./_apply";
 import { find, load, note, update, type Store, type Task } from "./_store";
 import { handBack } from "./_main";
 import { waitCard } from "./waits";
-import { endWaits, isOutside, open, question, sync } from "./_waits";
+import { endWaits, isOutside, open, question } from "./_waits";
 
 const STEP = {
   type: "object",
@@ -38,14 +38,13 @@ const STEP = {
 export const tools = {
   task_update: {
     description:
-      "Put where your board task stands on the board. state: working (still at it: summary / links), done (finished, nothing for the user to judge), delivering (your change is out and waits on a merge: give mr, the MR URL; a watcher follows it and sends you review comments and failed pipelines), review (the result is for the user to judge). links are artifacts (MR, docs, pipelines): kept, so add new ones only. When to report: the my-workflow skill, references/board.md.",
+      "Put where your board task stands on the board. state: working (still at it: summary / links), done (finished, nothing for the user to judge), review (the result is for the user to judge). Only you (or the user) say a task is done: a merged MR or a passed pipeline is news for you, not the end. Waiting on an MR, a colleague or a job: wait_for. links are artifacts (MR, docs, pipelines): kept, so add new ones only. When to report: the my-workflow skill, references/board.md.",
     input: {
       type: "object",
       properties: {
-        state: { type: "string", enum: ["working", "done", "delivering", "review"] },
+        state: { type: "string", enum: ["working", "done", "review"] },
         summary: { type: "string", description: "Where it stands in 1-3 sentences, for the board card" },
         links: { type: "array", items: { type: "object", properties: { label: { type: "string" }, url: { type: "string" } }, required: ["url"] } },
-        mr: { type: "string", description: "With delivering: the MR URL" },
       },
       required: ["state"],
     },
@@ -87,20 +86,19 @@ export function task_update(input: { state: string; summary?: string; links?: { 
     let state = input.state === "working" ? undefined : input.state;
     // Answering the user's own question in the chat: they read it there; don't move the task to "come and look"
     if (state === "review" && sess?.byPerson && t.status === "running") state = undefined;
+    const before = new Set((t.waits ?? []).map((w) => w.id));
     applyBlock(s, t, { ...input, state });
     // "working" says nothing about what's next: it doesn't reset the reminder count, or a worker that answers each
     // reminder with "still working" and stops would be reminded forever (tasks.ts silentStop)
     Object.assign(t, { viaTools: true, synced: undefined, reportedAt: Date.now(), updatedAt: Date.now() });
-    // A new state is what's next: the reminder count starts over, and a wait_for before it no longer says what it waits on
-    if (state) {
+    // A new state is what's next: the reminder count starts over, and a wait_for before it no longer says what it waits on.
+    // "delivering" (older workers: an MR out) is a wait_for on the MR (_apply.ts), shown in the chat as wait_for's is
+    if (state && state !== "delivering") {
       t.nudges = 0;
       endWaits(t, isOutside, "worker 报了新进展");
     }
-    // Handed to the MR watcher: the MR wait (made by sync, here at once so the card can name it) shows in the chat as
-    // a card, like wait_for's
-    sync(s);
-    const mr = input.state === "delivering" && t.status === "delivering" ? open(t).find((w) => w.kind === "mr") : undefined;
-    return { id: t.id, status: t.status, column: question(t) ? "等你" : t.status, ...(mr ? { gerdrCard: waitCard(ctx, t, [mr]) } : {}) };
+    const fresh = open(t).filter((w) => isOutside(w) && !before.has(w.id));
+    return { id: t.id, status: t.status, column: question(t) ? "等你" : t.status, ...(fresh.length ? { gerdrCard: waitCard(ctx, t, fresh) } : {}) };
   });
 }
 
@@ -195,7 +193,6 @@ export function my_task(input: unknown, ctx: Ctx) {
     question: question(t),
     waits: open(t).map((w) => ({ kind: w.kind, what: w.what, since: w.since })),
     artifacts: t.links ?? [],
-    mr: t.delivery?.url,
     humanSteps: humans.map((h) => ({ id: h.id, title: h.title, status: h.status, handedBack: h.handBack?.kind === "secret" ? (h.status === "done" ? `secret ${h.handBack.name} saved` : undefined) : h.handedBack })),
   };
 }

@@ -13,7 +13,7 @@
 // it) ends the wait — it calls wait_for again if it still waits.
 
 import { load, note, update, type Task } from "./_store";
-import { addWait, endWaits, isOutside, open, wakeText, type Wait } from "./_waits";
+import { isOutside, mrConversation, open, waitOn, wakeText, type Wait } from "./_waits";
 import { wake } from "./_wake";
 import { followUp, record, subscribers, compact } from "./_main";
 import { mine } from "./board";
@@ -44,13 +44,14 @@ export const tools = {
 };
 
 /** Which conversation a worker means, as events name it: { source, key }, from what has come from it lately. */
-function resolve(ctx: Ctx, conv: string): { source: string; key: string; where: string } {
+function resolve(ctx: Ctx, conv: string): { source: string; key: string; where: string; url?: string } {
   const c = conv.trim();
+  // An MR: its events come from the MR watcher (mrwatch.ts) as gitlab, group/repo!34 — review, pipeline, merge…
+  const asMr = mrConversation(c);
+  if (asMr) return asMr;
   const keys = new Set<string>([c]);
   const slack = /\/archives\/([A-Z0-9]+)/.exec(c);
   if (slack) keys.add(slack[1]);
-  const mr = /^https?:\/\/[^/]+\/(.+?)\/-\/merge_requests\/(\d+)/.exec(c);
-  if (mr) keys.add(`${mr[1]}!${mr[2]}`);
   const since = Date.now() - 30 * DAY;
   for (const key of keys) {
     const seen = ctx.events.list({ key, since, limit: 1 });
@@ -62,8 +63,6 @@ function resolve(ctx: Ctx, conv: string): { source: string; key: string; where: 
       return { source: e.source, key, where: who ? `${kind} · ${who}` : `${kind} · ${key}` };
     }
   }
-  // An MR nobody has commented on yet: its events will come from the GitLab watcher (mrwatch.ts) as gitlab/*
-  if (mr) return { source: "gitlab", key: `${mr[1]}!${mr[2]}`, where: `MR ${mr[1].split("/").pop()}!${mr[2]}` };
   throw new Error(
     `没找到「${c}」这个对话：最近 30 天没有它的消息进来（可能这个来源的插件没开，或者写的不是频道 / 私信 id）。` +
       `只等状态变化的（job、发布）用 recheck 定时回来看；要人回话的，换成对方会回复的那个对话的 id 或链接`,
@@ -81,20 +80,13 @@ export function wait_for(input: { what: string; conversation?: string; recheck?:
     const t = mine(s, ctx);
     if (t.status !== "running") throw new Error(`${t.id} 现在不是进行中（${t.status}），不用等`);
     const now = Date.now();
-    // A new wait_for replaces the one before: it says what it waits on now
-    endWaits(t, isOutside, "换成了新的等待");
-    const ws: Wait[] = [];
-    if (th) {
-      const cur = t.threads ?? (t.origin?.key ? [{ source: t.origin.source, key: t.origin.key }] : []);
-      if (!cur.some((x) => x.source === th.source && x.key === th.key)) t.threads = [...cur, { source: th.source, key: th.key }];
-      ws.push(addWait(t, { kind: "reply", what, since: now, on: { source: th.source, key: th.key }, where: th.where }));
-    }
-    if (recheck != null) ws.push(addWait(t, { kind: "time", what, since: now, at: now + recheck * 60_000 }));
+    const ws = waitOn(t, { what, conv: th, at: recheck != null ? now + recheck * 60_000 : undefined });
     note(t, `等：${what}${th ? `（${th.where} 上的回复）` : ""}${recheck != null ? `，${recheck} 分钟后回来看` : ""}`);
     Object.assign(t, { viaTools: true, reportedAt: now, nudges: 0, updatedAt: now });
     return { t, ws };
   });
-  if (th) ensureTrigger(ctx, th);
+  // The MR watcher's events come in through triggers/mr.json; anything else may need a trigger of its own
+  if (th && th.source !== "gitlab") ensureTrigger(ctx, th);
   return {
     id: t.id,
     gerdrCard: waitCard(ctx, t, ws),
@@ -107,7 +99,7 @@ export function wait_for(input: { what: string; conversation?: string; recheck?:
 /**
  * A wait shown in the worker's chat (ui/src/cards.tsx "task-wait"): what it waits on, what will wake it, and later how
  * it ended — a turn that just ends after "I'll wait" left the user unsure anything was going on (2026-11-04). Used by
- * wait_for and by task_update delivering (the MR).
+ * wait_for (and older workers' task_update delivering: a wait_for on the MR).
  */
 export function waitCard(ctx: Ctx, t: Task, ws: Wait[]) {
   return {
@@ -118,7 +110,7 @@ export function waitCard(ctx: Ctx, t: Task, ws: Wait[]) {
     waits: ws.map((w) => w.id),
     kicker: `在等 · ${t.id}`,
     title: ws[0]?.what ?? "",
-    body: ws.map((w) => wakeText(w, t)).join("；"),
+    body: ws.map((w) => wakeText(w)).join("；"),
     url: ws.find((w) => w.url)?.url,
     since: ws[0]?.since,
     tone: "info",
@@ -135,11 +127,11 @@ export function status(input: { id: string; waits?: string[]; since?: number; ki
   const all = t.waits ?? [];
   const ws = input.waits?.length
     ? all.filter((w) => input.waits!.includes(w.id))
-    : all.filter((w) => w.since === input.since && (input.kind === "mr" ? w.kind === "mr" : isOutside(w)));
+    : all.filter((w) => w.since === input.since && isOutside(w));
   const on = ws.filter((w) => !w.end);
   if (on.length) {
     const woke = on.find((w) => w.woke)?.woke;
-    return { state: "waiting", body: on.map((w) => wakeText(w, t)).join("；"), woke };
+    return { state: "waiting", body: on.map((w) => wakeText(w)).join("；"), woke };
   }
   const end = ws.map((w) => w.end).filter(Boolean).sort((a, b) => a!.at - b!.at)[0];
   if (end) return { state: "ended", how: end.how, at: end.at };

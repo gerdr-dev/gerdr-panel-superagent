@@ -7,9 +7,10 @@
 // with nothing to wake it (t29), one reporting "working" and stopping (t30), an MR wait nobody could see in the chat.
 //
 // Now a task has `waits`: each says what it waits for, whether that's the user, and what ends it. Two kinds are
-// registered by the worker's own calls (a reply / a time with wait_for, a question for the user); three are kept in
-// step with what they mirror on every write (sync): the MR it delivers in, the user's board items it's blocked by, the
-// sessions it handed work to. The board reads only this:
+// registered by the worker's own calls (wait_for: news in a conversation — a colleague's DM, an MR — or a time; a
+// question for the user); two are kept in step with what they mirror (sync): the user's board items it's blocked by,
+// the sessions it handed work to. An MR is no kind of its own: a way of working (the worker's skill) plus a source of
+// events (mrwatch.ts), waited on like any conversation. The board reads only this:
 //
 //   有直接等你的（问题、批准）→ 等你（等你在看板上做的那一项，是那一项的卡片在等你）
 //   worker 在跑，或者还有等待 → 进行中
@@ -19,7 +20,7 @@
 
 import type { Store, Task } from "./_store";
 
-export type WaitKind = "reply" | "time" | "mr" | "session" | "user" | "task";
+export type WaitKind = "reply" | "time" | "session" | "user" | "task";
 
 export type Wait = {
   id: string;
@@ -29,7 +30,8 @@ export type Wait = {
   since: number;
   /** It waits on the user (a question, a step, a helper's approval): the task goes under 等你. */
   user?: boolean;
-  /** What wakes it. reply / mr: a message in this conversation (an event's source + key); where: it in words. */
+  /** What wakes it. reply: anything new in this conversation — a person's message, an MR's review / pipeline / merge
+   * (an event's source + key); where: it in words. */
   on?: { source: string; key: string };
   where?: string;
   /** time: when it's woken to look again. */
@@ -40,7 +42,7 @@ export type Wait = {
    * question answered in the chat or on the card. */
   item?: string;
   url?: string;
-  /** Long waits (an MR) are woken more than once without ending: the last time, and by what. */
+  /** The last time something woke it without ending it, and what. */
   woke?: { how: string; at: number };
   /** How it ended: what came, or why it no longer applies. */
   end?: { how: string; at: number };
@@ -100,13 +102,41 @@ export function isOutside(w: Wait) {
   return w.kind === "reply" || w.kind === "time";
 }
 
+/** The task follows a conversation from now on (threads): what comes in it goes to its worker (_main.ts subscribers). */
+export function follow(t: Task, on: { source: string; key: string }) {
+  const cur = t.threads ?? (t.origin?.key ? [{ source: t.origin.source, key: t.origin.key }] : []);
+  if (!cur.some((x) => x.source === on.source && x.key === on.key)) t.threads = [...cur, { source: on.source, key: on.key }];
+}
+
+/**
+ * The worker waits on outside (wait_for): news in a conversation (the task follows it from now on) and / or a time.
+ * Replaces what it waited on outside before: this says what it waits on now. Returns the new waits.
+ */
+export function waitOn(t: Task, w: { what: string; conv?: { source: string; key: string; where?: string; url?: string }; at?: number }): Wait[] {
+  const now = Date.now();
+  endWaits(t, isOutside, "换成了新的等待");
+  const out: Wait[] = [];
+  if (w.conv) {
+    follow(t, w.conv);
+    out.push(addWait(t, { kind: "reply", what: w.what, since: now, on: { source: w.conv.source, key: w.conv.key }, where: w.conv.where, url: w.conv.url }));
+  }
+  if (w.at) out.push(addWait(t, { kind: "time", what: w.what, since: now, at: w.at }));
+  return out;
+}
+
+/** The conversation an MR is, as the MR watcher (mrwatch.ts) emits its events: gitlab, group/repo!34. */
+export function mrConversation(url: string): { source: string; key: string; where: string; url: string } | null {
+  const m = /^(https?:\/\/[^/]+)\/(.+?)\/-\/merge_requests\/(\d+)/.exec(url.trim());
+  return m ? { source: "gitlab", key: `${m[2]}!${m[3]}`, where: `MR !${m[3]}`, url: m[0] } : null;
+}
+
 // ---- kept in step with what they mirror ----
 
 const hhmm = (ms: number) => new Date(ms).toTimeString().slice(0, 5);
 
 /**
- * Brings the mirrored waits in step, on every write (_store.ts update): the MR it delivers in, the board items it's
- * blocked by; a finished task ends everything. Sessions it handed work to need Gerdr's session list: syncSessions.
+ * Brings the mirrored waits in step, on every write (_store.ts update): the board items it's blocked by; a finished
+ * task ends everything. Sessions it handed work to need Gerdr's session list: syncSessions.
  */
 export function sync(s: Store) {
   for (const t of s.tasks) {
@@ -114,12 +144,6 @@ export function sync(s: Store) {
     if (t.status === "done" || t.status === "dropped") {
       endWaits(t, () => true, t.status === "done" ? "任务完成了" : "任务放弃了");
       continue;
-    }
-    // The MR: one open wait while delivering it
-    const d = t.status === "delivering" ? t.delivery : undefined;
-    endWaits(t, (w) => w.kind === "mr" && w.url !== d?.url, t.status === "delivering" ? "换了一个 MR" : "不再等这个 MR");
-    if (d && !open(t).some((w) => w.kind === "mr")) {
-      addWait(t, { kind: "mr", what: `MR !${d.iid} 合并`, url: d.url, on: { source: "gitlab", key: `${d.project}!${d.iid}` }, since: d.since });
     }
     // The user's board items (and any task it's blocked by): open while the item is
     for (const id of t.blockedBy ?? []) {
@@ -163,17 +187,13 @@ export function syncSessions(t: Task, kids: Kid[]) {
 // ---- for people ----
 
 /** What will wake it, in words (the 在等 list, the chat card). */
-export function wakeText(w: Wait, t?: Task): string {
+export function wakeText(w: Wait): string {
   switch (w.kind) {
     case "reply":
-      return `${w.where ?? (w.on ? `${w.on.source} ${w.on.key}` : "那个对话")} 一回复就叫醒它`;
+      return `${w.where ?? (w.on ? `${w.on.source} ${w.on.key}` : "那个对话")} 上有新消息 / 新动静就叫醒它`;
     case "time":
-      return w.at ? `${hhmm(w.at)} 叫醒它回来看` : "到点叫醒它";
-    case "mr": {
-      const d = t?.delivery;
-      const now = d?.detail ? `现在：${d.detail}${d.checked ? `（${hhmm(d.checked)} 查的）` : ""}。` : "";
-      return `${now}每 5 分钟查一次；review 意见、挂掉的流水线叫醒它，能合就自动合`;
-    }
+      // The worker picked the interval (wait_for recheck): say it, not only the clock time it comes to
+      return w.at ? `${Math.round((w.at - w.since) / 60000)} 分钟后（${hhmm(w.at)}）叫醒它回来看` : "到点叫醒它";
     case "session":
       return "它做完会回报，Gerdr 把结果交给 worker";
     case "user":

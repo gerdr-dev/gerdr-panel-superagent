@@ -2,12 +2,8 @@
 // list) or from its panel tools (board.ts task_update / ask_human). One set of rules for both.
 
 import { newTask, note, type Question, type Store, type Task } from "./_store";
-import { askUser, endQuestions } from "./_waits";
+import { askUser, endQuestions, mrConversation, waitOn } from "./_waits";
 
-/** The conversation an MR is, as mrwatch.ts emits its events: gitlab, group/repo!34. */
-export function mrThread(project: string, iid: number) {
-  return { source: "gitlab", key: `${project}!${iid}` };
-}
 
 /** What a worker's reply says, applied to its task. Returns the human task it asked for, if any. */
 export function applyBlock(s: Store, t: Task, b: any): Task | null {
@@ -28,26 +24,18 @@ export function applyBlock(s: Store, t: Task, b: any): Task | null {
       endQuestions(t, "worker 交了结论");
       break;
     case "done":
-      Object.assign(t, { status: "done", delivery: undefined, doneAt: Date.now() });
+      Object.assign(t, { status: "done", doneAt: Date.now() });
       break;
+    // Older workers' "delivering" (an MR out, waiting on it): the same as wait_for on the MR — no state of its own
     case "delivering": {
-      const m = /^(https?:\/\/[^/]+)\/(.+?)\/-\/merge_requests\/(\d+)/.exec(String(b.mr ?? ""));
-      if (!m) {
-        askUser(t, `worker 说在等交付，但没给出 MR 地址（mr 字段）：${b.mr ?? "空"}。去对话里让它补上`);
+      const conv = mrConversation(String(b.mr ?? ""));
+      if (!conv) {
+        askUser(t, `worker 说在等 MR，但没给出 MR 地址（mr 字段）：${b.mr ?? "空"}。去对话里让它补上`);
         break;
       }
-      const url = m[0];
-      if (!(t.links ?? []).some((l) => l.url === url)) t.links = [...(t.links ?? []), { label: `MR !${m[3]}`, url, at: Date.now() }];
-      // The same MR again (after handling a round): keep what the watcher already saw
-      const same = t.delivery?.url === url;
-      t.delivery = same ? t.delivery : { kind: "mr", url, project: m[2], iid: Number(m[3]), since: Date.now(), seen: [], rounds: 0 };
-      // The MR is a conversation of this task from now on: what happens on it (review comments, a failed pipeline,
-      // conflicts; mrwatch.ts emits them) comes to this task's worker by subscription, like a follow-up in its chat
-      const th = mrThread(m[2], Number(m[3]));
-      const cur = t.threads ?? (t.origin?.key ? [{ source: t.origin.source, key: t.origin.key }] : []);
-      if (!cur.some((x) => x.source === th.source && x.key === th.key)) t.threads = [...cur, th];
-      t.status = "delivering";
-      endQuestions(t, "交付了，等合并");
+      if (!(t.links ?? []).some((l) => l.url === conv.url)) t.links = [...(t.links ?? []), { label: conv.where, url: conv.url, at: Date.now() }];
+      waitOn(t, { what: `${conv.where}：review、流水线、合并`, conv });
+      endQuestions(t, "提了 MR，在等它");
       break;
     }
     case "question":

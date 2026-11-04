@@ -1,7 +1,7 @@
 // The task board's data (user/data/tasks.json: this person's, never shared — _user.ts), shared by tasks.ts (the board, the panel's agent) and the watchers
 // (mrwatch.ts). A helper file (leading _): nothing here is callable from a page.
 
-import { addWait, askUser, question, sync, type Wait } from "./_waits";
+import { addWait, askUser, follow, open, question, sync, type Wait } from "./_waits";
 import { DATA, migrate } from "./_user";
 
 export const FILE = `${DATA}/tasks.json`;
@@ -23,12 +23,13 @@ export type Task = {
   title: string;
   owner: "agent" | "human";
   /**
-   * todo → running → done (nothing for the user to judge) | review (the user judges the result) | delivering (handed
-   * off to a process: an MR on its way to merge, followed by a watcher) → done; dropped. Human tasks: todo → done.
+   * todo → running → done (nothing for the user to judge) | review (the user judges the result); dropped. Only the
+   * worker or the user says done: no rule does (a merged MR is news for the worker, not the end). Human tasks: todo → done.
+   * "delivering" (an MR the board followed to merge) is gone: read as running, waiting on the MR (upgrade).
    */
-  status: "todo" | "running" | "review" | "delivering" | "done" | "dropped";
-  /** While delivering: what it waits on and what the watcher (mrwatch.ts) last saw. */
-  delivery?: Delivery;
+  status: "todo" | "running" | "review" | "done" | "dropped" | "delivering";
+  /** @deprecated the MR of a "delivering" task: read by upgrade into a wait on the MR's conversation. */
+  delivery?: { url: string; project: string; iid: number; since: number };
   /** When it was handed to the panel's agent to pick the repository / agent (the user dispatched it without one). */
   routing?: number;
   /**
@@ -109,26 +110,6 @@ export type Task = {
   doneAt?: number;
 };
 
-/** An MR the task's work went out in; mrwatch.ts follows it to merged. */
-export type Delivery = {
-  kind: "mr";
-  url: string;
-  project: string; // group/repo
-  iid: number;
-  since: number; // when it was handed over: comments before it were the worker's to see already
-  /** GitLab's detailed_merge_status (mergeable, need_rebase, not_approved, ci_still_running...) and a line for the card. */
-  state?: string;
-  detail?: string;
-  checked?: number;
-  /** Notes already handed to the worker, the pipeline / sha already acted on, how many review rounds so far. */
-  seen?: number[];
-  pipeline?: number;
-  rebased?: string;
-  conflict?: string;
-  rounds?: number;
-  merging?: number;
-};
-
 export type Store = { next: number; tasks: Task[] };
 
 export function load(ctx: Ctx): { store: Store; etag?: string } {
@@ -154,6 +135,17 @@ function upgrade(s: Store): Store {
       t.waiting = undefined;
     }
     t.waitEnd = undefined;
+    // Delivering: running, waiting on its MR like on any conversation (the watcher is only a source of its events now)
+    if (t.status === "delivering") {
+      t.status = "running";
+      const d = t.delivery;
+      if (d?.url) {
+        const on = { source: "gitlab", key: `${d.project}!${d.iid}` };
+        follow(t, on);
+        if (!open(t).some((w) => w.on?.key === on.key)) addWait(t, { kind: "reply", what: `MR !${d.iid}：review、流水线、合并`, on, where: `MR !${d.iid}`, url: d.url, since: d.since });
+      }
+    }
+    t.delivery = undefined;
   }
   return s;
 }
@@ -195,7 +187,6 @@ function tellOrigins(ctx: Ctx, before: Seen, s: Store) {
       const summary = t.summary ? `：${t.summary}` : "";
       if (t.status === "done") text = `${t.id} 做完了${summary}`;
       else if (t.status === "review") text = `${t.id} 有结论了，等你看${summary}`;
-      else if (t.status === "delivering") text = `${t.id} 交付了${t.delivery?.url ? `：${t.delivery.url}` : summary}，等合并`;
       else if (t.status === "dropped") text = `${t.id} 不做了`;
     } else if (question(t) && question(t) !== b.question) {
       text = `${t.id} 需要你定：${question(t)}（在任务看板上回答）`;

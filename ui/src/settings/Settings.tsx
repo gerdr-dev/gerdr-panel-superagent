@@ -59,7 +59,6 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
   });
 
   const put = <K extends keyof Settings>(k: K, v: Settings[K]) => setS((x) => (x ? { ...x, [k]: v } : x));
-  const mr = <K extends keyof Settings["mr"]>(k: K, v: Settings["mr"][K]) => setS((x) => (x ? { ...x, mr: { ...x.mr, [k]: v } } : x));
 
   return (
     <div className="mx-auto max-w-4xl space-y-4 p-6 max-md:p-3">
@@ -67,7 +66,7 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
         <div>
           <h1 className="text-[22px] font-semibold tracking-tight">设置</h1>
           <p className="mt-1 text-[13px] text-muted-foreground">
-            代码照着做的值：谁来派活、谁来干活、有哪些仓库、MR 怎么合、主动工作开不开。只存在你这里，不会随面板分享出去。
+            代码照着做的值：谁来派活、谁来干活、有哪些仓库、主动工作开不开。只存在你这里，不会随面板分享出去。
             怎么做事（怎么交付、review 意见怎么处理、怎么挑仓库）是你用自己的话写的，在
             <button className="mx-0.5 text-brand hover:underline" onClick={onFlow}>
               流程
@@ -100,27 +99,9 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
             <Repos repos={s.repos} onChange={(v) => put("repos", v)} />
           </Section>
 
-          <Section title="GitLab" note="mrwatch 查 MR、变基、合并时找的 GitLab（glab 要先在这台电脑上登录过它）。">
+          <Section title="GitLab" note="盯 MR 的定时任务（mrwatch）查 MR 时找的 GitLab（glab 要先在这台电脑上登录过它）。MR 谁来合、要不要变基，写在「流程 → mr」里，由 worker 照着做。">
             <Field label="地址">
               <input className={clsx(input, "font-mono text-[12px]")} value={s.gitlab.host} placeholder="gitlab.com" onChange={(e) => put("gitlab", { host: e.target.value })} />
-            </Field>
-          </Section>
-
-          <Section title="MR 合并" note="盯 MR 的定时任务（mrwatch）照这里做。worker 自己从不合并，只按「流程」里的规则处理 review 意见、流水线和冲突。">
-            <Field label="合并" hint={s.mr.merge === "manual" ? "看板上会显示「可以合并」，等你点「立即合并」" : "被批准、GitLab 也说可以合并时，自己合并"}>
-              <Choice value={s.mr.merge} options={[["auto", "自动"], ["manual", "手动"]]} onChange={(v) => mr("merge", v)} />
-            </Field>
-            <Field label="至少几个人批准">
-              <input className={clsx(input, "w-24")} type="number" min={0} max={10} value={s.mr.minApprovals} onChange={(e) => mr("minApprovals", Number(e.target.value))} />
-            </Field>
-            <Field label="落后目标分支时变基">
-              <Choice value={s.mr.rebase} options={[["auto", "自动"], ["manual", "手动"], ["off", "不做"]]} onChange={(v) => mr("rebase", v)} />
-            </Field>
-            <Field label="变基时的流水线" hint="跳过省时间；项目要求流水线必须通过时，要允许跳过的流水线才能合">
-              <Choice value={s.mr.rebaseSkipCI ? "skip" : "run"} options={[["run", "跑"], ["skip", "跳过"]]} onChange={(v) => mr("rebaseSkipCI", v === "skip")} />
-            </Field>
-            <Field label="最多几轮" hint="同一个 MR 改了这么多轮还有新意见，就停下来问你，不再交给 worker">
-              <input className={clsx(input, "w-24")} type="number" min={1} max={20} value={s.mr.maxRounds} onChange={(e) => mr("maxRounds", Number(e.target.value))} />
             </Field>
           </Section>
 
