@@ -30,18 +30,21 @@ export function SettingsSheet({ tab, onTab, onClose, onTask }: { tab: SettingsTa
       <SheetContent showCloseButton={false} aria-describedby={undefined} className="w-full gap-0 sm:max-w-5xl">
         <SheetTitle className="sr-only">Superagent</SheetTitle>
       <header className="flex items-center gap-1 border-b px-3 py-2">
-        <span className="mr-2 text-[14px] font-medium">Superagent</span>
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => onTab(t.id)}
-            className={clsx("flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px]", tab === t.id ? "bg-accent font-medium" : "text-muted-foreground hover:bg-accent/60")}
-          >
-            <t.icon className="size-3.5" />
-            {t.label}
-          </button>
-        ))}
-        <Button variant="ghost" size="icon" className="ml-auto" aria-label="关闭" title="关闭（Esc）" onClick={onClose}>
+        {/* On a phone the tabs don't fit beside the name: the name goes and the tabs scroll sideways, each on one line */}
+        <span className="mr-2 hidden shrink-0 text-[14px] font-medium sm:inline">Superagent</span>
+        <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => onTab(t.id)}
+              className={clsx("flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-[13px]", tab === t.id ? "bg-accent font-medium" : "text-muted-foreground hover:bg-accent/60")}
+            >
+              <t.icon className="size-3.5" />
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <Button variant="ghost" size="icon" className="shrink-0" aria-label="关闭" title="关闭（Esc）" onClick={onClose}>
           <X className="size-4" />
         </Button>
       </header>

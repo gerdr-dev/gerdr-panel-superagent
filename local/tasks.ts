@@ -153,6 +153,16 @@ export async function list(input: unknown, ctx: Ctx) {
 }
 
 /**
+ * Brings the board up to date and tells Gerdr's inbox what waits on the user (list does both; _inbox.ts). On a
+ * schedule (schedules/inbox.json), so a task that starts waiting on the user reaches the inbox and the phone without
+ * the board being open.
+ */
+export async function sync(input: unknown, ctx: Ctx) {
+  const r = await list(input, ctx);
+  return { you: r.tasks.filter((t) => t.column === "you").map((t) => t.id) };
+}
+
+/**
  * A worker that reports through the tools stopped, its task still running, with nothing to wait on: whether it reported
  * "working" on the way doesn't matter (t30). A turn the user started in its chat counts too: they say a few words, close
  * the chat and don't come back to it — what the answer left open must be on the board as well.

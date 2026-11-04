@@ -1,1 +1,1 @@
-{ "fn": "inbox.sync", "every": "1m", "name": "看板跟上 worker 的状态，等你的事放进收件箱" }
+{ "fn": "tasks.sync", "every": "1m", "name": "看板跟上 worker 的状态，等你的事放进收件箱" }
