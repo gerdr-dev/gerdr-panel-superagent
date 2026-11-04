@@ -276,7 +276,7 @@ export default function BoardPage() {
           sub={view.sub}
           onSub={(tc) => setShown(convo(view.session, tc))}
           {...panel}
-          top={<Trail task={sel.id} version={sel.updatedAt} current={viewing} router={sel.router} onSession={setShown} onTask={setOpen} onRules={() => setSettings("settings")} />}
+          trail={{ task: sel.id, version: sel.updatedAt, current: viewing, router: sel.router, onSession: setShown, onTask: setOpen, onRules: () => setSettings("settings") }}
           onAction={onAction}
           onClose={() => setOpen("")}
         />
@@ -286,18 +286,18 @@ export default function BoardPage() {
           session={peek.session}
           sub={peek.sub}
           onSub={(tc) => setPeek({ ...peek, sub: tc ?? undefined })}
-          top={
-            peek.task && byId[peek.task] ? (
-              <Trail
-                task={peek.task}
-                version={byId[peek.task].updatedAt}
-                current={convo(peek.session, peek.sub)}
-                router={byId[peek.task].router}
-                onSession={(id) => setPeek({ ...peek, ...parseConvo(id), sub: parseConvo(id).sub })}
-                onTask={(id) => (setPeek(null), setOpen(id))}
-                onRules={() => setSettings("settings")}
-              />
-            ) : undefined
+          trail={
+            peek.task && byId[peek.task]
+              ? {
+                  task: peek.task,
+                  version: byId[peek.task].updatedAt,
+                  current: convo(peek.session, peek.sub),
+                  router: byId[peek.task].router,
+                  onSession: (id) => setPeek({ ...peek, ...parseConvo(id), sub: parseConvo(id).sub }),
+                  onTask: (id) => (setPeek(null), setOpen(id)),
+                  onRules: () => setSettings("settings"),
+                }
+              : undefined
           }
           onClose={() => setPeek(null)}
         />
@@ -614,15 +614,21 @@ function Drawer({ t, byId, act, onClose, onGo }: { t: Task; byId: Record<string,
         }}
       >
         <SheetTitle className="sr-only">{t.title}</SheetTitle>
-        <div className="flex items-center gap-2 border-b px-4 py-2.5 text-[12px] text-muted-foreground">
-          {t.owner === "human" ? <Hand className="size-3.5" /> : <Bot className="size-3.5" />}
-          <span className="font-mono">{t.id}</span>
-          <span>· {COLS.find((c) => c.id === colOf(t))?.title}</span>
-          <Button variant="ghost" size="icon" aria-label="关闭" className="ml-auto" onClick={onClose}>
-            <X className="size-4" />
-          </Button>
-        </div>
-        {t.owner === "agent" && <Trail task={t.id} version={t.updatedAt} onSession={(id) => openChat(id, t.id)} onTask={onGo} />}
+        {(() => {
+          const header = (toggle: React.ReactNode) => (
+            <div className="flex items-center gap-2 border-b px-4 py-2.5 text-[12px] text-muted-foreground">
+              {t.owner === "human" ? <Hand className="size-3.5" /> : <Bot className="size-3.5" />}
+              <span className="font-mono">{t.id}</span>
+              <span>· {COLS.find((c) => c.id === colOf(t))?.title}</span>
+              <span className="ml-auto" />
+              {toggle}
+              <Button variant="ghost" size="icon" aria-label="关闭" onClick={onClose}>
+                <X className="size-4" />
+              </Button>
+            </div>
+          );
+          return t.owner === "agent" ? <Trail header={header} task={t.id} version={t.updatedAt} onSession={(id) => openChat(id, t.id)} onTask={onGo} /> : header(null);
+        })()}
         <div className="min-h-0 flex-1 overflow-y-auto p-4">{done && !(t.questions && t.status === "done") ? <DoneDetail t={t} act={act} /> : t.owner === "human" ? <HumanCard key={t.id} t={t} byId={byId} act={act} onGo={onGo} /> : <AgentCard key={t.id} t={t} byId={byId} act={act} />}</div>
       </SheetContent>
     </Sheet>

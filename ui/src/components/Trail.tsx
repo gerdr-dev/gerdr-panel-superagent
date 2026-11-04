@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronRight, ExternalLink, GitFork, Settings2 } from "lucide-react";
 import clsx from "clsx";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { run } from "../lib/gerdr";
 
 // 链路: where a task came from and every conversation behind it, as a tree of any depth — the event, who handed
@@ -24,15 +24,7 @@ function count(n: Node[]): number {
   return n.reduce((k, x) => k + 1 + count(x.children), 0);
 }
 
-export function Trail({
-  task,
-  version,
-  current,
-  router,
-  onSession,
-  onTask,
-  onRules,
-}: {
+export type TrailProps = {
   task: string;
   /** Changes when the task does (its updatedAt): the tree is fetched again. */
   version?: number;
@@ -41,7 +33,22 @@ export function Trail({
   onSession: (id: string) => void;
   onTask: (id: string) => void;
   onRules?: () => void;
-}) {
+};
+
+/**
+ * `header` draws the drawer's title row with the 链路 toggle in it (null while there's nothing to show): a row of its
+ * own took a whole line on a phone for one word. The list opens under that row.
+ */
+export function Trail({
+  header,
+  task,
+  version,
+  current,
+  router,
+  onSession,
+  onTask,
+  onRules,
+}: TrailProps & { header: (toggle: ReactNode) => ReactNode }) {
   const [tree, setTree] = useState<Tree | null>(null);
   const [open, setOpen] = useState(false);
   // Gone to another conversation (a subagent from 在等 or its chat card, a helper asking): the list opens, so it's clear
@@ -53,9 +60,8 @@ export function Trail({
   useEffect(() => {
     run<Tree>("tasks.tree", { id: task }).then(setTree, () => setTree(null));
   }, [task, version]);
-  if (!tree) return null;
-  const n = count(tree.roots);
-  if (!n && !tree.origin && !tree.from && !tree.splits.length) return null;
+  const n = tree ? count(tree.roots) : 0;
+  if (!tree || (!n && !tree.origin && !tree.from && !tree.splits.length)) return <>{header(null)}</>;
   const summary = [
     tree.origin && `来自 ${tree.origin.source}`,
     tree.up.length > 0 && `${tree.up[tree.up.length - 1].title || "上一级"} 派的`,
@@ -82,14 +88,26 @@ export function Trail({
       {x.children.map((c) => node(c, depth + 1))}
     </div>
   );
+  const toggle = (
+    <button
+      className={clsx("flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground", open && "bg-accent text-foreground")}
+      title={`链路：${summary}`}
+      aria-expanded={open}
+      onClick={() => setOpen(!open)}
+    >
+      <GitFork className="size-3.5" />
+      <span className="max-md:hidden">链路</span>
+      {n > 0 && <span className="tabular-nums">{n}</span>}
+      {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+    </button>
+  );
+  const rules = current && router && current === router && onRules;
   return (
+    <>
+      {header(toggle)}
+      {(open || rules) && (
     <div className="shrink-0 border-b px-3 py-1">
-      <button className="flex w-full items-center gap-1.5 py-0.5 text-left text-[12px] text-muted-foreground hover:text-foreground" onClick={() => setOpen(!open)}>
-        {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-        <GitFork className="size-3.5" />
-        <span className="font-medium text-foreground">链路</span>
-        <span className="min-w-0 flex-1 truncate">{summary}</span>
-      </button>
+      {open && <div className="truncate px-1.5 pt-0.5 text-[11px] text-muted-foreground">{summary}</div>}
       {open && (
         <div className="max-h-[200px] space-y-0.5 overflow-y-auto pt-1 pb-1.5">
           {tree.origin &&
@@ -130,12 +148,14 @@ export function Trail({
           ))}
         </div>
       )}
-      {current && router && current === router && onRules && (
+      {rules && (
         <button className="mb-1 inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground" onClick={onRules}>
           <Settings2 className="size-3.5" />
           派得不对？改仓库、模型或派活规则
         </button>
       )}
     </div>
+      )}
+    </>
   );
 }

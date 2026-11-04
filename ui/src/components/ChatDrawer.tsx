@@ -1,9 +1,10 @@
-import { ArrowDownRight, X } from "lucide-react";
+import { ArrowDownRight, MoreHorizontal, X } from "lucide-react";
 import clsx from "clsx";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Sheet, SheetContent, SheetTitle } from "./ui/sheet";
 import { SessionChat, useSession } from "@gerdr/core";
 import { Button } from "./Button";
+import { Trail, type TrailProps } from "./Trail";
 
 // A worker's conversation over the right of the board: Gerdr's own chat (SessionChat from @gerdr/core: images, files,
 // approvals, cards), with the board's line, things waiting on the user and buttons above it. A shadcn Sheet, not
@@ -23,7 +24,7 @@ export function ChatDrawer({
   label,
   actions,
   items,
-  top,
+  trail,
   onAction,
   onClose,
 }: {
@@ -31,8 +32,8 @@ export function ChatDrawer({
   /** One of its subagents' conversation instead (a toolCallId), and where 查看对话 / the way back go (null = main). */
   sub?: string;
   onSub?: (toolCallId: string | null) => void;
-  /** Above the line and buttons: the board's 链路 (which conversations this task went through). */
-  top?: React.ReactNode;
+  /** The board's 链路 (which conversations this task went through): a toggle in the title row, the list under it. */
+  trail?: TrailProps;
   label?: string;
   actions?: ChatAction[];
   items?: ChatItem[];
@@ -43,7 +44,39 @@ export function ChatDrawer({
   const [armed, setArmed] = useState("");
   const [jump, setJump] = useState<{ ref: string; seq: number }>();
   useEffect(() => setArmed(""), [session]);
+  const [full, setFull] = useState(false);
+  useEffect(() => setFull(false), [label]);
   const go = (ref: string) => setJump((j) => ({ ref, seq: (j?.seq ?? 0) + 1 }));
+  const act = (a: ChatAction) => {
+    if (a.confirm && armed !== a.id) return setArmed(a.id);
+    setArmed("");
+    onAction?.(a.id);
+  };
+  // The main step (通过) stays in sight; the rarely used ones (放弃, 标为完成) are in the ⋯ menu of the title row
+  const shown = (actions ?? []).filter((a) => a.kind === "primary");
+  const tucked = (actions ?? []).filter((a) => a.kind !== "primary");
+  const button = (a: ChatAction) => (
+    <Button
+      key={a.id}
+      variant={a.kind === "primary" ? "default" : "ghost"}
+      title={a.label}
+      className={clsx("h-7 max-w-[20rem] min-w-0 text-[12px]", (a.kind === "danger" || armed === a.id) && "text-bad hover:text-bad")}
+      onClick={() => act(a)}
+    >
+      <span className="min-w-0 truncate">{armed === a.id ? a.confirm : a.label}</span>
+    </Button>
+  );
+  const header = (toggle: ReactNode) => (
+    <div className="flex h-10 shrink-0 items-center gap-1 border-b px-3">
+      <span className={clsx("mr-1 size-2 shrink-0 rounded-full", s?.status === "running" ? "bg-ok" : s?.status === "waiting" || s?.status === "error" ? "bg-warn" : "bg-muted-foreground/40")} />
+      <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{s?.title || session}</span>
+      {toggle}
+      {tucked.length > 0 && <Menu actions={tucked} armed={armed} onPick={act} onClose={() => setArmed("")} />}
+      <Button variant="ghost" size="icon" className="size-7" title="关闭" onClick={onClose}>
+        <X className="size-4" />
+      </Button>
+    </div>
+  );
   return (
     <Sheet open modal={false} onOpenChange={(o) => !o && onClose()}>
       <SheetContent
@@ -61,40 +94,24 @@ export function ChatDrawer({
         }}
       >
         <SheetTitle className="sr-only">{s?.title || session}</SheetTitle>
-        <div className="flex h-10 shrink-0 items-center gap-2 border-b px-3">
-          <span className={clsx("size-2 shrink-0 rounded-full", s?.status === "running" ? "bg-ok" : s?.status === "waiting" || s?.status === "error" ? "bg-warn" : "bg-muted-foreground/40")} />
-          <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{s?.title || session}</span>
-          <Button variant="ghost" size="icon" className="size-7" title="关闭" onClick={onClose}>
-            <X className="size-4" />
-          </Button>
-        </div>
-        {top}
-        {(label || actions?.length || items?.length) && (
+        {trail ? <Trail {...trail} header={header} /> : header(null)}
+        {(label || shown.length > 0 || items?.length) && (
           <div className="shrink-0 space-y-1 border-b bg-muted/40 px-3 py-1.5">
-            <div className="flex flex-wrap items-center gap-2">
-              {label && (
-                <span className="line-clamp-4 min-w-0 flex-1 text-[12px] whitespace-pre-wrap text-muted-foreground" title={label}>
-                  {label}
-                </span>
-              )}
-              <div className="ml-auto flex max-w-full flex-wrap justify-end gap-1.5">
-                {actions?.map((a) => (
-                  <Button
-                    key={a.id}
-                    variant={a.kind === "primary" ? "default" : "ghost"}
-                    title={a.label}
-                    className={clsx("h-7 max-w-[20rem] min-w-0 text-[12px]", (a.kind === "danger" || armed === a.id) && "text-bad hover:text-bad")}
-                    onClick={() => {
-                      if (a.confirm && armed !== a.id) return setArmed(a.id);
-                      setArmed("");
-                      onAction?.(a.id);
-                    }}
+            {(label || shown.length > 0) && (
+              <div className="flex items-center gap-2">
+                {label && (
+                  // Clamped; a tap shows all of it
+                  <button
+                    className={clsx("min-w-0 flex-1 text-left text-[12px] whitespace-pre-wrap text-muted-foreground", !full && "line-clamp-3")}
+                    title={label}
+                    onClick={() => setFull(!full)}
                   >
-                    <span className="min-w-0 truncate">{armed === a.id ? a.confirm : a.label}</span>
-                  </Button>
-                ))}
+                    {label}
+                  </button>
+                )}
+                {shown.length > 0 && <div className="ml-auto flex shrink-0 gap-1.5">{shown.map((a) => button(a))}</div>}
               </div>
-            </div>
+            )}
             {items?.map((it, n) => (
               <button
                 key={n}
@@ -113,5 +130,45 @@ export function ChatDrawer({
         </div>
       </SheetContent>
     </Sheet>
+  );
+}
+
+/**
+ * The ⋯ menu. Drawn in place, not portaled: a portaled menu lands in the panel's mount outside the sheet, and a click
+ * there counts as one on the board, closing the drawer. A confirm item asks in place (its label becomes the question).
+ */
+function Menu({ actions, armed, onPick, onClose }: { actions: ChatAction[]; armed: string; onPick: (a: ChatAction) => void; onClose: () => void }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return onClose();
+    const out = (e: PointerEvent) => !box.current?.contains(e.target as Node) && setOpen(false);
+    document.addEventListener("pointerdown", out, true);
+    return () => document.removeEventListener("pointerdown", out, true);
+  }, [open]);
+  return (
+    <div ref={box} className="relative">
+      <Button variant="ghost" size="icon" className="size-7" title="更多" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <MoreHorizontal className="size-4" />
+      </Button>
+      {open && (
+        <div role="menu" className="absolute top-full right-0 z-10 mt-1 min-w-36 rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
+          {actions.map((a) => (
+            <button
+              key={a.id}
+              role="menuitem"
+              className={clsx("flex w-full rounded-sm px-2 py-1.5 text-left text-[13px] hover:bg-accent", (a.kind === "danger" || armed === a.id) && "text-bad")}
+              onClick={() => {
+                if (a.confirm && armed !== a.id) return onPick(a);
+                setOpen(false);
+                onPick(a);
+              }}
+            >
+              {armed === a.id ? a.confirm : a.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
