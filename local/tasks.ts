@@ -117,7 +117,7 @@ export async function list(input: unknown, ctx: Ctx) {
       return {
         ...t,
         // What its worker handed out and waits on (shown as 等 … on the card; one waiting for the user puts it under 等你)
-        helpers: kids.length ? kids.map((k) => ({ id: k.id, title: k.title, status: k.status, waiting: k.waiting })) : undefined,
+        helpers: kids.length ? kids.map((k: any) => ({ id: k.id, title: k.title, status: k.status, waiting: k.waiting, waitingKind: k.waitingKind, left: k.status === "waiting" && (k.waitingKind !== "ask" || askLeft(k, sess)) })) : undefined,
         live: sess ? { status: sess.status, waiting: sess.waiting, waitingSince: sess.waitingSince, turnStartedAt: sess.turnStartedAt, updatedAt: sess.updatedAt, error: sess.error, title: sess.title } : null,
         column: column(s, t, sess, kids),
         ready: blockersDone(s, t),
@@ -164,8 +164,10 @@ function column(s: Store, t: Task, sess: any, kids: Session[] = []): "you" | "re
   // delivering: running as far as the user is concerned, until the watcher merges it or says it's stuck (question)
   if (t.owner === "human") return blockersDone(s, t) ? "you" : "active";
   if (t.question || sess?.status === "waiting" || sess?.status === "error") return "you";
-  // A session it handed work to asks the user something (an approval): the user's to act on
-  if (t.status === "running" && kids.some((k) => k.status === "waiting")) return "you";
+  // A session it handed work to waits: an approval is the user's; a question is its worker's to answer (Gerdr reports
+  // it there), so only one the worker has left unanswered — it ran since the question came and stopped again, or it
+  // hasn't picked it up in two minutes — is the user's
+  if (t.status === "running" && kids.some((k) => k.status === "waiting" && (k.waitingKind !== "ask" || askLeft(k, sess)))) return "you";
   // 进行中 holds only what is running or explicitly waiting (an MR to merge, a step the user owes): a worker that
   // stopped with nothing to wait on is the user's to look at, at once — never a card in 进行中 with nothing going on
   if (stopped(s, t, sess, kids)) return "you";
@@ -181,6 +183,14 @@ function stopped(s: Store, t: Task, sess: any, kids: Session[] = []) {
   if (sess && (sess.status === "running" || sess.status === "starting")) return false;
   if (kids.length) return false;
   return blockersDone(s, t);
+}
+
+/** A helper's question its worker didn't take: it has stopped since the question came, or two minutes went by. */
+function askLeft(k: any, sess: any) {
+  const since = k.waitingSince ?? 0;
+  const workerBusy = sess && (sess.status === "running" || sess.status === "starting");
+  if (workerBusy) return false;
+  return (sess?.updatedAt ?? 0) > since + 2000 || Date.now() - since > 120_000;
 }
 
 /**

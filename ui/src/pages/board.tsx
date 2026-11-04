@@ -57,7 +57,7 @@ export default function BoardPage() {
   const inChat = !!sel && sel.owner === "agent" && ((!!sel.session && sel.status !== "done" && sel.status !== "dropped") || routingNow);
   // A session its worker handed work to is asking the user something: that's where the answer goes, so it opens
   // first (the 链路 above leads back to the worker)
-  const asking = sel?.status === "running" ? sel.helpers?.find((k) => k.status === "waiting") : undefined;
+  const asking = sel?.status === "running" ? sel.helpers?.find((k) => k.status === "waiting" && k.left) : undefined;
   const primary = sel ? (routingNow ? sel.router : asking ? asking.id : sel.session) : undefined;
   // Another conversation of the same task picked in its 链路 (the router, an earlier worker, a helper): shown in the
   // same drawer; its buttons are the task's live conversation's only
@@ -332,8 +332,8 @@ function chatPanel(t: Task, byId: Record<string, Task>): { label: string; action
           ? `它在下面等你${t.live.waiting ? `：${t.live.waiting}` : "审批或回答"}`
           : t.live?.status === "error"
             ? `出错了：${t.live.error ?? "看看最后的报错"}`
-            : t.helpers?.some((k) => k.status === "waiting")
-              ? `它派出去的「${t.helpers.find((k) => k.status === "waiting")!.title}」在等你：${t.helpers.find((k) => k.status === "waiting")!.waiting ?? "批准或回答"}。下面就是它的对话，直接在这里答；答完它接着跑，${t.id} 等它回报`
+            : t.helpers?.some((k) => k.left)
+              ? `它派出去的「${t.helpers.find((k) => k.left)!.title}」${t.helpers.find((k) => k.left)!.waitingKind === "ask" ? "在问，worker 没接" : "要你批准"}：${t.helpers.find((k) => k.left)!.waiting ?? "批准或回答"}。下面就是它的对话，直接在这里处理；处理完它接着跑，${t.id} 等它回报`
             : t.question
               ? `它问你：${t.question}`
               : t.stopped
@@ -399,11 +399,17 @@ function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, T
       {!t.question &&
         t.helpers
           ?.filter((k) => k.status === "waiting")
-          .map((k) => (
-            <p key={k.id} className="line-clamp-3 text-[12px] text-warn">
-              「{k.title || k.id}」在问你：{k.waiting ?? "批准或回答"}
-            </p>
-          ))}
+          .map((k) =>
+            k.left ? (
+              <p key={k.id} className="line-clamp-3 text-[12px] text-warn">
+                「{k.title || k.id}」{k.waitingKind === "ask" ? "在问（worker 没接）" : "要你批准"}：{k.waiting ?? "批准或回答"}
+              </p>
+            ) : (
+              <p key={k.id} className="line-clamp-2 text-[12px] text-muted-foreground">
+                「{k.title || k.id}」在问 worker，它来判断
+              </p>
+            ),
+          )}
       {t.questions && t.status === "todo" && (
         <p className="text-[12px] text-warn">
           {unanswered(t).length ? `${unanswered(t).length} 个问题要你答` : "都答了"}
