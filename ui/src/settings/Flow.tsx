@@ -1,10 +1,11 @@
-import { FileText, Loader2, Plus, Save } from "lucide-react";
+import { FileText, Plus } from "lucide-react";
 import clsx from "clsx";
 import { useEffect, useState } from "react";
 import { Button } from "../components/Button";
 import { input } from "../components/pickers";
 import { run } from "../lib/gerdr";
 import { isSubmitEnter } from "../lib/utils";
+import { SaveBar } from "../components/SaveBar";
 
 // 流程: the user's skills (skills/<name>/SKILL.md + references/). Prose in their own words, which Gerdr gives the panel
 // agent and every session the panel starts as a skill (they read what they need). Only prose: values the code acts
@@ -99,16 +100,11 @@ export default function FlowPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {dirty && <span className="text-[12px] text-warn">没保存</span>}
           {!dirty && files?.find((f) => f.name === name)?.changed && (
             <Button variant="outline" disabled={busy} title="这份你改过：去掉你的修改，用面板自带的默认内容" onClick={reset}>
               恢复默认
             </Button>
           )}
-          <Button disabled={!dirty || busy} onClick={save}>
-            {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
-            保存
-          </Button>
         </div>
       </header>
       {err && <p role="alert" className="text-[13px] text-bad">{err}</p>}
@@ -139,6 +135,7 @@ export default function FlowPage() {
           className="h-[70vh] w-full resize-none rounded-lg border bg-card p-3 font-sans text-[13px] leading-6 outline-none focus:ring-2 focus:ring-ring max-md:h-[50vh] max-md:text-[16px]"
         />
       </div>
+      <SaveBar dirty={dirty} busy={busy} onSave={save} onRevert={() => setText(saved)} />
     </div>
   );
 }

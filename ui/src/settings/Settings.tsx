@@ -1,10 +1,11 @@
-import { Loader2, Plus, Save, X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import clsx from "clsx";
 import { useEffect, useState } from "react";
 import { Button } from "../components/Button";
 import { AgentPick, input, PathPick } from "../components/pickers";
 import { run } from "../lib/gerdr";
 import { normalize, type Repo, type Settings, type Who } from "../lib/settings";
+import { SaveBar } from "../components/SaveBar";
 
 // 设置: the values the code acts on (lib/settings.ts says why they're settings and not prose in the skill). Each field
 // carries its why as its description, which is what the sentence around a {{variable}} used to do. Stored as this
@@ -74,13 +75,6 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
             里。
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          {dirty && <span className="text-[12px] text-warn">没保存</span>}
-          <Button disabled={!dirty || busy} onClick={save}>
-            {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
-            保存
-          </Button>
-        </div>
       </header>
       {err && <p role="alert" className="text-[13px] text-bad">{err}</p>}
       {broken && <p className="text-[13px] text-warn">user/settings.json 不是合法的 JSON，现在用的是默认值。在这里保存一次就会覆盖它。</p>}
@@ -143,6 +137,7 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
           </Section>
         </>
       )}
+      <SaveBar dirty={dirty} busy={busy} onSave={save} onRevert={() => saved && setS(JSON.parse(saved))} />
     </div>
   );
 }
