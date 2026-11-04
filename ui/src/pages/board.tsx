@@ -169,7 +169,7 @@ export default function BoardPage() {
                   )}
                 </h2>
                 <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-2 pb-2">
-                  {shown.length ? shown.map((t) => <MiniCard key={t.id} t={t} byId={byId} active={t.id === open} onOpen={() => setOpen(t.id)} />) : <p className="py-6 text-center text-[12px] text-muted-foreground">无任务</p>}
+                  {shown.length ? shown.map((t) => <MiniCard key={t.id} t={t} byId={byId} active={t.id === open} onOpen={() => (setPeek(null), setOpen(t.id))} />) : <p className="py-6 text-center text-[12px] text-muted-foreground">无任务</p>}
                   {all.length > shown.length && (
                     <button className="w-full py-2 text-[12px] text-muted-foreground hover:text-foreground" onClick={() => setDoneLimit(doneLimit + 50)}>
                       再显示 {Math.min(50, all.length - shown.length)} 个
@@ -368,7 +368,7 @@ function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, T
   const open = t.status !== "done" && t.status !== "dropped";
   const asked = t.owner === "human" && open ? `${ago(t.createdAt)}${t.handBack?.kind === "choice" || t.questions ? "问的" : "交给你"}` : "";
   return (
-    <button onClick={onOpen} className={clsx("block w-full space-y-1.5 rounded-lg border bg-card p-3 text-left shadow-xs transition-[border-color,box-shadow,transform] duration-150 hover:border-ring/50 hover:shadow-sm active:scale-[0.99]", active ? "border-ring" : notDispatched(t) && "border-warn/60")}>
+    <button data-task-card="" onClick={onOpen} className={clsx("block w-full space-y-1.5 rounded-lg border bg-card p-3 text-left shadow-xs transition-[border-color,box-shadow,transform] duration-150 hover:border-ring/50 hover:shadow-sm active:scale-[0.99]", active ? "border-ring" : notDispatched(t) && "border-warn/60")}>
       <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
         {t.owner === "human" ? t.handBack?.kind === "choice" ? <CircleHelp className="size-3 shrink-0" /> : <Hand className="size-3 shrink-0" /> : <Bot className="size-3 shrink-0" />}
         {/* Never squeezed: a long "asked by" beside it truncates instead of wrapping the id onto two lines */}
@@ -471,8 +471,18 @@ function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, T
 function Drawer({ t, byId, act, onClose, onGo }: { t: Task; byId: Record<string, Task>; act: Act; onClose: () => void; onGo: (id: string) => void }) {
   const done = t.status === "done" || t.status === "dropped";
   return (
-    <Sheet open onOpenChange={(o) => !o && onClose()}>
-      <SheetContent showCloseButton={false} aria-describedby={undefined} className="w-full gap-0 sm:max-w-[520px]">
+    // Not modal, like the chat drawer: another task's card stays clickable and switches the drawer to it; a click on
+    // the board elsewhere closes it
+    <Sheet open modal={false} onOpenChange={(o) => !o && onClose()}>
+      <SheetContent
+        showCloseButton={false}
+        aria-describedby={undefined}
+        className="w-full gap-0 sm:max-w-[520px]"
+        onInteractOutside={(e) => {
+          const el = e.target as Element | null;
+          if (!el?.closest?.("[data-gerdr-mount]") || el.closest("[data-task-card]")) e.preventDefault();
+        }}
+      >
         <SheetTitle className="sr-only">{t.title}</SheetTitle>
         <div className="flex items-center gap-2 border-b px-4 py-2.5 text-[12px] text-muted-foreground">
           {t.owner === "human" ? <Hand className="size-3.5" /> : <Bot className="size-3.5" />}

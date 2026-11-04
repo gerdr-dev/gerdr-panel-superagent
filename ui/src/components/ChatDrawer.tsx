@@ -49,8 +49,10 @@ export function ChatDrawer({
           if ((document.activeElement as Element | null)?.closest?.("textarea, input, [contenteditable=true]")) e.preventDefault();
         }}
         onInteractOutside={(e) => {
-          // Only a click on the board itself: not the chat's own lightbox, menus or Gerdr's toasts
-          if (!(e.target as Element | null)?.closest?.("[data-gerdr-mount]")) e.preventDefault();
+          // Only a click on the board itself: not the chat's own lightbox, menus or Gerdr's toasts. A click on another
+          // task's card isn't a way out either: the drawer switches to that task (the card's own click) instead
+          const el = e.target as Element | null;
+          if (!el?.closest?.("[data-gerdr-mount]") || el.closest("[data-task-card]")) e.preventDefault();
         }}
       >
         <SheetTitle className="sr-only">{s?.title || session}</SheetTitle>
