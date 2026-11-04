@@ -7,7 +7,9 @@ const GerdrMarkdown = (core as unknown as { Markdown?: React.ComponentType<{ chi
 
 // A local image / video / audio path written bare (agents often list sample files that way, not as ![](…)): shown as
 // the media itself after its line, as the chat would show ![](path). The path stays in the text, clickable.
-const MEDIA = /(?:^|[\s(（:：])(\/[^\s)）`'"]+\.(?:mp4|mov|webm|m4v|png|jpe?g|gif|webp|svg|mp3|wav|m4a))(?=$|[\s)）。，,;；])/gim;
+// What may follow the path: an end of line, a space, or punctuation — Chinese too (t18's "EP01-music.mp4（低清，带配乐）"
+// wasn't shown as a video: "（" wasn't on the list)
+const MEDIA = /(?:^|[\s(（:：「『"'`、，；])(\/[^\s()（）「」『』，。、；：！？`'"]+\.(?:mp4|mov|webm|m4v|png|jpe?g|gif|webp|svg|mp3|wav|m4a))(?=$|[\s()（）「」『』，。、；：！？,.;:!?`'"])/gim;
 
 export function withMedia(text: string) {
   return text
