@@ -21,8 +21,12 @@ export type Task = {
   delivery?: Delivery;
   /** When it was handed to the Work agent to pick the repository / agent (the user dispatched it without one). */
   routing?: number;
-  /** The one-off conversation picking its repository (tasks.ts route), closed once it has dispatched the task. */
+  /**
+   * The one-off conversation that dispatched it (tasks.ts route; a part split off shares its parent's). Kept after
+   * that conversation is closed (routerClosed), so every task traces back to the decision that sent it out.
+   */
   router?: string;
+  routerClosed?: boolean;
   /** Agent task: what the worker is told, the repository it runs in, which agent / role. */
   prompt?: string;
   /** Images and files the user gave with it (uploaded to Gerdr's machine): sent with the first message to the worker. */

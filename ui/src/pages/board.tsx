@@ -7,6 +7,7 @@ import { Sheet, SheetContent, SheetTitle } from "../components/ui/sheet";
 import { AttachmentBar, useAttach, type Attachment } from "../components/Attachments";
 import { askSecret, secretNames } from "../lib/bridge";
 import { ChatDrawer, type ChatAction, type ChatItem } from "../components/ChatDrawer";
+import { Trail } from "../components/Trail";
 import { SettingsSheet, type SettingsTab } from "../components/SettingsSheet";
 import { day, since, type Task, useTasks } from "../lib/tasks";
 import { project, run } from "../lib/gerdr";
@@ -48,14 +49,31 @@ export default function BoardPage() {
   const sel = open ? byId[open] : undefined;
   // An agent task with a worker opens as its conversation (Gerdr's chat in our drawer): the whole chat to decide
   // from, and its input box for the answer. Everything else (to do, human tasks, finished ones) in our own panel.
-  const inChat = !!sel && sel.owner === "agent" && !!sel.session && sel.status !== "done" && sel.status !== "dropped";
-  const panel = sel && inChat ? chatPanel(sel, byId) : null;
-  // A conversation opened from a panel ("回到 tN 的对话", a finished task's chat): the chat alone, over the panel
-  const [peek, setPeek] = useState("");
+  // Still being handed out: it opens as the routing conversation, live, so the user sees how it's deciding and can
+  // put it right
+  const routingNow = !!sel && sel.owner === "agent" && sel.status === "todo" && !!sel.routing && !!sel.router;
+  const inChat = !!sel && sel.owner === "agent" && ((!!sel.session && sel.status !== "done" && sel.status !== "dropped") || routingNow);
+  const primary = sel ? (routingNow ? sel.router : sel.session) : undefined;
+  // Another conversation of the same task picked in its 来龙去脉 (the router, an earlier worker, a helper): shown in the
+  // same drawer; its buttons are the task's live conversation's only
+  const [shown, setShown] = useState("");
+  useEffect(() => setShown(""), [open]);
+  const viewing = shown || primary;
+  const panel =
+    sel && inChat && viewing
+      ? viewing !== primary
+        ? { label: viewing === sel.router ? `${sel.id} 的派活对话：它当时怎么判断的。以后都不想这样派，就改「流程」里的规则` : `${sel.id} 背后的另一个对话`, actions: [] }
+        : routingNow
+          ? { label: `${sel.id} · 正在派活：挑仓库、agent 和模型。看到不对直接在下面纠正`, actions: [{ id: "drop", label: "放弃", confirm: "确定放弃？" } as ChatAction] }
+          : chatPanel(sel, byId)
+      : null;
+  // A conversation opened from a panel ("回到 tN 的对话", a finished task's chat): the chat alone, over the panel,
+  // with its task's 来龙去脉 when it has one
+  const [peek, setPeek] = useState<{ session: string; task?: string } | null>(null);
   // Opening a conversation from a task's panel closes the panel: it sat on top and hid the chat (on a phone, all of it)
-  openChat = (session: string) => {
+  openChat = (session: string, task?: string) => {
     setOpen("");
-    setPeek(session);
+    setPeek({ session, task });
   };
   // A worker's conversation brought up from elsewhere in Gerdr (a notification, the inbox): it's this board's, so it
   // opens here, as its task's drawer (or just the chat when no task has it)
@@ -64,11 +82,12 @@ export default function BoardPage() {
   useEffect(
     () =>
       onShowSession(project, (session) => {
-        const t = (tasksRef.current ?? []).find((x) => x.session === session || x.sessions?.includes(session));
-        if (t && t.owner === "agent" && t.session === session && t.status !== "done" && t.status !== "dropped") {
-          setPeek("");
+        const t = (tasksRef.current ?? []).find((x) => x.session === session || x.sessions?.includes(session) || x.router === session);
+        const live = t && t.owner === "agent" && t.status !== "done" && t.status !== "dropped";
+        if (live && (t.session === session || (t.router === session && t.status === "todo" && t.routing))) {
+          setPeek(null);
           setOpen(t.id);
-        } else setPeek(session);
+        } else setPeek({ session, task: t?.id });
       }),
     [],
   );
@@ -140,8 +159,34 @@ export default function BoardPage() {
         </div>
       )}
       {sel && !inChat && <Drawer t={sel} byId={byId} act={act} onClose={() => setOpen("")} onGo={setOpen} />}
-      {panel && sel?.session && !peek && <ChatDrawer session={sel.session} {...panel} onAction={onAction} onClose={() => setOpen("")} />}
-      {peek && <ChatDrawer session={peek} onClose={() => setPeek("")} />}
+      {panel && sel && viewing && !peek && (
+        <ChatDrawer
+          session={viewing}
+          {...panel}
+          top={<Trail task={sel.id} version={sel.updatedAt} current={viewing} router={sel.router} onSession={setShown} onTask={setOpen} onRules={() => setSettings("flow")} />}
+          onAction={onAction}
+          onClose={() => setOpen("")}
+        />
+      )}
+      {peek && (
+        <ChatDrawer
+          session={peek.session}
+          top={
+            peek.task && byId[peek.task] ? (
+              <Trail
+                task={peek.task}
+                version={byId[peek.task].updatedAt}
+                current={peek.session}
+                router={byId[peek.task].router}
+                onSession={(id) => setPeek({ ...peek, session: id })}
+                onTask={(id) => (setPeek(null), setOpen(id))}
+                onRules={() => setSettings("flow")}
+              />
+            ) : undefined
+          }
+          onClose={() => setPeek(null)}
+        />
+      )}
       {creating && <NewTask onClose={() => setCreating(false)} act={act} />}
       {settings && <SettingsSheet tab={settings} onTab={setSettings} onClose={() => setSettings(null)} />}
     </div>
@@ -149,7 +194,7 @@ export default function BoardPage() {
 }
 
 /** Opens a conversation in the drawer, from anywhere on the page (set by BoardPage). */
-let openChat: (session: string) => void = () => {};
+let openChat: (session: string, task?: string) => void = () => {};
 
 /** The line and buttons on a worker's conversation, by where its task stands. */
 function chatPanel(t: Task, byId: Record<string, Task>): { label: string; actions: ChatAction[]; items?: ChatItem[] } {
@@ -272,6 +317,7 @@ function Drawer({ t, byId, act, onClose, onGo }: { t: Task; byId: Record<string,
             <X className="size-4" />
           </Button>
         </div>
+        {t.owner === "agent" && <Trail task={t.id} version={t.updatedAt} onSession={(id) => openChat(id, t.id)} onTask={onGo} />}
         <div className="min-h-0 flex-1 overflow-y-auto p-4">{done ? <DoneDetail t={t} /> : t.owner === "human" ? <HumanCard key={t.id} t={t} byId={byId} act={act} onGo={onGo} /> : <AgentCard key={t.id} t={t} byId={byId} act={act} />}</div>
       </SheetContent>
     </Sheet>
@@ -372,7 +418,7 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
       <div className="flex items-start justify-between gap-2">
         <h3 className="text-[16px] font-medium">{t.title}</h3>
         {t.session && (
-          <Button variant="ghost" className="text-[12px]" onClick={() => openChat(t.session!)}>
+          <Button variant="ghost" className="text-[12px]" onClick={() => openChat(t.session!, t.id)}>
             <MessageSquare className="size-3.5" />
             对话
           </Button>
@@ -398,7 +444,7 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
             </Button>
           </div>
           {t.session && (
-            <button className="inline-flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground" onClick={() => openChat(t.session!)}>
+            <button className="inline-flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground" onClick={() => openChat(t.session!, t.id)}>
               <Paperclip className="size-3" />
               要发图片、文件或者多说几句：在对话里回复
             </button>
@@ -417,7 +463,7 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
         </div>
       )}
       {rejecting && t.session && (
-        <button className="inline-flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground" onClick={() => openChat(t.session!)}>
+        <button className="inline-flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground" onClick={() => openChat(t.session!, t.id)}>
           <Paperclip className="size-3" />
           要附截图：在对话里说哪里不对
         </button>
@@ -627,7 +673,7 @@ function DoneDetail({ t }: { t: Task }) {
         </details>
       )}
       {t.session && (
-        <Button variant="outline" className="text-[12px]" onClick={() => openChat(t.session!)}>
+        <Button variant="outline" className="text-[12px]" onClick={() => openChat(t.session!, t.id)}>
           <MessageSquare className="size-3.5" />
           打开对话
         </Button>

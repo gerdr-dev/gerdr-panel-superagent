@@ -12,6 +12,8 @@ export type Task = {
   /** While delivering: the MR and what the watcher last saw (local/_store.ts Delivery). */
   delivery?: { kind: "mr"; url: string; iid: number; state?: string; detail?: string; checked?: number; rounds?: number };
   routing?: number;
+  router?: string;
+  routerClosed?: boolean;
   prompt?: string;
   repo?: string;
   agent?: string;

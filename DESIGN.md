@@ -145,6 +145,21 @@ worker 拿到一组 Work 工具（`local/board.ts`，经 Gerdr 的 `gerdr work m
 - **回复不认来源**：事件自带回复地址，`ctx.events.reply` 原路回去。建好时说「建了 tN」；之后任务做完、
   要你验收、开了 MR、要你定的时候再说一声（`_store.ts` 的 `tellOrigins`：所有改动都经过 `update`，所以只在这一处看）。
 
+## 来龙去脉：每个任务都能追到是谁派的
+
+派活的决定要能被人看见、被人调：路由挑错了仓库或模型，人得看到它当时怎么想的，才知道去改哪条规则；
+agent 复盘也要整条链。所以：
+
+- **链是一棵会话树，层数不限**：Gerdr 给每个会话记 `parent`（谁开的它：agent 的 `gerdr session new`，
+  或它跑 `gerdr work run` 调的函数开的）。路由跑 `tasks.dispatch` 开出 worker，worker 再开帮手，帮手再开……
+  都在一棵树上。看板不写死「路由 → worker」两层（`local/tasks.ts` 的 `tree`）。
+- **派完不丢**：派活对话派完照样关掉，但 `router` 留在任务上（`routerClosed` 标记已关）。
+  **被否掉的做法：关掉时把 `router` 清掉。** 派完就再也找不到它当时为什么这么派。拆出来的子任务继承同一个 `router`。
+- **在任务的抽屉里看，不在右边**：右边是 Work 助手，派活对话属于任务。抽屉顶上「来龙去脉」：来源、上一级（谁派的这个任务）、
+  拆自、整棵会话树、拆出；点哪个，抽屉就换成哪个对话。还在派活的任务，点卡片直接打开派活对话，能实时纠正。
+- **看完就能调**：在派活对话里有「改『流程』里的派活规则」，直接去改仓库、模型规则。
+- **给 agent 复盘**：`tasks.trace`（任务这一级的链）和 `tasks.tree`（整棵会话树），再用 `gerdr session read` 读每个对话。
+
 ## 用户在对话里
 
 点 agent 任务的卡片，打开的是 worker 的对话：看板自己的抽屉（`ui/src/components/ChatDrawer.tsx`），

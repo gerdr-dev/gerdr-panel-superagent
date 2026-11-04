@@ -21,10 +21,13 @@ export function ChatDrawer({
   label,
   actions,
   items,
+  top,
   onAction,
   onClose,
 }: {
   session: string;
+  /** Above the line and buttons: the board's 来龙去脉 (which conversations this task went through). */
+  top?: React.ReactNode;
   label?: string;
   actions?: ChatAction[];
   items?: ChatItem[];
@@ -58,6 +61,7 @@ export function ChatDrawer({
             <X className="size-4" />
           </Button>
         </div>
+        {top}
         {(label || actions?.length || items?.length) && (
           <div className="shrink-0 space-y-1 border-b bg-muted/40 px-3 py-1.5">
             <div className="flex flex-wrap items-center gap-2">

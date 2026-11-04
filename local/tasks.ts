@@ -441,7 +441,7 @@ export async function dispatch(input: { id: string; title?: string; parts: Part[
     try {
       out.push(
         (await add(
-          { title: p.title, prompt: p.prompt, repo: p.repo, agent: p.agent, model: p.model, effort: p.effort, worktree: p.worktree, attachments: t.attachments, from: t.id, start: true },
+          { title: p.title, prompt: p.prompt, repo: p.repo, agent: p.agent, model: p.model, effort: p.effort, worktree: p.worktree, attachments: t.attachments, from: t.id, router: t.router, routerClosed: true, start: true },
           ctx,
         )) as Task,
       );
@@ -451,6 +451,69 @@ export async function dispatch(input: { id: string; title?: string; parts: Part[
   }
   if (errors.length) throw new Error(`已派出 ${out.map((x) => x.id).join("、")}；没派出去的：\n${errors.join("\n")}`);
   return out;
+}
+
+/**
+ * Where a task came from and where it went, for an agent looking back (or tuning how work is handed out):
+ * { id } → the event it came from, the conversation that dispatched it, its workers' conversations (oldest first),
+ * the task it was split off and the ones split off it. Read a conversation with `gerdr session read <id>`. The
+ * sessions those workers started in turn (any depth) are in tasks.tree.
+ */
+export function trace(input: { id: string }, ctx: Ctx) {
+  const { store } = load(ctx);
+  const t = find(store, input.id);
+  return {
+    id: t.id,
+    title: t.title,
+    status: t.status,
+    origin: t.origin ? { source: t.origin.source, kind: t.origin.kind, key: t.origin.key, title: t.origin.title, url: t.origin.url } : undefined,
+    from: t.from,
+    router: t.router,
+    workers: t.sessions ?? (t.session ? [t.session] : []),
+    splits: store.tasks.filter((x) => x.from === t.id).map((x) => ({ id: x.id, title: x.title, status: x.status })),
+    followups: t.followups?.length ?? 0,
+  };
+}
+
+type TreeNode = { id: string; title: string; agent: string; status: string; role: "router" | "worker" | "helper"; children: TreeNode[] };
+
+/**
+ * The conversations behind a task as a tree, any number of levels deep: its router and workers, and every session
+ * they started (Gerdr records each session's parent), down to helpers of helpers. `up`: who handed out the task
+ * itself (the chain above its router: the Work agent that called tasks.add, …). For the drawer's 来龙去脉.
+ */
+export function tree(input: { id: string }, ctx: Ctx) {
+  const { store } = load(ctx);
+  const t = find(store, input.id);
+  const all = ctx.sessions.list() as (Session & { parent?: string })[];
+  const byId = new Map(all.map((x) => [x.id, x]));
+  const kids = new Map<string, string[]>();
+  for (const x of all) if (x.parent) kids.set(x.parent, [...(kids.get(x.parent) ?? []), x.id]);
+  const workers = new Set(t.sessions ?? (t.session ? [t.session] : []));
+  const seen = new Set<string>();
+  const node = (id: string, depth: number): TreeNode | null => {
+    if (seen.has(id) || depth > 12) return null;
+    seen.add(id);
+    const x = byId.get(id);
+    const children = (kids.get(id) ?? [])
+      .map((k) => node(k, depth + 1))
+      .filter((n): n is TreeNode => !!n)
+      .sort((a, b) => (byId.get(a.id)?.createdAt ?? 0) - (byId.get(b.id)?.createdAt ?? 0));
+    return { id, title: x?.title || id, agent: x?.agent ?? "", status: x?.status ?? "gone", role: id === t.router ? "router" : workers.has(id) ? "worker" : "helper", children };
+  };
+  // Roots: the router, then any worker not under it (started by the board itself, re-dispatched by hand)
+  const roots = [t.router, ...workers].filter((id): id is string => !!id).map((id) => node(id, 0)).filter((n): n is TreeNode => !!n);
+  const up: { id: string; title: string }[] = [];
+  for (let p = roots[0] && byId.get(roots[0].id)?.parent; p && up.length < 12 && !up.some((u) => u.id === p); p = byId.get(p)?.parent) {
+    up.unshift({ id: p, title: byId.get(p)?.title || p });
+  }
+  return {
+    origin: t.origin ? { source: t.origin.source, kind: t.origin.kind, title: t.origin.title, url: t.origin.url } : undefined,
+    from: t.from ? { id: t.from, title: store.tasks.find((x) => x.id === t.from)?.title ?? "" } : undefined,
+    splits: store.tasks.filter((x) => x.from === t.id).map((x) => ({ id: x.id, title: x.title })),
+    up,
+    roots,
+  };
 }
 
 /** For the board's @-mentions: the agents and roles a task can go to. */
@@ -463,11 +526,13 @@ async function closeRouters(ctx: Ctx, live: Record<string, any>) {
   const done = update(ctx, (s) => {
     const out: string[] = [];
     for (const t of s.tasks) {
-      if (!t.router || (t.status === "todo" && t.routing)) continue; // still being routed
+      if (!t.router || t.routerClosed || (t.status === "todo" && t.routing)) continue; // still being routed
       const r = live[t.router] ?? ctx.sessions.get(t.router);
       if (r && r.status !== "idle" && r.status !== "error") continue; // still finishing its turn
       out.push(t.router);
-      t.router = undefined;
+      // Closed, not forgotten: t.router stays, so the task can always be traced back to the conversation that
+      // dispatched it (the drawer's 来龙去脉, tasks.trace) — for tuning the rules, and for a look back.
+      t.routerClosed = true;
     }
     return out;
   });
