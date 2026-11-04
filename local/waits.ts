@@ -47,7 +47,7 @@ export const tools = {
           type: "object",
           description: "A command run on a timer: exit 0 when what you wait for has happened, else non-zero; print one line of where it stands",
           properties: {
-            command: { type: "string", description: "Run with sh -c; 60 s at most per run. Use tools you already used (glab, lb-cli, curl…)" },
+            command: { type: "string", description: "Run with sh -c; 60 s at most per run. Use the tools you already use for this work" },
             every: { type: "number", description: "Minutes between runs (1 – 60, default 2)" },
             cwd: { type: "string", description: "Absolute directory to run it in (default: the task's repository)" },
           },
