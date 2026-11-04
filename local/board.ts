@@ -21,7 +21,7 @@ const STEP = {
     steps: {
       type: "string",
       description:
-        "Markdown the user reads without your chat: numbered steps, direct links, codes, values to paste. Something to look at before deciding (a screenshot, sample videos) goes in as ![](/absolute/path): the board and the chat show the image / play the video right there.",
+        "Markdown the user reads without your chat: numbered steps, direct links, codes, values to paste. Something to look at before deciding (a screenshot, sample videos, a recording) MUST be written as ![](/absolute/path) — the board and the chat then show the image / play the video right there. A bare path or a [link](path) only shows as text: the user would have to open it themselves.",
     },
     handBack: {
       type: "object",
