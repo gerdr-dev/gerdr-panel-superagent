@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { run } from "./gerdr";
+import * as core from "@gerdr/core";
+
+// Gerdr's toast (sonner), through the namespace so an older Gerdr without it still runs the board
+const toast = (core as unknown as { toast?: ((m: string, o?: Record<string, unknown>) => unknown) & { error?: (m: string) => unknown } }).toast;
 
 /** An artifact (产物): something a step produced, with when it came (older ones have no time). */
 export type Link = { label: string; url: string; at?: number };
@@ -84,11 +88,20 @@ export function useTasks() {
       document.removeEventListener("visibilitychange", vis);
     };
   }, [reload]);
-  /** Runs a tasks.<fn> and refreshes the board after. */
+  /** Runs a tasks.<fn> and refreshes the board after. 放弃 gets an undo in a toast: it's easy to click by mistake. */
   const act = useCallback(
     async (fn: string, input: unknown) => {
       const r = await run(`tasks.${fn}`, input);
       await reload();
+      const id = (input as { id?: string } | null)?.id;
+      if (fn === "drop" && id && toast)
+        toast(`已放弃 ${id}`, {
+          duration: 10000,
+          action: {
+            label: "撤销",
+            onClick: () => void run("tasks.restore", { id }).then(reload, (e: any) => toast?.error?.(String(e?.message ?? e))),
+          },
+        });
       return r;
     },
     [reload],

@@ -472,7 +472,7 @@ function Drawer({ t, byId, act, onClose, onGo }: { t: Task; byId: Record<string,
           </Button>
         </div>
         {t.owner === "agent" && <Trail task={t.id} version={t.updatedAt} onSession={(id) => openChat(id, t.id)} onTask={onGo} />}
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">{done && !(t.questions && t.status === "done") ? <DoneDetail t={t} /> : t.owner === "human" ? <HumanCard key={t.id} t={t} byId={byId} act={act} onGo={onGo} /> : <AgentCard key={t.id} t={t} byId={byId} act={act} />}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">{done && !(t.questions && t.status === "done") ? <DoneDetail t={t} act={act} /> : t.owner === "human" ? <HumanCard key={t.id} t={t} byId={byId} act={act} onGo={onGo} /> : <AgentCard key={t.id} t={t} byId={byId} act={act} />}</div>
       </SheetContent>
     </Sheet>
   );
@@ -889,7 +889,7 @@ function Steps({ text }: { text: string }) {
   return <Md className="rounded-md bg-muted/60 px-3 py-2">{text}</Md>;
 }
 
-function DoneDetail({ t }: { t: Task }) {
+function DoneDetail({ t, act }: { t: Task; act?: Act }) {
   return (
     <div className="space-y-3">
       <h3 className={clsx("text-[16px] font-medium", t.status === "dropped" && "text-muted-foreground line-through")}>{t.title}</h3>
@@ -914,12 +914,20 @@ function DoneDetail({ t }: { t: Task }) {
           <p className="mt-1 whitespace-pre-wrap">{t.prompt}</p>
         </details>
       )}
-      {t.session && (
-        <Button variant="outline" className="text-[12px]" onClick={() => openChat(t.session!, t.id)}>
-          <MessageSquare className="size-3.5" />
-          打开对话
-        </Button>
-      )}
+      <div className="flex flex-wrap gap-2">
+        {t.session && (
+          <Button variant="outline" className="text-[12px]" onClick={() => openChat(t.session!, t.id)}>
+            <MessageSquare className="size-3.5" />
+            打开对话
+          </Button>
+        )}
+        {t.status === "dropped" && act && (
+          <Button variant="outline" className="text-[12px]" title="撤销放弃：回到放弃前的样子" onClick={() => void act("restore", { id: t.id })}>
+            <Undo2 className="size-3.5" />
+            恢复这个任务
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

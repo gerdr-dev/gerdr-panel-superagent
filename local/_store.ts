@@ -90,6 +90,8 @@ export type Task = {
   viaTools?: boolean;
   /** When its worker last reported (task_update / ask_human): a stop with nothing reported since is noticed (tasks.list). */
   reportedAt?: number;
+  /** What it was before 放弃, so restore puts it back. */
+  droppedFrom?: Task["status"];
   /** Reminders sent for stops without a report since its last one: one, then the stop goes to the user. */
   nudges?: number;
   /** Feedback history (rejections, answers), newest last. */

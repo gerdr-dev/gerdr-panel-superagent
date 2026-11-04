@@ -440,11 +440,27 @@ export async function drop(input: { id: string; reason?: string }, ctx: Ctx) {
   const t = update(ctx, (s) => {
     const t = find(s, input.id);
     if (input.reason) note(t, `放弃：${input.reason}`);
+    // Kept so it can be undone (restore): a click on 放弃 is easy to make by mistake
+    if (t.status !== "dropped") t.droppedFrom = t.status;
     Object.assign(t, { status: "dropped", doneAt: Date.now(), updatedAt: Date.now() });
     return t;
   });
   if (t.session && (ctx.sessions as any).close) await (ctx.sessions as any).close(t.session).catch(() => {});
   return t;
+}
+
+/**
+ * Undoes 放弃: { id } — back to where it was (its worker's conversation was only closed: the next message opens it
+ * again, and a session it handed work to still reports back to it).
+ */
+export function restore(input: { id: string }, ctx: Ctx) {
+  return update(ctx, (s) => {
+    const t = find(s, input.id);
+    if (t.status !== "dropped") throw new Error(`${t.id} 没有被放弃`);
+    note(t, "恢复了（撤销放弃）");
+    Object.assign(t, { status: t.droppedFrom ?? (t.owner === "human" ? "todo" : t.session ? "running" : "todo"), droppedFrom: undefined, doneAt: undefined, updatedAt: Date.now() });
+    return t;
+  });
 }
 
 /**
