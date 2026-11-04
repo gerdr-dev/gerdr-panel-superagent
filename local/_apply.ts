@@ -3,6 +3,11 @@
 
 import { newTask, note, type Store, type Task } from "./_store";
 
+/** The conversation an MR is, as mrwatch.ts emits its events: gitlab, group/repo!34. */
+export function mrThread(project: string, iid: number) {
+  return { source: "gitlab", key: `${project}!${iid}` };
+}
+
 /** What a worker's reply says, applied to its task. Returns the human task it asked for, if any. */
 export function applyBlock(s: Store, t: Task, b: any): Task | null {
   if (typeof b.summary === "string" && b.summary.trim()) t.summary = b.summary.trim();
@@ -35,6 +40,11 @@ export function applyBlock(s: Store, t: Task, b: any): Task | null {
       // The same MR again (after handling a round): keep what the watcher already saw
       const same = t.delivery?.url === url;
       t.delivery = same ? t.delivery : { kind: "mr", url, project: m[2], iid: Number(m[3]), since: Date.now(), seen: [], rounds: 0 };
+      // The MR is a conversation of this task from now on: what happens on it (review comments, a failed pipeline,
+      // conflicts; mrwatch.ts emits them) comes to this task's worker by subscription, like a follow-up in its chat
+      const th = mrThread(m[2], Number(m[3]));
+      const cur = t.threads ?? (t.origin?.key ? [{ source: t.origin.source, key: t.origin.key }] : []);
+      if (!cur.some((x) => x.source === th.source && x.key === th.key)) t.threads = [...cur, th];
       Object.assign(t, { status: "delivering", question: undefined });
       break;
     }

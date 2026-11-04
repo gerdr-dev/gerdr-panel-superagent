@@ -10,7 +10,7 @@ import { since } from "../lib/tasks";
 // neither. Turning one on writes a Gerdr trigger file (triggers/inbox-*.json, local/inbox.ts); its runs come from
 // /api/work/triggers.
 
-type Source = { on: string; title?: string; description?: string; addon?: string; canReply?: boolean; seen?: number; enabled: boolean; key?: string; allow?: string[] };
+type Source = { on: string; title?: string; description?: string; addon?: string; canReply?: boolean; seen?: number; enabled: boolean; key?: string; allow?: string[]; inferred?: boolean };
 type TriggerInfo = { id: string; on: string; runs: number; last?: { startedAt: string; ok: boolean; error?: string } };
 
 export default function TriggersPage() {
@@ -61,13 +61,14 @@ function Row({ s, info, onSaved }: { s: Source; info?: TriggerInfo; onSaved: () 
   const [key, setKey] = useState(s.key ?? "");
   const [allow, setAllow] = useState((s.allow ?? []).join(", "));
   const allowNow = (s.allow ?? []).join(", ");
+  const [inferred, setInferred] = useState(!!s.inferred);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const save = async (enabled: boolean) => {
     setBusy(true);
     setErr("");
     try {
-      await run("inbox.setSource", { on: s.on, enabled, key, title: s.title, allow });
+      await run("inbox.setSource", { on: s.on, enabled, key, title: s.title, allow, inferred });
       onSaved();
     } catch (e: any) {
       setErr(String(e.message || e));
@@ -104,7 +105,12 @@ function Row({ s, info, onSaved }: { s: Source; info?: TriggerInfo; onSaved: () 
           <input className="h-7 w-56 rounded-md border bg-background px-2 font-mono text-[12px]" value={key} placeholder="比如某个频道 id" onChange={(e) => setKey(e.target.value)} />
           <span className="text-muted-foreground">只收这些人（发送人 ID 或名字，逗号分隔；空 = 来源放进来的都收）</span>
           <input className="h-7 w-56 rounded-md border bg-background px-2 font-mono text-[12px]" value={allow} placeholder="比如 U012ABCD" onChange={(e) => setAllow(e.target.value)} />
-          {(key !== (s.key ?? "") || allow !== allowNow) && (
+          <span className="text-muted-foreground">这些消息是</span>
+          <select className="h-7 rounded-md border bg-background px-1.5 text-[12px]" value={inferred ? "inferred" : "explicit"} onChange={(e) => setInferred(e.target.value === "inferred")}>
+            <option value="explicit">找我的（私信、@ 我）</option>
+            <option value="inferred">不是找我的（只按主动工作的规则接）</option>
+          </select>
+          {(key !== (s.key ?? "") || allow !== allowNow || inferred !== !!s.inferred) && (
             <Button disabled={busy} onClick={() => save(true)}>
               保存
             </Button>

@@ -12,6 +12,11 @@ export type Workflow = {
   /** Who runs the routing conversation and the workers (skills/…/models.md); "" = Gerdr's default. */
   router: Who;
   worker: Who;
+  /**
+   * Work nobody asked for (events a trigger marks inferred): off, observe (judged and recorded, not done: dsh's
+   * observe mode, the default) or on. The rules themselves are the prose in skills/…/proactive.md.
+   */
+  proactive: "off" | "observe" | "on";
   mr: {
     merge: "auto" | "manual";
     minApprovals: number;
@@ -37,6 +42,7 @@ export function workflow(ctx: Ctx): Workflow {
       model: str(ctx, ["干活模型", "worker model"], ""),
       effort: str(ctx, ["干活思考强度", "worker effort"], ""),
     },
+    proactive: pick(ctx, ["主动工作", "proactive"], { off: ["关", "off"], observe: ["只记录", "observe"], on: ["照做", "on"] }, "observe"),
     mr: {
       merge: pick(ctx, ["合并", "merge"], { auto: ["自动", "auto"], manual: ["手动", "manual"] }, "manual"),
       minApprovals: num(ctx, ["批准人数", "approvals"], 1),

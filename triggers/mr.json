@@ -1,0 +1,6 @@
+{
+  "on": "gitlab/*",
+  "fn": "inbox.onEvent",
+  "name": "MR 上的新情况 → 跟着它的任务",
+  "input": { "inferred": true }
+}

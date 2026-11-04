@@ -1,4 +1,4 @@
-import { ExternalLink, Loader2, RotateCcw } from "lucide-react";
+import { ExternalLink, Loader2, Play, RotateCcw } from "lucide-react";
 import clsx from "clsx";
 import { useEffect, useState } from "react";
 import { Button } from "../components/Button";
@@ -12,8 +12,11 @@ import { since } from "../lib/tasks";
 type Item = {
   id: string;
   at: number;
-  state: "filtered" | "delivered" | "pending" | "accepted" | "attached" | "stopped" | "ignored" | "unavailable";
+  state: "filtered" | "delivered" | "pending" | "accepted" | "attached" | "stopped" | "ignored" | "unavailable" | "observed";
   reason?: string;
+  inferred?: boolean;
+  rule?: string;
+  would?: { title?: string; parts: { repo: string; agent?: string; model?: string; title?: string }[] };
   tasks?: string[];
   handBacks?: { task: string; reason: string }[];
   event: { id: string; source: string; kind: string; key?: string; actor?: string; who?: string; title?: string; text?: string; url?: string };
@@ -22,6 +25,7 @@ type Item = {
 const STATE: Record<Item["state"], { label: string; tone: string }> = {
   pending: { label: "在判断", tone: "text-brand" },
   unavailable: { label: "没判断成", tone: "text-warn" },
+  observed: { label: "本来会接", tone: "text-brand" },
   accepted: { label: "建了任务", tone: "text-ok" },
   attached: { label: "并进任务", tone: "text-ok" },
   delivered: { label: "交给任务", tone: "text-ok" },
@@ -43,14 +47,16 @@ export default function Log({ onTask }: { onTask: (id: string) => void }) {
     const t = setInterval(() => document.visibilityState === "visible" && load(), 10_000);
     return () => clearInterval(t);
   }, []);
-  const first = (items ?? []).filter((x) => x.state === "unavailable");
-  const rest = (items ?? []).filter((x) => x.state !== "unavailable");
+  const top = (x: Item) => x.state === "unavailable" || x.state === "observed";
+  const first = (items ?? []).filter(top);
+  const rest = (items ?? []).filter((x) => !top(x));
   return (
     <div className="mx-auto max-w-4xl space-y-4 p-6 max-md:p-3">
       <header>
         <h1 className="text-[22px] font-semibold tracking-tight">去向</h1>
         <p className="mt-1 text-[13px] text-muted-foreground">
-          外面来的每条消息去了哪。已有任务的对话里的后续直接交给那个任务；其余的由 Superagent 判断是不是活、派给谁。看板上自己建的任务不在这里。
+          外面来的每条消息去了哪。已有任务的对话里的后续直接交给那个任务；其余的由 Superagent 判断是不是活、派给谁。
+          「不是找你的」只按主动工作的规则接；规则还在「只记录」时，记成「本来会接」，看对了点「照做」。看板上自己建的任务不在这里。
         </p>
       </header>
       {err && <p role="alert" className="text-[13px] text-bad">{err}</p>}
@@ -73,11 +79,12 @@ function Row({ x, onTask, onRetried }: { x: Item; onTask: (id: string) => void; 
   const st = STATE[x.state] ?? { label: x.state, tone: "" };
   const e = x.event;
   const again = x.state === "ignored" || x.state === "filtered" || x.state === "unavailable";
-  const retry = async () => {
+  const doIt = x.state === "observed" && !!x.would;
+  const call = async (fn: string, input: unknown) => {
     setBusy(true);
     setErr("");
     try {
-      await run("superagent.retry", { ids: [x.id] });
+      await run(fn, input);
       onRetried();
     } catch (er: any) {
       setErr(String(er.message || er));
@@ -98,6 +105,7 @@ function Row({ x, onTask, onRetried }: { x: Item; onTask: (id: string) => void; 
           {e.source}/{e.kind}
         </span>
         {(e.who || e.actor) && <span>· {e.who || e.actor}</span>}
+        {x.inferred && <span className="rounded-sm bg-muted px-1 text-[10px]">不是找你的</span>}
         <span className="ml-auto shrink-0">{since(x.at)}前</span>
         {e.url && (
           <a href={e.url} target="_blank" rel="noreferrer" className="hover:text-foreground" title="打开原消息">
@@ -106,16 +114,28 @@ function Row({ x, onTask, onRetried }: { x: Item; onTask: (id: string) => void; 
         )}
       </div>
       <p className="line-clamp-3 text-[13px] whitespace-pre-wrap">{e.text || e.title}</p>
+      {x.rule && <p className="text-[12px] text-muted-foreground">按规则：{x.rule}</p>}
+      {x.would && x.state === "observed" && (
+        <p className="text-[12px] text-muted-foreground">
+          会建「{x.would.title || "（标题取第一行）"}」，派到 {x.would.parts.map((p) => [p.repo.split("/").pop(), p.agent, p.model].filter(Boolean).join(" / ")).join("、")}
+        </p>
+      )}
       {x.reason && <p className="text-[12px] text-muted-foreground">{x.state === "pending" ? "" : "理由："}{x.reason}</p>}
       {x.handBacks?.map((h) => (
         <p key={h.task} className="text-[12px] text-muted-foreground">
           {h.task} 交回：{h.reason}
         </p>
       ))}
-      {(again || err) && (
+      {(again || doIt || err) && (
         <div className="flex items-center gap-2">
+          {doIt && (
+            <Button disabled={busy} onClick={() => call("superagent.execute", { id: x.id })} title="照它判断的建任务、派出去">
+              {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
+              照做
+            </Button>
+          )}
           {again && (
-            <Button variant="outline" disabled={busy} onClick={retry} title="交给 Superagent 重新判断">
+            <Button variant="outline" disabled={busy} onClick={() => call("superagent.retry", { ids: [x.id] })} title="交给 Superagent 重新判断">
               {busy ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCcw className="size-3.5" />}
               重新判断
             </Button>

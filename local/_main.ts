@@ -44,7 +44,16 @@ export type Item = {
   id: string;
   at: number;
   event: Ev;
-  state: "filtered" | "delivered" | "pending" | "accepted" | "attached" | "stopped" | "ignored" | "unavailable";
+  state: "filtered" | "delivered" | "pending" | "accepted" | "attached" | "stopped" | "ignored" | "unavailable" | "observed";
+  /**
+   * Not addressed to the agent (the trigger says so: a channel message without @, an alert, an MR nobody follows):
+   * dsh's inferred strength. Taken only under a rule from skills/…/proactive.md, and in observe mode only recorded.
+   */
+  inferred?: boolean;
+  /** The proactive rule it was (or would have been) taken under. */
+  rule?: string;
+  /** Observe mode: what accepting it would have been, so 去向's 照做 can do exactly that. */
+  would?: { title?: string; parts: unknown[] };
   reason?: string;
   tasks?: string[];
   /** Workers that gave a delivered message back (not their task's business), with why. */
@@ -121,11 +130,13 @@ export function threadsOf(t: Task): { source: string; key: string }[] {
  * the latest one that ended (a person speaking in its conversation picks it up again, as dsh resumes an ended
  * Ticket). Dropped tasks get nothing: the person stopped them, so the message is new work to judge.
  */
-export function subscribers(tasks: Task[], e: { source: string; key?: string }): Task[] {
+export function subscribers(tasks: Task[], e: { source: string; key?: string; actor?: string }): Task[] {
   if (!e.key) return [];
   const on = tasks.filter((t) => t.status !== "dropped" && threadsOf(t).some((x) => x.source === e.source && x.key === e.key));
   const live = on.filter((t) => t.status !== "done");
   if (live.length) return live;
+  // Only a person picks an ended task up again: a bot or a pipeline (no actor) on a merged MR is no reason to
+  if (!e.actor) return [];
   const last = on.sort((a, b) => (b.doneAt ?? b.updatedAt ?? 0) - (a.doneAt ?? a.updatedAt ?? 0))[0];
   return last ? [last] : [];
 }
@@ -158,10 +169,13 @@ export async function followUp(ctx: Ctx, id: string, e: Ev) {
     return x;
   });
   if (t.session) {
+    // A person in a chat (it has a reply address) "goes on"; anything else (an MR review, a failed pipeline) is
+    // headed by its own title. Only a chat hears back about results (tellOrigins).
+    const head = e.reply ? `${e.source} 上${by}接着说` : e.title || `${e.source}/${e.kind}`;
     await ctx.sessions.send(
       t.session,
-      `[${e.source} 上${by}接着说]（任务 ${t.id}，消息 ${e.id}）\n\n${text}\n\n` +
-        `是这个任务的事就照常做、用 task_update 汇报，结果会转回给他；超出这个任务、或者是别的任务的事，用 hand_back 交回，不要自己答。`,
+      `[${head}]（任务 ${t.id}，消息 ${e.id}）\n\n${text}\n\n` +
+        `是这个任务的事就照常做、用 task_update 汇报${e.reply ? "，结果会转回给他" : ""}；超出这个任务、或者是别的任务的事，用 hand_back 交回，不要自己答。`,
       { now: true, attachments: files.map((f) => f.path) },
     );
   }
@@ -206,9 +220,22 @@ async function brief(ctx: Ctx): Promise<string> {
     `## 可选的 agent\n${agentLines.join("\n")}`,
     `## 仓库（用户自己写的）\n${repoText}`,
     modelText && `## agent 和模型（用户自己写的）\n${modelText}`,
+    proactiveText(ctx),
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+/** The proactive rules for the brief, when proactive work is on at all. */
+function proactiveText(ctx: Ctx) {
+  const mode = workflow(ctx).proactive;
+  if (mode === "off") return "";
+  const rules = fileWith(ctx, ["主动工作", "proactive"]);
+  return (
+    `## 不是找你的事：主动工作（用户自己写的规则）\n` +
+    `标着「不是找你的」的 [消息 cN]：只有符合下面某条规则才 accept，并且在决定里写 "rule"（是哪一条，用规则原话的开头）；不符合任何一条就 ignore（reason 写「没有对应的规则」），不回复。` +
+    `${mode === "observe" ? "现在是「只记录」：你照常给出决定，系统只记下来不执行。" : ""}\n\n${rules || "（还没写规则：一律 ignore）"}`
+  );
 }
 
 function oneLine(text: string, max: number) {
@@ -301,7 +328,7 @@ function eventBlock(it: Item, tasks: Task[]) {
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, 12);
   return [
-    `[消息 ${it.id}] ${e.source}/${e.kind}${who(e) ? ` · ${who(e)}${e.actor && e.actor !== who(e) ? `（${e.actor}）` : ""}` : ""}${e.key ? ` · 对话 ${e.key}` : ""}`,
+    `[消息 ${it.id}]${it.inferred ? "（不是找你的：只按主动工作的规则判断）" : ""} ${e.source}/${e.kind}${who(e) ? ` · ${who(e)}${e.actor && e.actor !== who(e) ? `（${e.actor}）` : ""}` : ""}${e.key ? ` · 对话 ${e.key}` : ""}`,
     e.text || e.title || "",
     e.files?.length ? `附件：\n${e.files.map((f) => `- ${f.name}：${f.path}`).join("\n")}` : "",
     it.handBacks?.length ? `负责它的 worker 交回了：\n${it.handBacks.map((h) => `- ${h.task}：${h.reason}`).join("\n")}` : "",

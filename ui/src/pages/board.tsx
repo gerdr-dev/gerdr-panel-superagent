@@ -39,6 +39,9 @@ export default function BoardPage() {
   const [settings, setSettings] = useState<SettingsTab | null>(null);
   const [open, setOpen] = useState("");
   const [doneLimit, setDoneLimit] = useState(20);
+  // Home is what needs the user (dsh's Overview); the whole board is a click away. Remembered per browser.
+  const [view, setView] = useState<"you" | "board">(() => (localStorage.getItem("superagent.view") === "board" ? "board" : "you"));
+  useEffect(() => localStorage.setItem("superagent.view", view), [view]);
   const byId = Object.fromEntries((tasks ?? []).map((t) => [t.id, t]));
   const list = (c: Col) => {
     const l = (tasks ?? []).filter((t) => colOf(t) === c);
@@ -110,10 +113,24 @@ export default function BoardPage() {
   return (
     <div className="flex h-full min-h-0 flex-col [overflow-wrap:anywhere] max-md:h-auto md:relative">
       <header className="flex items-center justify-between gap-3 border-b px-4 py-2.5">
-        <h1 className="flex items-center gap-2 text-[14px] font-medium">
-          <ListTodo className="size-4 text-muted-foreground" />
-          Superagent
-        </h1>
+        <div className="flex items-center gap-3">
+          <h1 className="flex items-center gap-2 text-[14px] font-medium">
+            <ListTodo className="size-4 text-muted-foreground" />
+            Superagent
+          </h1>
+          <nav className="flex rounded-md bg-muted p-0.5 text-[12px]">
+            {(
+              [
+                ["you", `要你管${tasks ? ` ${needsYou(tasks).length}` : ""}`],
+                ["board", "看板"],
+              ] as const
+            ).map(([id, label]) => (
+              <button key={id} className={clsx("rounded px-2 py-0.5", view === id ? "bg-background font-medium shadow-xs" : "text-muted-foreground hover:text-foreground")} onClick={() => setView(id)}>
+                {label}
+              </button>
+            ))}
+          </nav>
+        </div>
         <div className="flex items-center gap-1">
           <MainButton onOpen={(id) => (setOpen(""), setPeek({ session: id }))} />
           <Button variant="ghost" size="sm" title="外面来的每条消息去了哪：交给了哪个任务、为什么没接" onClick={() => setSettings("log")}>
@@ -132,6 +149,8 @@ export default function BoardPage() {
       {error && <p role="alert" className="px-4 pt-3 text-[13px] text-bad">读取失败：{error}</p>}
       {!tasks && !error ? (
         <p className="p-8 text-center text-[13px] text-muted-foreground">正在加载…</p>
+      ) : view === "you" ? (
+        <Overview tasks={tasks ?? []} byId={byId} open={open} onOpen={setOpen} onLog={() => setSettings("log")} onBoard={() => setView("board")} />
       ) : (
         <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto p-3 max-md:snap-x max-md:snap-mandatory">
           {COLS.map((c) => {
@@ -195,6 +214,101 @@ export default function BoardPage() {
       )}
       {creating && <NewTask onClose={() => setCreating(false)} act={act} />}
       {settings && <SettingsSheet tab={settings} onTab={setSettings} onClose={() => setSettings(null)} onTask={(id) => (setSettings(null), setOpen(id))} />}
+    </div>
+  );
+}
+
+/** What needs the user: their column, things to judge, and tasks that didn't get dispatched. */
+function needsYou(tasks: Task[]) {
+  return tasks.filter((t) => {
+    const c = colOf(t);
+    if (c === "you" || c === "review") return true;
+    // An agent task nobody is dispatching: the Superagent gave up on it, or it was added without starting
+    return t.owner === "agent" && t.status === "todo" && !t.routing && !t.session;
+  });
+}
+
+type LogSummary = {
+  main: { id: string; status: string; waiting?: string } | null;
+  items: { id: string; at: number; state: string; rule?: string; event: { source: string; kind: string; title?: string; text?: string } }[];
+};
+
+/**
+ * Home (dsh-superagent's Overview, its "three questions" in this order): does anything need me now — the tasks in
+ * 等你 / 待验收 / not dispatched, with their own actions one click away; is the Superagent healthy — its main session
+ * waiting or failed, messages it gave no decision on, what proactive work only recorded; and a line of what happened
+ * in the last day. A healthy state takes no space: no lists, one sentence.
+ */
+function Overview({ tasks, byId, open, onOpen, onLog, onBoard }: { tasks: Task[]; byId: Record<string, Task>; open: string; onOpen: (id: string) => void; onLog: () => void; onBoard: () => void }) {
+  const [log, setLog] = useState<LogSummary | null>(null);
+  useEffect(() => {
+    const load = () => run<LogSummary>("superagent.log", { limit: 300 }).then(setLog, () => {});
+    load();
+    const t = setInterval(() => document.visibilityState === "visible" && load(), 10_000);
+    return () => clearInterval(t);
+  }, []);
+  const mine = needsYou(tasks);
+  const groups: { title: string; hint: string; list: Task[] }[] = [
+    { title: "等你", hint: "要你做、要你定，或者它卡住了", list: mine.filter((t) => colOf(t) === "you").sort((a, b) => Number(!!b.urgent) - Number(!!a.urgent) || a.updatedAt - b.updatedAt) },
+    { title: "待验收", hint: "结论要你看", list: mine.filter((t) => colOf(t) === "review").sort((a, b) => a.updatedAt - b.updatedAt) },
+    { title: "没派出去", hint: "点开再派一次", list: mine.filter((t) => colOf(t) !== "you" && colOf(t) !== "review") },
+  ].filter((g) => g.list.length);
+  const day = Date.now() - 24 * 3600_000;
+  const items = log?.items ?? [];
+  const unavailable = items.filter((x) => x.state === "unavailable").length;
+  const observed = items.filter((x) => x.state === "observed" && x.at > day).length;
+  const m = log?.main;
+  const problems: { text: string; action?: { label: string; go: () => void } }[] = [];
+  if (m?.status === "waiting") problems.push({ text: `Superagent 在问你：${m.waiting ?? "去它的对话里看看"}`, action: { label: "去回答", go: () => openChat(m.id) } });
+  if (m?.status === "error") problems.push({ text: "Superagent 的调度会话出错了：下一件事来时会换一个新的", action: { label: "看看", go: () => openChat(m.id) } });
+  if (unavailable) problems.push({ text: `${unavailable} 条消息 Superagent 没给决定`, action: { label: "去向", go: onLog } });
+  if (observed) problems.push({ text: `主动工作今天记了 ${observed} 条「本来会接」：看对不对，对的点照做`, action: { label: "去向", go: onLog } });
+  const got = items.filter((x) => x.at > day);
+  const taken = got.filter((x) => x.state === "accepted" || x.state === "attached" || x.state === "delivered").length;
+  const running = tasks.filter((t) => colOf(t) === "active").length;
+  const doneToday = tasks.filter((t) => t.status === "done" && (t.doneAt ?? 0) > day).length;
+  const stats = [got.length && `收到 ${got.length} 条消息，交给任务 ${taken} 条`, running && `${running} 个在跑`, doneToday && `${doneToday} 个做完`].filter(Boolean).join(" · ");
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="mx-auto max-w-3xl space-y-5 p-4 max-md:p-3">
+        {problems.map((p) => (
+          <div key={p.text} className="flex items-center gap-2 rounded-lg border border-warn/40 bg-warn/5 px-3 py-2 text-[13px]">
+            <AlertTriangle className="size-3.5 shrink-0 text-warn" />
+            <span className="min-w-0 flex-1">{p.text}</span>
+            {p.action && (
+              <Button variant="outline" onClick={p.action.go}>
+                {p.action.label}
+              </Button>
+            )}
+          </div>
+        ))}
+        {groups.map((g) => (
+          <section key={g.title} className="space-y-2">
+            <h2 className="flex items-baseline gap-2 text-[13px] font-medium">
+              {g.title}
+              <span className="text-[12px] font-normal text-muted-foreground tabular-nums">{g.list.length}</span>
+              <span className="text-[12px] font-normal text-muted-foreground">{g.hint}</span>
+            </h2>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {g.list.map((t) => (
+                <MiniCard key={t.id} t={t} byId={byId} active={t.id === open} onOpen={() => onOpen(t.id)} />
+              ))}
+            </div>
+          </section>
+        ))}
+        {!groups.length && !problems.length && (
+          <div className="py-16 text-center">
+            <CheckCircle2 className="mx-auto size-6 text-ok" />
+            <p className="mt-2 text-[14px] font-medium">没有要你管的事</p>
+          </div>
+        )}
+        <p className="text-center text-[12px] text-muted-foreground">
+          {stats ? `最近一天：${stats}。` : ""}
+          <button className="underline-offset-2 hover:text-foreground hover:underline" onClick={onBoard}>
+            看全部任务
+          </button>
+        </p>
+      </div>
     </div>
   );
 }

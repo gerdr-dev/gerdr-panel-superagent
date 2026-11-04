@@ -4,9 +4,10 @@
 import { add, dispatch, drop } from "./tasks";
 import { find, load, update, type Task } from "./_store";
 import { evaluate, findItem, followUp, mainId, state, updateState, type Item } from "./_main";
+import { workflow } from "./_config";
 
 type Part = { repo: string; agent?: string; model?: string; effort?: string; worktree?: boolean; title?: string; prompt?: string };
-type Decision = { item: string; decision?: "accept" | "attach" | "stop" | "ignore"; title?: string; parts?: Part[]; task?: string; reason?: string; reply?: string };
+type Decision = { item: string; decision?: "accept" | "attach" | "stop" | "ignore"; title?: string; parts?: Part[]; task?: string; reason?: string; reply?: string; rule?: string };
 
 /**
  * The main session's decisions on a batch, in one call: { decisions: [{ item, decision?, title?, parts?, task?,
@@ -44,30 +45,16 @@ async function one(d: Decision, ctx: Ctx) {
   switch (d.decision) {
     case "accept": {
       if (!d.parts?.length) throw new Error("accept 要给 parts");
-      const text = (e.text ?? "").trim() || e.title || "";
-      const from = [e.who && `来自 ${e.who}`, `${e.source}/${e.kind}`].filter(Boolean).join("，");
-      const t = (await add(
-        {
-          title: d.title || firstLine(text) || e.title || `${e.source}/${e.kind}`,
-          prompt: `${text}\n\n（${from}${e.url ? `：${e.url}` : ""}）`,
-          attachments: e.files,
-          origin: { id: e.id, source: e.source, kind: e.kind, key: e.key, title: e.title, url: e.url, reply: e.reply },
-          threads: e.key ? [{ source: e.source, key: e.key }] : undefined,
-          router: mainId(ctx),
-        },
-        ctx,
-      )) as Task;
-      let ids = [t.id];
-      try {
-        ids = ((await dispatch({ id: t.id, parts: d.parts }, ctx)) as Task[]).map((x) => x.id);
-      } catch (err: any) {
-        // Accepted all the same: the task is on the board; only sending it out is to redo, as a board task
-        settle({ state: "accepted", tasks: ids, reason: undefined });
-        throw new Error(`建了任务 ${t.id}，但没派出去：${err?.message ?? err}。改了用 {"item":"${t.id}","parts":[…]} 再派`);
+      if (it.inferred) {
+        if (!d.rule?.trim()) throw new Error("这条不是找你的：accept 要写 rule（按主动工作的哪条规则），没有对应的规则就 ignore");
+        // Observe mode (dsh's default for proactive work): recorded with what it would have done, not done. 去向
+        // shows it; the user can have it done (superagent.run) or switch the mode once the judgements look right.
+        if (workflow(ctx).proactive !== "on") {
+          settle({ state: "observed", rule: d.rule.trim(), would: { title: d.title, parts: d.parts }, reason: undefined });
+          return { item: it.id, observed: true };
+        }
       }
-      settle({ state: "accepted", tasks: ids, reason: undefined });
-      answer(ctx, it, `收到，建了任务 ${t.id}「${find(load(ctx).store, t.id).title}」，有结果会在这里说。`);
-      return { item: it.id, tasks: ids };
+      return accept(ctx, it, d.title, d.parts, d.rule?.trim());
     }
     case "attach": {
       const t = live(ctx, d.task);
@@ -92,12 +79,54 @@ async function one(d: Decision, ctx: Ctx) {
     case "ignore": {
       if (!d.reason) throw new Error("ignore 要写 reason");
       settle({ state: "ignored", reason: d.reason });
-      if (d.reply?.trim()) answer(ctx, it, d.reply.trim());
+      if (d.reply?.trim() && !it.inferred) answer(ctx, it, d.reply.trim());
       return { item: it.id, ignored: true };
     }
     default:
       throw new Error(`decision 是 accept / attach / stop / ignore 之一，不是「${d.decision ?? ""}」`);
   }
+}
+
+/**
+ * Accepting an event: a task from it, following its conversation, sent out as the parts say, and "taken" said where
+ * it came from. Taken under a proactive rule (nobody asked): the worker is told to stay within that rule, and nobody
+ * is told it was taken — no one is waiting for an answer.
+ */
+async function accept(ctx: Ctx, it: Item, title: string | undefined, parts: Part[], rule?: string) {
+  const e = it.event;
+  const settle = (patch: Partial<Item>) => updateState(ctx, (s) => Object.assign(findItem(s, it.id), { decidedAt: Date.now(), ...patch }));
+  const text = (e.text ?? "").trim() || e.title || "";
+  const from = [e.who && `来自 ${e.who}`, `${e.source}/${e.kind}`].filter(Boolean).join("，");
+  const scope = it.inferred && rule ? `\n\n这件事没人找你做，是按主动工作的规则接的：「${rule}」。只做这条规则允许的，超出的用 ask_human 问用户。` : "";
+  const t = (await add(
+    {
+      title: title || firstLine(text) || e.title || `${e.source}/${e.kind}`,
+      prompt: `${text}\n\n（${from}${e.url ? `：${e.url}` : ""}）${scope}`,
+      attachments: e.files,
+      origin: { id: e.id, source: e.source, kind: e.kind, key: e.key, title: e.title, url: e.url, reply: it.inferred ? undefined : e.reply },
+      threads: e.key ? [{ source: e.source, key: e.key }] : undefined,
+      router: mainId(ctx),
+    },
+    ctx,
+  )) as Task;
+  let ids = [t.id];
+  try {
+    ids = ((await dispatch({ id: t.id, parts }, ctx)) as Task[]).map((x) => x.id);
+  } catch (err: any) {
+    // Accepted all the same: the task is on the board; only sending it out is to redo, as a board task
+    settle({ state: "accepted", tasks: ids, rule, reason: undefined });
+    throw new Error(`建了任务 ${t.id}，但没派出去：${err?.message ?? err}。改了用 {"item":"${t.id}","parts":[…]} 再派`);
+  }
+  settle({ state: "accepted", tasks: ids, rule, reason: undefined });
+  if (!it.inferred) answer(ctx, it, `收到，建了任务 ${t.id}「${find(load(ctx).store, t.id).title}」，有结果会在这里说。`);
+  return { item: it.id, tasks: ids };
+}
+
+/** 照做: what the main session would have done with an observed event, done now by the user's say-so. { id } */
+export async function execute(input: { id: string }, ctx: Ctx) {
+  const it = findItem(state(ctx), input?.id ?? "");
+  if (it.state !== "observed" || !it.would) throw new Error(`${it.id} 不是「只记录」下记的（${it.state}）`);
+  return accept(ctx, it, it.would.title, it.would.parts as Part[], it.rule);
 }
 
 function live(ctx: Ctx, id?: string): Task {

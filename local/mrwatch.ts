@@ -1,11 +1,16 @@
 import { get, send, text } from "./_glab";
 import { find, load, note, update, type Delivery, type Task } from "./_store";
 import { workflow } from "./_config";
+import { mrThread } from "./_apply";
 
 // Follows the MRs that board tasks went out in (status "delivering", see tasks.ts) until they're merged. Run on a
-// schedule (schedules/mrwatch.json), all deterministic: it reads GitLab and decides by its fields, and only hands what
-// needs judgement to the worker that opened the MR (new review comments, a failed pipeline, conflicts), with the
-// handling rules in the user's skill (the worker has it; this only says what happened). Rebasing and merging follow
+// schedule (schedules/mrwatch.json), all deterministic: it reads GitLab and decides by its fields. What needs
+// judgement (new review comments, a failed pipeline, conflicts) it doesn't hand to anyone itself: it's a source, and
+// emits it as an event (gitlab/mr.review, gitlab/pipeline.failed, gitlab/mr.conflict, key group/repo!34). The task
+// follows its MR's conversation (threads, set when it reported delivering: _apply.ts), so triggers/mr.json →
+// inbox.onEvent delivers it to the worker like any follow-up — logged in 去向, given back with hand_back if it isn't
+// that task's. dsh-superagent's GitHub source works the same way for pull requests. The handling rules are in the
+// user's skill (the worker has it; this only says what happened). Rebasing and merging follow
 // the values in that skill (_config.ts): automatic, or waiting for the user's button (rebase / mergeNow below). Merged → the task is done and
 // its worker parked. A closed MR, or more review rounds than mr.maxRounds, goes to the user (the task's question:
 // the board's "needs you").
@@ -22,6 +27,7 @@ export async function tick(input: { dry?: boolean } | undefined, ctx: Ctx) {
   dry = !!input?.dry;
   const tasks = load(ctx).store.tasks.filter((t) => t.status === "delivering" && t.delivery?.kind === "mr");
   if (!tasks.length) return { watched: 0 };
+  if (!dry) follow(tasks, ctx);
   const me = (await get("user", ctx)).username as string;
   const out: Record<string, string> = {};
   for (const t of tasks) {
@@ -103,7 +109,17 @@ async function one(t: Task, me: string, ctx: Ctx): Promise<string> {
       const body = String(n.body ?? "").slice(0, NOTE_MAX);
       return `${i + 1}. @${n.author?.username}${where}${n.resolvable ? (n.resolved ? "（已解决）" : "（未解决）") : ""}：\n${body}\n${d.url}#note_${n.id}`;
     });
-    await act(`send ${fresh.length} notes to the worker: ${fresh.map((n) => n.id).join(",")}`, () => ctx.sessions.send(t.session!, `[${label} 有 ${fresh.length} 条新意见]（任务 ${t.id}，盯 MR 的定时任务发来的）\n\n${lines.join("\n\n")}\n\n${playbook(ctx)}`, { now: true }));
+    const first = fresh[0];
+    await act(`emit ${fresh.length} notes: ${fresh.map((n) => n.id).join(",")}`, async () =>
+      emit(ctx, d, {
+        id: `gitlab:review:${d.project}!${d.iid}:${fresh.map((n) => n.id).join(",")}`,
+        kind: "mr.review",
+        actor: first.author?.username,
+        title: `${label} 有 ${fresh.length} 条新意见`,
+        text: `${lines.join("\n\n")}\n\n${playbook(ctx)}`,
+        url: `${d.url}#note_${first.id}`,
+      }),
+    );
     return save({ seen: ids, rounds, detail: `${fresh.length} 条新意见已交给 worker` }, `handed ${fresh.length} notes`);
   }
 
@@ -116,14 +132,30 @@ async function one(t: Task, me: string, ctx: Ctx): Promise<string> {
       logs.push(`### ${j.name}（job ${j.id}，${j.web_url}）\n\`\`\`\n${trace.split("\n").slice(-60).join("\n")}\n\`\`\``);
     }
     const names = jobs.map((j) => j.name).join("、") || "（没拿到 job）";
-    await act(`send failed pipeline ${pipe.id} to the worker`, () => ctx.sessions.send(t.session!, `[${label} 的流水线挂了]（任务 ${t.id}）失败的 job：${names}。${pipe.web_url}\n\n${logs.join("\n\n")}\n\n${playbook(ctx)}`, { now: true }));
+    await act(`emit failed pipeline ${pipe.id}`, async () =>
+      emit(ctx, d, {
+        id: `gitlab:pipeline:${d.project}:${pipe.id}`,
+        kind: "pipeline.failed",
+        title: `${label} 的流水线挂了`,
+        text: `失败的 job：${names}。${pipe.web_url}\n\n${logs.join("\n\n")}\n\n${playbook(ctx)}`,
+        url: pipe.web_url,
+      }),
+    );
     return save({ pipeline: pipe.id, detail: `流水线挂了（${names}），已交给 worker` }, "handed failed pipeline");
   }
 
   // 3. Conflicts: the worker resolves them (once per head commit)
   if (mr.has_conflicts || state === "conflict") {
     if (d.conflict === mr.sha) return save({ detail: "有冲突，worker 在处理" }, "conflict (handed)");
-    await act("send the conflict to the worker", () => ctx.sessions.send(t.session!, `[${label} 和 ${mr.target_branch} 有冲突]（任务 ${t.id}）把 ${mr.target_branch} 合进来或者变基，解决冲突再推。\n\n${playbook(ctx)}`, { now: true }));
+    await act("emit the conflict", async () =>
+      emit(ctx, d, {
+        id: `gitlab:conflict:${d.project}!${d.iid}:${mr.sha}`,
+        kind: "mr.conflict",
+        title: `${label} 和 ${mr.target_branch} 有冲突`,
+        text: `把 ${mr.target_branch} 合进来或者变基，解决冲突再推。\n\n${playbook(ctx)}`,
+        url: d.url,
+      }),
+    );
     return save({ conflict: mr.sha, detail: "有冲突，已交给 worker" }, "handed conflict");
   }
 
@@ -150,6 +182,31 @@ async function one(t: Task, me: string, ctx: Ctx): Promise<string> {
   }
 
   return save({ detail: describe(state, pipe?.status) }, state);
+}
+
+/** What happened on an MR, as an event of its conversation (gitlab, group/repo!34): the task following it gets it. */
+function emit(ctx: Ctx, d: Delivery, e: { id: string; kind: string; actor?: string; title: string; text: string; url?: string }) {
+  const { key } = mrThread(d.project, d.iid);
+  return ctx.events.emit({ ...e, source: "gitlab", key, data: { project: d.project, iid: d.iid, mr: d.url } });
+}
+
+/**
+ * Tasks that went delivering before tasks followed their MR (threads): made to follow it now, so what this emits
+ * reaches them.
+ */
+function follow(tasks: Task[], ctx: Ctx) {
+  const missing = (t: Task) => {
+    const th = mrThread(t.delivery!.project, t.delivery!.iid);
+    return !(t.threads ?? []).some((x) => x.source === th.source && x.key === th.key);
+  };
+  if (!tasks.some(missing)) return;
+  update(ctx, (s) => {
+    for (const x of s.tasks) {
+      if (x.status !== "delivering" || x.delivery?.kind !== "mr" || !missing(x)) continue;
+      const cur = x.threads ?? (x.origin?.key ? [{ source: x.origin.source, key: x.origin.key }] : []);
+      x.threads = [...cur, mrThread(x.delivery.project, x.delivery.iid)];
+    }
+  });
 }
 
 function rebaseNow(base: string, skipCI: boolean, ctx: Ctx) {
