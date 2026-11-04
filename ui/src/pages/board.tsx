@@ -361,9 +361,10 @@ function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, T
   return (
     <button onClick={onOpen} className={clsx("block w-full space-y-1.5 rounded-lg border bg-card p-3 text-left shadow-xs transition-[border-color,box-shadow,transform] duration-150 hover:border-ring/50 hover:shadow-sm active:scale-[0.99]", active ? "border-ring" : notDispatched(t) && "border-warn/60")}>
       <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-        {t.owner === "human" ? t.handBack?.kind === "choice" ? <CircleHelp className="size-3" /> : <Hand className="size-3" /> : <Bot className="size-3" />}
-        <span className="font-mono">{t.id}</span>
-        {t.urgent && <AlertTriangle className="size-3 text-warn" />}
+        {t.owner === "human" ? t.handBack?.kind === "choice" ? <CircleHelp className="size-3 shrink-0" /> : <Hand className="size-3 shrink-0" /> : <Bot className="size-3 shrink-0" />}
+        {/* Never squeezed: a long "asked by" beside it truncates instead of wrapping the id onto two lines */}
+        <span className="shrink-0 font-mono whitespace-nowrap">{t.id}</span>
+        {t.urgent && <AlertTriangle className="size-3 shrink-0 text-warn" />}
         {asker && (
           // Where it came from, in the card's own line: the task whose worker asked it, a click opening that
           // conversation (the context for answering). A span, not a button: the card is a <button> already.
