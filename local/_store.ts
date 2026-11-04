@@ -88,6 +88,10 @@ export type Task = {
   askedBy?: string;
   /** Its worker reports through the panel tools (board.ts): no ```gerdr-task``` block to expect at the end of a turn. */
   viaTools?: boolean;
+  /** When its worker last reported (task_update / ask_human): a stop with nothing reported since is noticed (tasks.list). */
+  reportedAt?: number;
+  /** Reminders sent for stops without a report since its last one: one, then the stop goes to the user. */
+  nudges?: number;
   /** Feedback history (rejections, answers), newest last. */
   notes?: { at: number; text: string }[];
   /** The session `updatedAt` whose reply was last applied, so a reply is applied once. */

@@ -22,7 +22,7 @@ export const WORKER_PROTOCOL = `
 This is task {id} on the user's Superagent board. They follow it there, not in this chat: report through the "work" tools
 (task_update, ask_human, cancel_human), and follow the skills from this panel for how they like things done. When you
 need the user to decide something, put it on the board with ask_human and its options, then end your turn: they may
-answer days later. Your own ask-question tool only while they're talking with you here.
+answer days later. Every time you stop, the board must say where things stand: a question only in this chat is never seen. Your own ask-question tool only while they're talking with you here.
 `;
 
 /** The last ```gerdr-task``` block in a reply, parsed; null when there's none or it isn't JSON. */
@@ -51,7 +51,9 @@ export async function list(input: unknown, ctx: Ctx) {
   const { store } = load(ctx);
   // Read sessions outside the write: ctx.sessions.get is cheap, but keep the locked part small
   for (const t of store.tasks) if (t.session && t.status !== "done" && t.status !== "dropped") live[t.session] = ctx.sessions.get(t.session);
+  const nudge: { session: string; id: string }[] = [];
   const s = update(ctx, (s) => {
+    nudge.length = 0; // update retries this function on a write race: decide afresh each time
     for (const t of s.tasks) {
       const sess = t.session && live[t.session];
       // The worker is at it again: the user answered (in its chat, with whatever they attached) or it carried on.
@@ -62,6 +64,7 @@ export async function list(input: unknown, ctx: Ctx) {
       }
       if (!sess || (sess.status !== "idle" && sess.status !== "error")) continue;
       if (t.synced === sess.updatedAt) continue;
+      const prevStop = t.synced ?? 0;
       t.synced = sess.updatedAt;
       const b = lastBlock(sess.reply ?? "");
       // The user asked it something in its chat and it answered: they're reading that answer and will carry on, so
@@ -70,11 +73,34 @@ export async function list(input: unknown, ctx: Ctx) {
       if (b && sess.byPerson && b.state === "review" && t.status === "running") applyBlock(s, t, { ...b, state: undefined });
       else if (b) applyBlock(s, t, b);
       else if (t.status === "running" && sess.status === "idle" && !t.viaTools) t.question = "Worker 停下了，但没在看板上汇报进展：去对话里看看它说了什么，让它接着做，或者直接「标为完成」";
+      else if (t.status === "running" && sess.status === "idle" && silentStop(s, t, sess, prevStop)) {
+        // It stopped without a word on the board — typically a question written only in its reply (t3 asking which
+        // style, on 2026-11-04): the task sat in 进行中 with nothing running. Reminded once to put it on the board
+        // (a card, a status); if it stops silent again, the user is told, with what it last said.
+        if ((t.nudges ?? 0) < 1) {
+          t.nudges = (t.nudges ?? 0) + 1;
+          nudge.push({ session: sess.id, id: t.id });
+        } else {
+          const said = String(sess.reply ?? "").replace(/\s+/g, " ").trim();
+          t.question = `Worker 停下了，没在看板上汇报。它最后说：「${[...said].slice(0, 160).join("")}${[...said].length > 160 ? "…" : ""}」`;
+        }
+      }
       t.updatedAt = Date.now();
     }
     dropOrphans(s);
     return s;
   });
+  for (const n of nudge)
+    await ctx.sessions
+      .send(
+        n.session,
+        `[看板] 你这一轮停下了，但没在看板上汇报（任务 ${n.id}）。用户看的是看板，不看聊天：\n` +
+          `- 要用户决定 / 给东西：用 ask_human 登记（决定带 options），然后结束这一轮；\n` +
+          `- 做完了、交付了、要用户验收：用 task_update 报对应的 state；\n` +
+          `- 还在做：用 task_update（working）写一句进展。\n` +
+          `只补汇报，别重复聊天里说过的话。`,
+      )
+      .catch(() => {});
   await closeRouters(ctx, live);
   sweep(ctx);
   return {
@@ -84,6 +110,18 @@ export async function list(input: unknown, ctx: Ctx) {
     }),
     at: Date.now(),
   };
+}
+
+/**
+ * A worker that reports through the tools stopped without reporting anything since its last stop, and isn't waiting
+ * on the user (no open step / question of its own). A turn the user started in its chat counts too: they say a few
+ * words, close the chat and don't come back to it — what the answer left open must be on the board as well.
+ */
+function silentStop(s: Store, t: Task, sess: any, prevStop: number) {
+  if (!t.viaTools) return false;
+  if ((t.reportedAt ?? 0) > prevStop) return false;
+  const waiting = s.tasks.some((h) => h.owner === "human" && h.status === "todo" && (h.askedBy === t.id || t.blockedBy?.includes(h.id)));
+  return !waiting;
 }
 
 /**

@@ -82,7 +82,7 @@ export function task_update(input: { state: string; summary?: string; links?: { 
     // Answering the user's own question in the chat: they read it there; don't move the task to "come and look"
     if (state === "review" && sess?.byPerson && t.status === "running") state = undefined;
     applyBlock(s, t, { ...input, state });
-    Object.assign(t, { viaTools: true, synced: undefined, updatedAt: Date.now() });
+    Object.assign(t, { viaTools: true, synced: undefined, reportedAt: Date.now(), nudges: 0, updatedAt: Date.now() });
     return { id: t.id, status: t.status, column: t.question ? "等你" : t.status };
   });
 }
@@ -93,7 +93,7 @@ export function ask_human(input: any, ctx: Ctx) {
     const decision = Array.isArray(input.options) && input.options.length > 0;
     const human = decision ? { ...input, steps: input.steps ?? "", handBack: { kind: "choice", options: input.options.map(String), label: "你的决定" } } : input;
     const h = applyBlock(s, t, { state: "blocked", human, replace: false })!;
-    Object.assign(t, { viaTools: true, updatedAt: Date.now() });
+    Object.assign(t, { viaTools: true, reportedAt: Date.now(), nudges: 0, updatedAt: Date.now() });
     if (h.handBack?.kind === "questions") return questionCard(h, ctx);
     if (decision) h.urgent = false; // a decision can wait: no warning mark, it just sits under 等你
     // gerdrCard: Gerdr draws this result as a card in the chat, so the user sees the step where they are too
