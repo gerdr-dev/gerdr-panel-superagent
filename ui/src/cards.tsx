@@ -76,7 +76,7 @@ function TaskStep({ card }: CardProps) {
 
 registerCard("task-step", TaskStep);
 
-type Wait = { state: "waiting" | "ended" | "gone"; body?: string; how?: string; at?: number; woke?: { how: string; at: number } };
+type Wait = { state: "waiting" | "ended" | "gone"; body?: string; how?: string; at?: number; woke?: { how: string; at: number }; check?: { at: number; code: number; out: string } };
 
 /**
  * A worker ending its turn to wait on someone / something outside (wait_for, local/waits.ts). Without it the chat just
@@ -133,6 +133,11 @@ function TaskWait({ card }: CardProps) {
         <p className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
           {st?.body?.includes("回来看") || c.body?.includes("回来看") ? <AlarmClock className="size-3.5 shrink-0" /> : <Hourglass className="size-3.5 shrink-0" />}
           {st?.body ?? c.body}
+        </p>
+      )}
+      {st?.check && (
+        <p className="line-clamp-2 font-mono text-[11px] text-muted-foreground">
+          {new Date(st.check.at).toTimeString().slice(0, 5)} 查：{st.check.out || `exit ${st.check.code}`}
         </p>
       )}
       {st?.woke && (

@@ -1,4 +1,4 @@
-import { AlarmClock, AlertTriangle, Bot, Hourglass, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ListTodo, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Send, Settings, Undo2, X } from "lucide-react";
+import { AlarmClock, AlertTriangle, SquareTerminal, Bot, Hourglass, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ListTodo, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Send, Settings, Undo2, X } from "lucide-react";
 import clsx from "clsx";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "../components/Button";
@@ -262,7 +262,7 @@ function Alerts({ onLog }: { onLog: () => void }) {
   );
 }
 
-const WAIT_ICON: Record<Wait["kind"], typeof Hourglass> = { reply: MessageSquare, time: AlarmClock, session: Bot, user: Hand, task: ListTodo };
+const WAIT_ICON: Record<Wait["kind"], typeof Hourglass> = { reply: MessageSquare, check: SquareTerminal, time: AlarmClock, session: Bot, user: Hand, task: ListTodo };
 
 /**
  * 在等: everything every live task waits on, in one place — a colleague's reply, a time to look again, an MR to merge,
@@ -307,6 +307,11 @@ function WaitsButton({ tasks, onTask, onSession }: { tasks: Task[]; onTask: (id:
                     <p className={clsx("line-clamp-2 text-[13px]", w.user && "text-warn")}>{w.what}</p>
                     {w.wake && <p className="line-clamp-2 text-[12px] text-muted-foreground">{w.wake}</p>}
                     {w.woke && <p className="text-[11px] text-muted-foreground">上次叫醒：{w.woke.how} · {ago(w.woke.at)}</p>}
+                    {w.check?.last && (
+                      <p className="line-clamp-2 font-mono text-[11px] text-muted-foreground">
+                        {ago(w.check.last.at)}查：{w.check.last.out || `exit ${w.check.last.code}`}
+                      </p>
+                    )}
                   </button>
                 </li>
               );
@@ -614,7 +619,7 @@ function liveTone(t: Task) {
 
 /** What its worker waits on outside (wait_for): a reply, a time to look again. */
 function outside(t: Task) {
-  return (t.waits ?? []).filter((w) => w.kind === "reply" || w.kind === "time");
+  return (t.waits ?? []).filter((w) => w.kind === "reply" || w.kind === "check" || w.kind === "time");
 }
 
 function liveText(t: Task) {

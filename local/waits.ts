@@ -3,14 +3,18 @@
 // t29 on 2026-11-04 told the board it waited for a colleague to press Retry, stopped, and nothing ever woke it: the
 // colleague's DM reply and the job finishing reached nobody, and the user had to ask "are you waiting?".
 //
-// wait_for makes the waiting real:
-// - conversation: the task follows it (threads, like its origin's), so the reply goes to the worker as a follow-up
-//   (_main.ts followUp). Gerdr only runs this panel for events a trigger names, and the user may never have turned the
-//   source on in 触发器 — so a trigger of its own (user/triggers/follow-*.json → onFollowed) brings that one
-//   conversation in, and goes when no live task follows it any more (tick).
-// - recheck: in that many minutes the worker is told to look again (tick, every minute: schedules/waits.json).
-// Meanwhile the card stays in 进行中 showing what it waits on; the worker running again (woken, or the user writing to
-// it) ends the wait — it calls wait_for again if it still waits.
+// wait_for makes the waiting real. Whichever of its conditions comes first wakes the worker (_wake.ts):
+// - conversation: the task follows it (threads, like its origin's), so news there — a person's reply, an MR's review /
+//   pipeline / merge — goes to the worker as a follow-up (_main.ts followUp). Gerdr only runs this panel for events a
+//   trigger names, and the user may never have turned the source on in 触发器 — so a trigger of its own
+//   (user/triggers/follow-*.json → onFollowed) brings that one conversation in, and goes when no live task follows it.
+// - check: a command the worker wrote that says whether it has happened (a publish approved, a job done), run here every
+//   few minutes (tick → runChecks): exit 0 wakes it with the output. Watching a state is no fixed event: each wait has
+//   its own, so the worker writes it (2026-11-04: waiting on a colleague to approve a publish, only his DM reply would
+//   have woken it — not the approval itself).
+// - recheck: woken anyway after that many minutes.
+// Meanwhile the card stays in 进行中 showing what it waits on and the latest check; the worker running again (woken, or
+// the user writing to it) ends the wait — it calls wait_for again if it still waits.
 
 import { load, note, update, type Task } from "./_store";
 import { isOutside, mrConversation, open, waitOn, wakeText, type Wait } from "./_waits";
@@ -28,15 +32,28 @@ export const tools = {
   wait_for: {
     description:
       "End your turn waiting on someone or something outside, instead of only saying you'll wait (once your turn ends nothing wakes you otherwise). " +
-      "conversation: where the answer will come — the Slack channel / DM id you wrote to (D09…, C0…), a Slack message link, or an MR URL; their reply there is sent to you. " +
-      "recheck: minutes until you're told to look again yourself (a job, a deploy, anything nobody will write about). Give one or both. " +
+      "Give what wakes you — any of these, whichever comes first wakes you: " +
+      "conversation: where a person will answer — the Slack channel / DM id you wrote to (D09…, C0…), a Slack message link, or an MR URL (its reviews, pipelines, merge come too); " +
+      "check: a command that tells whether what you wait for has happened (a publish approved, a job finished, a page live) — the board runs it every `every` minutes, exit 0 = it has (you're woken with its output), any other exit = not yet; print one line saying where things stand, it shows on your card; " +
+      "recheck: minutes after which you're woken anyway, as a backstop. " +
+      "Waiting on a person to do something you can see (approve, merge, deploy)? Give both the conversation and a check. " +
       "Your card stays in progress meanwhile, showing `what`. Then end your turn; when woken and still waiting, call it again. When to use: the my-workflow skill, references/board.md.",
     input: {
       type: "object",
       properties: {
-        what: { type: "string", description: "What you wait for, for the card: 石石 点 Retry 重跑 deploy_console_tag" },
-        conversation: { type: "string", description: "Where the answer comes: a Slack channel / DM id, a Slack message link, or an MR URL" },
-        recheck: { type: "number", description: "Minutes until you're woken to check yourself (1 – 1440)" },
+        what: { type: "string", description: "What you wait for, for the card: 程志鹏审批香港生产发布单 publish-03d1…" },
+        conversation: { type: "string", description: "Where a person will answer: a Slack channel / DM id, a Slack message link, or an MR URL" },
+        check: {
+          type: "object",
+          description: "A command run on a timer: exit 0 when what you wait for has happened, else non-zero; print one line of where it stands",
+          properties: {
+            command: { type: "string", description: "Run with sh -c; 60 s at most per run. Use tools you already used (glab, lb-cli, curl…)" },
+            every: { type: "number", description: "Minutes between runs (1 – 60, default 2)" },
+            cwd: { type: "string", description: "Absolute directory to run it in (default: the task's repository)" },
+          },
+          required: ["command"],
+        },
+        recheck: { type: "number", description: "Minutes until you're woken anyway (1 – 1440)" },
       },
       required: ["what"],
     },
@@ -69,19 +86,28 @@ function resolve(ctx: Ctx, conv: string): { source: string; key: string; where: 
   );
 }
 
-export function wait_for(input: { what: string; conversation?: string; recheck?: number }, ctx: Ctx) {
+export function wait_for(
+  input: { what: string; conversation?: string; check?: { command: string; every?: number; cwd?: string }; recheck?: number },
+  ctx: Ctx,
+) {
   const what = (input?.what ?? "").trim();
   if (!what) throw new Error("what 写清在等什么");
   const recheck = input.recheck == null ? undefined : Number(input.recheck);
   if (recheck != null && !(recheck >= 1 && recheck <= 1440)) throw new Error("recheck 是 1 到 1440 分钟");
-  if (!input.conversation?.trim() && recheck == null) throw new Error("conversation 和 recheck 至少给一个：不然没有什么会叫醒你");
+  const cmd = input.check?.command?.trim();
+  if (input.check && !cmd) throw new Error("check 要给 command");
+  const every = input.check?.every == null ? 2 : Number(input.check.every);
+  if (cmd && !(every >= 1 && every <= 60)) throw new Error("check.every 是 1 到 60 分钟");
+  if (!input.conversation?.trim() && !cmd && recheck == null) throw new Error("conversation、check、recheck 至少给一个：不然没有什么会叫醒你");
   const th = input.conversation?.trim() ? resolve(ctx, input.conversation) : undefined;
   const { t, ws } = update(ctx, (s) => {
     const t = mine(s, ctx);
     if (t.status !== "running") throw new Error(`${t.id} 现在不是进行中（${t.status}），不用等`);
+    const cwd = input.check?.cwd?.trim() || t.repo || "";
+    if (cmd && !cwd.startsWith("/")) throw new Error("check.cwd 要是绝对路径（任务没有仓库时必须给）");
     const now = Date.now();
-    const ws = waitOn(t, { what, conv: th, at: recheck != null ? now + recheck * 60_000 : undefined });
-    note(t, `等：${what}${th ? `（${th.where} 上的回复）` : ""}${recheck != null ? `，${recheck} 分钟后回来看` : ""}`);
+    const ws = waitOn(t, { what, conv: th, check: cmd ? { command: cmd, cwd, every } : undefined, at: recheck != null ? now + recheck * 60_000 : undefined });
+    note(t, `等：${what}${th ? `（${th.where} 上的回复）` : ""}${cmd ? `，每 ${every} 分钟检查：${cmd}` : ""}${recheck != null ? `，${recheck} 分钟后回来看` : ""}`);
     Object.assign(t, { viaTools: true, reportedAt: now, nudges: 0, updatedAt: now });
     return { t, ws };
   });
@@ -91,7 +117,7 @@ export function wait_for(input: { what: string; conversation?: string; recheck?:
     id: t.id,
     gerdrCard: waitCard(ctx, t, ws),
     note:
-      [th && `${th.where} 上来的回复会发给你`, recheck != null && `${recheck} 分钟后会叫你回来看`].filter(Boolean).join("；") +
+      [th && `${th.where} 上来的消息会发给你`, cmd && `检查命令每 ${every} 分钟跑一次（一分钟内先跑第一次），exit 0 时叫醒你`, recheck != null && `${recheck} 分钟后会叫你回来看`].filter(Boolean).join("；") +
       "。现在结束这一轮，不用再等。",
   };
 }
@@ -131,7 +157,8 @@ export function status(input: { id: string; waits?: string[]; since?: number; ki
   const on = ws.filter((w) => !w.end);
   if (on.length) {
     const woke = on.find((w) => w.woke)?.woke;
-    return { state: "waiting", body: on.map((w) => wakeText(w)).join("；"), woke };
+    const last = on.find((w) => w.check?.last)?.check?.last;
+    return { state: "waiting", body: on.map((w) => wakeText(w)).join("；"), woke, check: last };
   }
   const end = ws.map((w) => w.end).filter(Boolean).sort((a, b) => a!.at - b!.at)[0];
   if (end) return { state: "ended", how: end.how, at: end.at };
@@ -196,7 +223,10 @@ export async function onFollowed(input: { event: GerdrEvent }, ctx: Ctx) {
 
 // ---- every minute ----
 
-/** Wakes workers whose time to look again came (the one wake path: _wake.ts), and removes follow triggers no live task needs. */
+/**
+ * Every minute: wakes workers whose time to look again came, runs the due check commands (the one wake path: _wake.ts),
+ * and removes follow triggers no live task needs.
+ */
 export async function tick(input: unknown, ctx: Ctx) {
   const now = Date.now();
   const due = load(ctx)
@@ -216,8 +246,73 @@ export async function tick(input: unknown, ctx: Ctx) {
       ctx.log(`${t.id} 叫不醒：${err?.message ?? err}`);
     }
   }
+  woke.push(...(await runChecks(ctx)));
   const removed = sweepTriggers(ctx, load(ctx).store.tasks);
   return { woke, removed };
+}
+
+const OUT_MAX = 1500;
+
+/**
+ * Runs the check commands that are due (wait_for check). Exit 0: what it waits for happened — the worker is woken with
+ * the output. Other exits: not yet; the output's last line goes on the card. Three broken runs in a row (timeout,
+ * couldn't start): woken with the error, so a bad command doesn't sit there for ever.
+ */
+async function runChecks(ctx: Ctx): Promise<string[]> {
+  const now = Date.now();
+  const due = load(ctx)
+    .store.tasks.filter((t) => t.status === "running")
+    .flatMap((t) => open(t).filter((w) => w.kind === "check" && w.check && w.check.next <= now).map((w) => ({ t, w })));
+  const woke: string[] = [];
+  for (const { t, w } of due) {
+    const c = w.check!;
+    let code = -1;
+    let out = "";
+    let broke = "";
+    try {
+      // cwd can't leave the panel's directory (ctx.exec): the shell goes there itself
+      const r = await ctx.exec("sh", ["-c", 'cd "$1" && eval "$2"', "_", c.cwd, c.command], { timeout: 60_000 });
+      code = r.code;
+      out = `${r.stdout}${r.stderr ? `\n${r.stderr}` : ""}`.trim();
+    } catch (err: any) {
+      broke = String(err?.message ?? err);
+    }
+    const tail = (out || broke).slice(-OUT_MAX);
+    const fails = broke ? (c.fails ?? 0) + 1 : 0;
+    const last = { at: Date.now(), code, out: lastLine(tail) };
+    if (code === 0 || fails >= 3) {
+      const how = code === 0 ? `检查到了：${last.out || "exit 0"}` : `检查命令连着 3 次出错：${lastLine(broke)}`;
+      try {
+        await wake(ctx, t.id, {
+          how,
+          text:
+            code === 0
+              ? `[看板] 你等的「${w.what}」检查到了（任务 ${t.id}）。检查命令的输出：\n\n${tail || "（没有输出）"}\n\n照常接着做、用 task_update 汇报；还要等别的就再 wait_for。`
+              : `[看板] 你为「${w.what}」写的检查命令连着 3 次没跑成（任务 ${t.id}）：\n\n${tail}\n\n看看命令哪里不对，改好再 wait_for。`,
+          ends: isOutside,
+          also: (x) => {
+            const ww = (x.waits ?? []).find((y) => y.id === w.id);
+            if (ww?.check) ww.check.last = last;
+          },
+        });
+        woke.push(t.id);
+      } catch (err: any) {
+        ctx.log(`${t.id} 叫不醒：${err?.message ?? err}`);
+      }
+      continue;
+    }
+    update(ctx, (s) => {
+      const ww = (s.tasks.find((x) => x.id === t.id)?.waits ?? []).find((y) => y.id === w.id);
+      if (!ww?.check || ww.end) return;
+      Object.assign(ww.check, { last, fails, next: Date.now() + ww.check.every * 60_000 });
+    });
+  }
+  return woke;
+}
+
+function lastLine(s: string) {
+  const line = s.trim().split("\n").filter((x) => x.trim()).pop() ?? "";
+  return [...line].length > 200 ? [...line].slice(0, 200).join("") + "…" : line;
 }
 
 function sweepTriggers(ctx: Ctx, tasks: Task[]) {

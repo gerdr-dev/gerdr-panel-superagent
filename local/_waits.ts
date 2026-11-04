@@ -20,7 +20,7 @@
 
 import type { Store, Task } from "./_store";
 
-export type WaitKind = "reply" | "time" | "session" | "user" | "task";
+export type WaitKind = "reply" | "check" | "time" | "session" | "user" | "task";
 
 export type Wait = {
   id: string;
@@ -36,6 +36,12 @@ export type Wait = {
   where?: string;
   /** time: when it's woken to look again. */
   at?: number;
+  /**
+   * check: a command the worker wrote to tell whether what it waits for has happened (a publish approved, a job done),
+   * run by the board every `every` minutes in `cwd`: exit 0 = it has → the worker is woken with its output; any other
+   * exit = not yet. last: the latest run, shown on the card. fails: runs in a row that broke (timeout, couldn't start).
+   */
+  check?: { command: string; cwd: string; every: number; next: number; last?: { at: number; code: number; out: string }; fails?: number };
   /** session: the session it handed work to. */
   session?: string;
   /** user / task: the board item it's blocked by (the user's step, or another task); a user wait without one is a
@@ -97,9 +103,9 @@ export function endQuestions(t: Task, how: string) {
   return endWaits(t, (w) => w.kind === "user" && !w.item, how);
 }
 
-/** The worker's own waits on outside (wait_for): a reply, a time. */
+/** The worker's own waits on outside (wait_for): news in a conversation, a check it wrote, a time. */
 export function isOutside(w: Wait) {
-  return w.kind === "reply" || w.kind === "time";
+  return w.kind === "reply" || w.kind === "check" || w.kind === "time";
 }
 
 /** The task follows a conversation from now on (threads): what comes in it goes to its worker (_main.ts subscribers). */
@@ -112,7 +118,10 @@ export function follow(t: Task, on: { source: string; key: string }) {
  * The worker waits on outside (wait_for): news in a conversation (the task follows it from now on) and / or a time.
  * Replaces what it waited on outside before: this says what it waits on now. Returns the new waits.
  */
-export function waitOn(t: Task, w: { what: string; conv?: { source: string; key: string; where?: string; url?: string }; at?: number }): Wait[] {
+export function waitOn(
+  t: Task,
+  w: { what: string; conv?: { source: string; key: string; where?: string; url?: string }; check?: { command: string; cwd: string; every: number }; at?: number },
+): Wait[] {
   const now = Date.now();
   endWaits(t, isOutside, "换成了新的等待");
   const out: Wait[] = [];
@@ -120,6 +129,7 @@ export function waitOn(t: Task, w: { what: string; conv?: { source: string; key:
     follow(t, w.conv);
     out.push(addWait(t, { kind: "reply", what: w.what, since: now, on: { source: w.conv.source, key: w.conv.key }, where: w.conv.where, url: w.conv.url }));
   }
+  if (w.check) out.push(addWait(t, { kind: "check", what: w.what, since: now, check: { ...w.check, next: now } }));
   if (w.at) out.push(addWait(t, { kind: "time", what: w.what, since: now, at: w.at }));
   return out;
 }
@@ -133,6 +143,10 @@ export function mrConversation(url: string): { source: string; key: string; wher
 // ---- kept in step with what they mirror ----
 
 const hhmm = (ms: number) => new Date(ms).toTimeString().slice(0, 5);
+const short = (cmd: string) => {
+  const one = cmd.replace(/\s+/g, " ").trim();
+  return [...one].length > 60 ? [...one].slice(0, 60).join("") + "…" : one;
+};
 
 /**
  * Brings the mirrored waits in step, on every write (_store.ts update): the board items it's blocked by; a finished
@@ -191,6 +205,8 @@ export function wakeText(w: Wait): string {
   switch (w.kind) {
     case "reply":
       return `${w.where ?? (w.on ? `${w.on.source} ${w.on.key}` : "那个对话")} 上有新消息 / 新动静就叫醒它`;
+    case "check":
+      return `每 ${w.check?.every ?? 1} 分钟跑一次它写的检查（${short(w.check?.command ?? "")}），等到了就叫醒它`;
     case "time":
       // The worker picked the interval (wait_for recheck): say it, not only the clock time it comes to
       return w.at ? `${Math.round((w.at - w.since) / 60000)} 分钟后（${hhmm(w.at)}）叫醒它回来看` : "到点叫醒它";

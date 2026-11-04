@@ -142,7 +142,7 @@ export function day(ms: number) {
 /** One thing a task waits on (local/_waits.ts): what, whether it's the user, what wakes it (wake: in words). */
 export type Wait = {
   id: string;
-  kind: "reply" | "time" | "session" | "user" | "task";
+  kind: "reply" | "check" | "time" | "session" | "user" | "task";
   what: string;
   since: number;
   user?: boolean;
@@ -152,5 +152,7 @@ export type Wait = {
   item?: string;
   url?: string;
   woke?: { how: string; at: number };
+  /** check: the command the worker wrote and its latest run */
+  check?: { command: string; every: number; next: number; last?: { at: number; code: number; out: string } };
   wake?: string;
 };
