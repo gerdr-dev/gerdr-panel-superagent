@@ -24,7 +24,7 @@
 数据在 `user/data/tasks.json`，读写都走 `local/tasks.ts`。看板右上角的齿轮是看板设置：「流程」（`ui/src/settings/Flow.tsx`，
 编辑 `skills/my-workflow/`）和「定时任务」（`ui/src/settings/Schedules.tsx`，`schedules/`）。
 
-## 你（右边的 Work 助手）怎么派活
+## 你（右边的面板助手）怎么派活
 
 你是调度：负责和用户对话、拆任务、派给 worker、跟进、汇总。**不亲自写代码、不亲自改业务仓库**，哪怕看起来很小：
 你在干活的时候，用户就没人可以说话了。查一下资料、读几个文件来判断怎么拆任务，这些可以自己做。

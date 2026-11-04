@@ -11,7 +11,7 @@
 - **看板是主界面，对话是附属。** 任何「要用户知道 / 要用户做」的东西，都得出现在看板上；只出现在对话里等于没说。
 - **不催人。** 用户可能几天后才处理一件事。除非真的有人在等（他正在对话里），否则不挂起会话、不亮红点。
 - **这套面板要给别人也能用。** 代码只放机制；用户本人的习惯（怎么交付、MR 怎么合、要不要自动合并、多久盯一次）
-  写在 `skills/` 和 `schedules/` 里，用他自己的话。见 Gerdr 内置 AGENTS.md 的「Adding to this Work」。
+  写在 `skills/` 和 `schedules/` 里，用他自己的话。见 Gerdr 内置 AGENTS.md 的「Adding to this panel」。
 
 ## 概念
 
@@ -39,7 +39,7 @@
 
 ## worker 怎么汇报：工具，不是文字
 
-worker 拿到一组 Work 工具（`local/board.ts`，经 Gerdr 的 `gerdr work mcp` 以 MCP 提供）：
+worker 拿到一组 面板工具（`local/board.ts`，经 Gerdr 的 `gerdr work mcp` 以 MCP 提供）：
 
 | 工具 | 用途 |
 |---|---|
@@ -107,7 +107,7 @@ worker 拿到一组 Work 工具（`local/board.ts`，经 Gerdr 的 `gerdr work m
 
 - **用户只写「要做什么」**：不用填标题（取第一行），也不用选仓库。可以带图片、文件（上传后作为附件带给 worker）。
 - **没选仓库的，交给 Superagent 的调度会话**（下面「Superagent」）：一直开着，只分派。
-  - **被否掉的做法：发给右边的 Work 助手。** 每派一个就把助手的对话撑长一轮，而用户根本不看；助手陪用户说话时也派不了。
+  - **被否掉的做法：发给右边的面板助手。** 每派一个就把助手的对话撑长一轮，而用户根本不看；助手陪用户说话时也派不了。
   - **被否掉的做法：每个任务开一个一次性的派活对话**（标题「派活：tN」，派完关掉）。每次都要开会话、重读同样的规则；
     外面的消息来了也没有一个「谁来判断」的地方。旧任务的 `router` 还指向那些对话（`routerClosed`），链路照样能看。
 - **派活要快**：调度会话要的东西全写在它的第一条消息里（仓库列表和用户挑仓库的说法、每个 agent / 角色是干什么的、
@@ -195,7 +195,7 @@ agent 复盘也要整条链。所以：
 - **派完不丢**：`router` 留在任务上（调度会话，或旧任务的一次性派活对话，`routerClosed` 标记已关）。
   调度会话派过所有任务，所以它在一个任务的链路里只挂这个任务自己的 worker。
   **被否掉的做法：关掉时把 `router` 清掉。** 派完就再也找不到它当时为什么这么派。拆出来的子任务继承同一个 `router`。
-- **在任务的抽屉里看，不在右边**：右边是 Work 助手，派活的决定属于任务。抽屉顶上「链路」：来源、上一级（谁派的这个任务）、
+- **在任务的抽屉里看，不在右边**：右边是面板助手，派活的决定属于任务。抽屉顶上「链路」：来源、上一级（谁派的这个任务）、
   拆自、整棵会话树、拆出；点哪个，抽屉就换成哪个对话。还在派活的任务，点卡片直接打开调度会话，能实时纠正。
 - **看完就能调**：在调度会话里有「改『流程』里的派活规则」，直接去改仓库、模型规则。
 - **给 agent 复盘**：`tasks.trace`（任务这一级的链）和 `tasks.tree`（整棵会话树），再用 `gerdr session read` 读每个对话。
@@ -208,8 +208,8 @@ agent 复盘也要整条链。所以：
 **正文写内容，按钮只写动作**：等你先做的几件事，每件一行（tN 待决定：……），点一下跳到对话里那张卡片。
 曾经把标题塞进按钮里，用户不要。
 - **被否掉的做法：在看板面板里复制 worker 的回复。** 只能看到最后一条、纯文本、不能发图片，用户要往前翻才能做决定。
-- **被否掉的做法：让 Gerdr 在页面上面替看板画抽屉**（`showSession`）。那时 Work 页面是个 iframe，用不了 Gerdr 的聊天，
-  看板想在抽屉里多放一样东西，就得改一次 Gerdr。现在 Work 页面直接挂在 Gerdr 的页面里，聊天是一个组件，抽屉是看板自己的。
+- **被否掉的做法：让 Gerdr 在页面上面替看板画抽屉**（`showSession`）。那时面板页面是个 iframe，用不了 Gerdr 的聊天，
+  看板想在抽屉里多放一样东西，就得改一次 Gerdr。现在面板页面直接挂在 Gerdr 的页面里，聊天是一个组件，抽屉是看板自己的。
 
 - **消息一律立即发送**：抽屉里的输入框（`SessionChat` 的 `sendNow`）和看板函数发给 worker 的消息（`ctx.sessions.send` 的
   `now`）都是「立即发送」：worker 在跑长命令时，命令转到后台，它马上读到新消息，不用等这一步做完。
@@ -244,11 +244,11 @@ agent 复盘也要整条链。所以：
 | `local/_store.ts` | 任务数据和读写（带 etag 重试） |
 | `local/_user.ts` | `user/`：个人副本优先的读法、旧 `data/` 的一次性迁移 |
 | `local/_apply.ts` | worker 汇报怎么落到任务上（工具和旧文字块共用） |
-| `local/tasks.ts` | 看板和 Work 助手调用的函数：list / add / start / accept / complete / deliver / redo / drop… |
+| `local/tasks.ts` | 看板和 面板助手调用的函数：list / add / start / accept / complete / deliver / redo / drop… |
 | `local/_main.ts` | Superagent 的核心：调度会话、订阅、交回、没判断成、事件的去向记录（`user/data/superagent.json`） |
 | `local/superagent.ts` | 调度会话的 `decide`，「去向」的 `log` / `retry` |
 | `local/inbox.ts` | 触发器的设置和 `onEvent`（准入 → 订阅 → 评估） |
-| `local/board.ts` | 给 worker 的 Work 工具 |
+| `local/board.ts` | 给 worker 的 面板工具 |
 | `local/mrwatch.ts` | 盯 MR |
 | `local/_config.ts`、`local/_vars.ts` | 从 skill 里的 `{{变量}}` 读出代码要用的值 |
 | `local/playbooks.ts`、`local/schedules.ts` | 「流程」「定时任务」的读写 |

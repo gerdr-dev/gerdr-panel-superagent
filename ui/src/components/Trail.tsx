@@ -5,7 +5,7 @@ import { run } from "../lib/gerdr";
 
 // 链路: where a task came from and every conversation behind it, as a tree of any depth — the event, who handed
 // it out, the router, its workers and whatever sessions they started in turn (Gerdr records each session's parent;
-// local/tasks.ts tree). In the task's drawer, not the Work agent's side: it belongs to the task. Picking a
+// local/tasks.ts tree). In the task's drawer, not the panel's agent's side: it belongs to the task. Picking a
 // conversation shows it in the same drawer; in the router's, a way to the rules it went by (流程), to tune them.
 
 type Node = { id: string; title: string; agent: string; status: string; role: "router" | "worker" | "helper"; children: Node[] };

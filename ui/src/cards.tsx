@@ -3,7 +3,7 @@ import { Check, Undo2 } from "lucide-react";
 import { DefaultCard, registerCard, type CardProps } from "@gerdr/core";
 import { run } from "./lib/gerdr";
 
-// Cards the board's Work tools put in a worker's chat (local/board.ts). Gerdr loads this file at start, so they're drawn
+// Cards the board's panel tools put in a worker's chat (local/board.ts). Gerdr loads this file at start, so they're drawn
 // this way wherever the chat is shown: the board's drawer, or the worker's tab in Code.
 
 type Step = { status: string; handedBack?: string; title?: string };

@@ -5,7 +5,7 @@ import { Button } from "../components/Button";
 import { project, run } from "../lib/gerdr";
 import { since } from "../lib/tasks";
 
-// 定时任务: schedules/<id>.json, what this Work does by itself on time (Gerdr runs them with the App closed too).
+// 定时任务: schedules/<id>.json, what this panel does by itself on time (Gerdr runs them with the App closed too).
 // The list and its runs come from Gerdr's /api/work/schedules; changing when one runs rewrites its file
 // (local/schedules.ts). Run now / pause / resume are Gerdr's, and this machine's only.
 
@@ -46,7 +46,7 @@ export default function SchedulesPage() {
       <header>
         <h1 className="text-[22px] font-semibold tracking-tight">定时任务</h1>
         <p className="mt-1 text-[13px] text-muted-foreground">
-          这个 Work 到点自己做的事（<span className="font-mono">schedules/</span>）。Gerdr 后台开着就会跑，App 关着也一样；错过的只补跑一次。
+          这个面板到点自己做的事（<span className="font-mono">schedules/</span>）。Gerdr 后台开着就会跑，App 关着也一样；错过的只补跑一次。
         </p>
       </header>
       {err && <p role="alert" className="text-[13px] text-bad">{err}</p>}

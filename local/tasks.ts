@@ -8,19 +8,19 @@ export type { Task };
 
 // Task board data: data/tasks.json (read and written through _store.ts). Agent tasks are handed to coding-agent sessions (workers); human tasks are
 // things only the user can do (UI clicks, accounts, approvals). Everything here is deterministic: the page, the
-// Work agent (`gerdr work run tasks.<fn> '<json>'`) and worker replies all go through these functions.
+// panel agent (`gerdr work run tasks.<fn> '<json>'`) and worker replies all go through these functions.
 //
-// Workers report through the board's Work tools (board.ts: task_update, ask_human, cancel_human), which Gerdr gives
+// Workers report through the board's panel tools (board.ts: task_update, ask_human, cancel_human), which Gerdr gives
 // them over MCP. Older workers ended replies with a ```gerdr-task``` JSON block instead; `list` still reads those.
 
 // What a worker is told besides its task: short, since it shows in the chat as part of the first message. How to
-// use each tool is in the tools' own descriptions (board.ts), the user's way of working in the Work's skills.
+// use each tool is in the tools' own descriptions (board.ts), the user's way of working in the panel's skills.
 // Old sessions may still end replies with a ```gerdr-task``` block: list() keeps reading those.
 export const WORKER_PROTOCOL = `
 
 ---
-This is task {id} on the user's Work board. They follow it there, not in this chat: report through the "work" tools
-(task_update, ask_human, cancel_human), and follow the skills from this Work for how they like things done. When you
+This is task {id} on the user's Superagent board. They follow it there, not in this chat: report through the "work" tools
+(task_update, ask_human, cancel_human), and follow the skills from this panel for how they like things done. When you
 need the user to decide something, put it on the board with ask_human and its options, then end your turn: they may
 answer days later. Your own ask-question tool only while they're talking with you here.
 `;
@@ -40,7 +40,7 @@ function lastBlock(reply: string): any {
 }
 
 
-// ---- called by the page and the Work agent ----
+// ---- called by the page and the panel's agent ----
 
 /**
  * Every task with its worker's live state, after applying worker replies not seen yet.
@@ -122,7 +122,7 @@ export async function add(input: Partial<Task> & { title?: string; start?: boole
   const title = (input?.title || firstLine(input?.prompt) || firstLine(input?.steps) || (input?.attachments?.length ? `看附件：${input.attachments[0].name}` : "")).trim();
   if (!title) throw new Error("任务要写清楚做什么");
   const { start: go, ...rest } = input;
-  // @-mentions in the text (the board's input box, the Work agent writing "@design …"): who the router hands it to.
+  // @-mentions in the text (the board's input box, the panel's agent writing "@design …"): who the router hands it to.
   // One mention and no agent given is simply the agent.
   if (rest.owner !== "human" && !rest.mentions && rest.prompt?.includes("@")) {
     const m = mentionsIn(rest.prompt, await allAgents(ctx));
@@ -146,7 +146,7 @@ export function edit(input: Partial<Task> & { id: string }, ctx: Ctx) {
 
 /**
  * Hands an agent task to a new worker session: in its repository (or a git worktree of it), told the task and the
- * reply protocol, reporting to the Work agent. { id, prompt?, repo?, agent?, model?, effort?, worktree?, mode? }
+ * reply protocol, reporting to the panel's agent. { id, prompt?, repo?, agent?, model?, effort?, worktree?, mode? }
  * Agent / model / effort not given: the task's, else the user's worker defaults (skills/…/models.md), else Gerdr's.
  */
 export async function start(
@@ -160,8 +160,8 @@ export async function start(
   let repo = (input.repo ?? t.repo ?? "").trim();
   if (!prompt && !t.attachments?.length) throw new Error(`${t.id} 还没写要 agent 做什么（prompt）`);
   if (!repo) {
-    // The user doesn't pick repositories: the Work agent knows the projects and decides. A second start without a repo
-    // (the Work agent itself forgetting it) is an error instead of another round trip.
+    // The user doesn't pick repositories: the panel's agent knows the projects and decides. A second start without a repo
+    // (the panel's agent itself forgetting it) is an error instead of another round trip.
     if (t.routing) throw new Error(`${t.id} 要给 repo（仓库绝对路径）：tasks.start {"id":"${t.id}","repo":"…"}`);
     return route(t.id, prompt, ctx);
   }
@@ -188,8 +188,8 @@ export async function start(
     tags: { task: t.id },
     // Followed on the board (its drawer shows the chat), not in Code: no tab of it appears there
     workspace: "none",
-    // No reportTo: the user follows the board, not the Work agent, and the worker updates the board itself (Work
-    // tools). A report would only have the Work agent repeat the worker's reply to nobody, a turn each time.
+    // No reportTo: the user follows the board, not the panel's agent, and the worker updates the board itself (panel
+    // tools). A report would only have the panel's agent repeat the worker's reply to nobody, a turn each time.
   });
   return update(ctx, (s) => {
     const x = find(s, t.id);
@@ -306,7 +306,7 @@ export async function complete(input: { id: string; value?: string }, ctx: Ctx) 
     for (const t of wake) await tell(ctx, t, `你问的「${h.title}」（${h.id}），用户的决定：${h.handedBack}\n照这个接着做。`);
     return { task: h, woke: wake.map((t) => t.id) };
   }
-  if (h.handBack?.kind === "secret") back = `\n密钥已存为 Work secret「${h.handBack.name}」（只有 Work 的本地函数能读，你看不到值）。`;
+  if (h.handBack?.kind === "secret") back = `\n密钥已存为面板密钥「${h.handBack.name}」（只有面板的本地函数能读，你看不到值）。`;
   for (const t of wake) await tell(ctx, t, `人工任务「${h.title}」（${h.id}）用户做完了。${back}\n先按你说的方式核验${h.verify ? `（${h.verify}）` : ""}，没问题再继续；核验不过就用 ask_human 再登记一个，说明哪里不对。`);
   return { task: h, woke: wake.map((t) => t.id) };
 }
@@ -329,7 +329,7 @@ export async function redo(input: { id: string }, ctx: Ctx) {
   return { asked: t.id };
 }
 
-/** Sends a task's worker a message (it wakes if parked): { id, text }. For the user or the Work agent steering it. */
+/** Sends a task's worker a message (it wakes if parked): { id, text }. For the user or the panel's agent steering it. */
 export async function say(input: { id: string; text: string }, ctx: Ctx) {
   if (!input.text?.trim()) throw new Error("消息是空的");
   const t = find(load(ctx).store, input.id);
@@ -425,7 +425,7 @@ type TreeNode = { id: string; title: string; agent: string; status: string; role
 /**
  * The conversations behind a task as a tree, any number of levels deep: its router and workers, and every session
  * they started (Gerdr records each session's parent), down to helpers of helpers. `up`: who handed out the task
- * itself (the chain above its router: the Work agent that called tasks.add, …). For the drawer's 链路.
+ * itself (the chain above its router: the panel's agent that called tasks.add, …). For the drawer's 链路.
  */
 export function tree(input: { id: string }, ctx: Ctx) {
   const { store } = load(ctx);

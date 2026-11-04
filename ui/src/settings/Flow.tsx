@@ -6,8 +6,8 @@ import { askSecret, secretNames } from "../lib/bridge";
 import { run } from "../lib/gerdr";
 import { format, joinList, parse, setValue, specFor, splitList, TYPES, type Var, type VarType } from "../lib/vars";
 
-// 流程: the user's skills (skills/<name>/SKILL.md + references/). Prose in their own words, which Gerdr gives the Work
-// agent and every session the Work starts as a skill (they read what they need), with {{name: value ; type}}
+// 流程: the user's skills (skills/<name>/SKILL.md + references/). Prose in their own words, which Gerdr gives the panel
+// agent and every session the panel starts as a skill (they read what they need), with {{name: value ; type}}
 // variables where the code needs a value (lib/vars.ts). The text area highlights the variables; the panel beside it
 // gives each one a control of its type, and inserts new ones. Saved as plain text: editing the file by hand works too.
 // Saved as this person's copy (user/skills/, never shared): the panel's own file stays the default, 恢复默认 brings it
@@ -375,7 +375,7 @@ function PathPick({ value, files, onChange }: { value: string; files: boolean; o
   );
 }
 
-/** A Work secret by name; the value is typed into Gerdr's own dialog and never seen here. */
+/** A panel secret by name; the value is typed into Gerdr's own dialog and never seen here. */
 function SecretPick({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [names, setNames] = useState<string[]>([]);
   const reload = () => secretNames().then(setNames, () => {});

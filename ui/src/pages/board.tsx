@@ -903,7 +903,7 @@ function NewTask({ onClose, act }: { onClose: () => void; act: Act }) {
               <select className={input} value={f.kind} onChange={set("kind")}>
                 <option value="none">不用交回，点完成就行</option>
                 <option value="value">一个值（账号名、id…）</option>
-                <option value="secret">一个密钥（存成 Work secret）</option>
+                <option value="secret">一个密钥（存成面板密钥）</option>
               </select>
               {f.kind !== "none" && (
                 <>

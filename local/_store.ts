@@ -1,4 +1,4 @@
-// The task board's data (user/data/tasks.json: this person's, never shared — _user.ts), shared by tasks.ts (the board, the Work agent) and the watchers
+// The task board's data (user/data/tasks.json: this person's, never shared — _user.ts), shared by tasks.ts (the board, the panel's agent) and the watchers
 // (mrwatch.ts). A helper file (leading _): nothing here is callable from a page.
 
 import { DATA, migrate } from "./_user";
@@ -21,7 +21,7 @@ export type Task = {
   status: "todo" | "running" | "review" | "delivering" | "done" | "dropped";
   /** While delivering: what it waits on and what the watcher (mrwatch.ts) last saw. */
   delivery?: Delivery;
-  /** When it was handed to the Work agent to pick the repository / agent (the user dispatched it without one). */
+  /** When it was handed to the panel's agent to pick the repository / agent (the user dispatched it without one). */
   routing?: number;
   /**
    * The conversation that dispatched it: the Superagent's main session (_main.ts; a part split off shares its
@@ -61,7 +61,7 @@ export type Task = {
   sessions?: string[];
   /** Tasks that must be done first (a human task blocking an agent task, or the other way round). */
   blockedBy?: string[];
-  /** A question the worker / Work agent wants the user to decide. */
+  /** A question the worker / panel agent wants the user to decide. */
   question?: string;
   /** The latest result in a line or a paragraph, and where to look (MR, doc). */
   summary?: string;
@@ -77,7 +77,7 @@ export type Task = {
   expiresAt?: number;
   /** Human task: the agent task that asked for it (its worker made it), so a newer ask from that worker replaces it. */
   askedBy?: string;
-  /** Its worker reports through the Work tools (board.ts): no ```gerdr-task``` block to expect at the end of a turn. */
+  /** Its worker reports through the panel tools (board.ts): no ```gerdr-task``` block to expect at the end of a turn. */
   viaTools?: boolean;
   /** Feedback history (rejections, answers), newest last. */
   notes?: { at: number; text: string }[];

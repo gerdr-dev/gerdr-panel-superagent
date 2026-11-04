@@ -1,12 +1,12 @@
-// The bridge between this Work project and gerdr around it.
+// The bridge between this panel and gerdr around it.
 //
 // - run(fn, input, options): stream a local function's result, progress and logs.
 //   Commands, files and platform access live in local/, while the page draws.
-// - ask(text): hand a task to the Work agent on the right of the page (gerdr sends it as a message;
+// - ask(text): hand a task to the panel's agent on the right of the page (gerdr sends it as a message;
 //   it queues if the agent is busy); resolves with the conversation's id. openChat(id) shows that conversation.
 // - The page follows gerdr's light / dark theme by itself (see the listener at the bottom).
 
-/** The project this Work site belongs to: it's served at /work/<project>/. */
+/** The panel this site is: it's served at /work/<project>/. */
 export const project = decodeURIComponent(location.pathname.split("/")[2] || "default");
 
 export type RunOptions = {
@@ -108,7 +108,7 @@ export function ask(text: string): Promise<string> {
   });
 }
 
-/** Shows a Work agent conversation (e.g. the one ask() returned): opens it on the right, and on a phone switches to the 助手 tab. */
+/** Shows a panel agent conversation (e.g. the one ask() returned): opens it on the right, and on a phone switches to the 助手 tab. */
 export function openChat(session: string) {
   window.parent.postMessage({ type: "gerdr:openChat", session }, location.origin);
 }

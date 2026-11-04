@@ -1,4 +1,4 @@
-// The board's Work tools: what a worker (a session the board started) calls to report on and change its task, from
+// The board's panel tools: what a worker (a session the board started) calls to report on and change its task, from
 // inside a turn. Gerdr serves them to the worker over MCP; ctx.caller.session says which conversation called, so the
 // task is looked up, never taken from the input. Same rules as the old ```gerdr-task``` block (_apply.ts), plus what a
 // block couldn't do: take back a human step the user no longer needs to do, and answer with ids.
@@ -19,7 +19,7 @@ const STEP = {
     steps: { type: "string", description: "Numbered steps the user can follow without reading your chat: direct links, codes, values to paste" },
     handBack: {
       type: "object",
-      description: "What the user gives back when done. kind none (just mark done) / value (a non-secret value) / secret (stored as a Work secret named name, never shown to anyone)",
+      description: "What the user gives back when done. kind none (just mark done) / value (a non-secret value) / secret (stored as a panel secret named name, never shown to anyone)",
       properties: { kind: { type: "string", enum: ["none", "value", "secret"] }, label: { type: "string" }, name: { type: "string" } },
     },
     verify: { type: "string", description: "How you will check it once the user says it's done" },

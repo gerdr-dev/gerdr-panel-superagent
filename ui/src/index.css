@@ -1,4 +1,4 @@
-/* Theme: the same tokens as gerdr's own UI, so the Work pages look like part of gerdr in light and dark. */
+/* Theme: the same tokens as gerdr's own UI, so the panel's pages look like part of gerdr in light and dark. */
 @custom-variant dark (&:is(.dark *));
 
 /* tw-animate: what shadcn/ui's animate-in / slide-in-from-right / data-[state=closed]:animate-out compile to. The panel

@@ -6,7 +6,7 @@ export function openSession(session: string) {
   window.parent.postMessage({ type: "gerdr:openSession", session }, location.origin);
 }
 
-/** jump: Gerdr scrolls the chat to the card with that ref (a Work tool's gerdrCard) instead of telling the page. */
+/** jump: Gerdr scrolls the chat to the card with that ref (a panel tool's gerdrCard) instead of telling the page. */
 export type SessionAction = { id: string; label: string; kind?: "primary" | "danger"; confirm?: string; jump?: string };
 
 /**

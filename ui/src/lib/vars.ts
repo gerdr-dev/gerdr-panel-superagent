@@ -11,7 +11,7 @@
 //   {{时间: 09:00, 16:00 ; time}}                 times of day, comma separated
 //   {{仓库: ~/dev/api ; dir}}  {{模板: ~/x.md ; file}}
 //   {{直推仓库: craft/a, craft/b ; list}}         several free values
-//   {{令牌: GITLAB_TOKEN ; secret}}               the name of a Work secret, never its value
+//   {{令牌: GITLAB_TOKEN ; secret}}               the name of a panel secret, never its value
 //   {{worker: codex ; agent}}                     an agent / role id
 //
 // Rendering for an agent replaces each {{…}} with its value. A value may not contain `;` or `}}`. Written inside
@@ -42,7 +42,7 @@ export const TYPES: { type: VarType; label: string; hint: string }[] = [
   { type: "dir", label: "目录", hint: "一个文件夹" },
   { type: "file", label: "文件", hint: "一个文件" },
   { type: "list", label: "列表", hint: "几个任意的值" },
-  { type: "secret", label: "密钥", hint: "Work 密钥的名字，值不进文字" },
+  { type: "secret", label: "密钥", hint: "面板密钥的名字，值不进文字" },
   { type: "agent", label: "Agent", hint: "Gerdr 里的 agent / 角色" },
 ];
 

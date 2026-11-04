@@ -1,5 +1,5 @@
 // A worker's report applied to its task: from a ```gerdr-task``` block at the end of a reply (older workers, tasks.ts
-// list) or from its Work tools (board.ts task_update / ask_human). One set of rules for both.
+// list) or from its panel tools (board.ts task_update / ask_human). One set of rules for both.
 
 import { newTask, note, type Store, type Task } from "./_store";
 
