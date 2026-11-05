@@ -40,7 +40,7 @@ export const tools = {
       "{type: time, minutes}: woken anyway after that long, as a backstop; " +
       "{type: teammate, who}: a member of your requirement (its task id, see my_task) tells you something — their tell wakes you. " +
       "Waiting on a person to do something you can see (approve, merge, deploy)? Give both a message and a check. " +
-      "Your card stays in progress meanwhile, showing `what`. Then end your turn; when woken and still waiting, call it again (it replaces the last one). When to use: the my-workflow skill, references/board.md.",
+      "Your card stays in progress meanwhile, showing `what`. When the last thing you waited on came and you got something done with it (it went live, a check passed), post_progress that result first: the feed already shows \"等到了\", not what came of it. Then end your turn; when woken and still waiting, call it again (it replaces the last one). When to use: the my-workflow skill, references/board.md.",
     input: {
       type: "object",
       properties: {

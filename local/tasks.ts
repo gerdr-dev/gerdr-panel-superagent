@@ -72,6 +72,13 @@ export async function list(input: unknown, ctx: Ctx) {
     nudge.length = 0; // update retries this function on a write race: decide afresh each time
     for (const t of s.tasks) {
       const sess = t.session && live[t.session];
+      // What the user typed in its chat (Gerdr's personSaid): the feed shows it, or the lines after it make no sense
+      // (t52: "等扶摇审批" with nothing saying the user asked for 扶摇)
+      const ps = (sess as any)?.personSaid as { text: string; at: number } | undefined;
+      if (ps?.at && ps.at > (t.heard ?? t.createdAt) && ps.text.trim()) {
+        t.heard = ps.at;
+        activity(s, t, { kind: "user", by: t.id, text: `你在对话里说：${ps.text.trim()}`, at: ps.at } as any);
+      }
       syncSessions(t, kids[t.id] ?? []);
       syncAgents(t, t.session, (sess?.tasks ?? []) as any[]);
       if (sess?.status === "running") {
@@ -239,7 +246,7 @@ function dropOrphans(s: Store) {
     if (!blocks.length || !blocks.every((t) => over(t))) continue;
     const why = blocks.map((t) => `${t.id} ${t.status === "done" ? "已完成" : "已放弃"}`).join("、");
     note(h, `${why}，这一步不需要了（自动放弃）`);
-    Object.assign(h, { status: "dropped", doneAt: Date.now(), updatedAt: Date.now() });
+    Object.assign(h, { status: "dropped", orphaned: Date.now(), doneAt: Date.now(), updatedAt: Date.now() });
   }
 }
 
@@ -599,6 +606,37 @@ function oneLine(s: string, n: number) {
   return [...x].length > n ? [...x].slice(0, n).join("") + "…" : x;
 }
 
+/**
+ * A handover takes the old task's steps for the user with it: what it asked them to do is still needed, now by the
+ * new one. Until 2026-11-05 they went with the old task: t11 was dropped for t52 to take over, its "approve the
+ * release" (t51) was dropped as nothing needed it any more, and the user lost it from 等你 while t52 waited on it.
+ * Steps the board dropped for that reason (orphaned) in the last hour come back.
+ */
+function takeOver(ctx: Ctx, id: string, from: string) {
+  update(ctx, (s) => {
+    const t = find(s, id);
+    const old = find(s, from);
+    const hour = Date.now() - 3600_000;
+    const steps = s.tasks.filter(
+      (h) =>
+        h.owner === "human" &&
+        (h.askedBy === old.id || old.blockedBy?.includes(h.id)) &&
+        (h.status === "todo" || (h.status === "dropped" && (h.orphaned ?? 0) > hour)),
+    );
+    for (const h of steps) {
+      if (h.status === "dropped") {
+        note(h, `${t.id} 接手了 ${old.id}，这一步还要做`);
+        Object.assign(h, { status: "todo", orphaned: undefined, doneAt: undefined });
+      }
+      Object.assign(h, { askedBy: t.id, updatedAt: Date.now() });
+      if (!t.blockedBy?.includes(h.id)) t.blockedBy = [...(t.blockedBy ?? []), h.id];
+      old.blockedBy = (old.blockedBy ?? []).filter((x) => x !== h.id);
+    }
+    // The card's first line: whose work this goes on with (the feed used to start at its first wait)
+    activity(s, t, { kind: "join", by: t.id, text: `接手了 ${old.id}「${old.title}」${steps.length ? `，连同要你做的：${steps.map((h) => `${h.id} ${h.title}`).join("；")}` : ""}` });
+  });
+}
+
 /** What a handover worker is told about the task it takes over: what it was for, how far it got, where to read more. */
 function handover(t: Task, said: string) {
   return [
@@ -671,6 +709,7 @@ export async function dispatch(input: { id: string; title?: string; parts: Part[
     if (split) parts[0] = { ...parts[0], prompt: `${parts[0].prompt}\n\n${told}` };
     else if (t.from !== old.id) edit({ id: t.id, prompt: `${t.prompt ?? t.title}\n\n${told}` }, ctx);
     edit({ id: t.id, from: old.id }, ctx);
+    takeOver(ctx, t.id, old.id);
   }
   const { store } = load(ctx);
   const t = find(store, input.id);

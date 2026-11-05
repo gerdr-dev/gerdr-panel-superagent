@@ -163,6 +163,11 @@ export async function task_update(input: { state: string; summary?: string; link
     const t = mine(s, ctx);
     if (t.status === "done" || t.status === "dropped") throw new Error(`${t.id} 已经${t.status === "done" ? "完成" : "放弃"}了`);
     let state = input.state === "working" ? undefined : input.state;
+    // "Come and look" while the user still has to choose something of yours reads as two different asks (t52: a review
+    // line "有结论了，等你看" next to the choice it was really waiting on). The choice is what's next.
+    const asking = s.tasks.filter((h) => h.owner === "human" && h.status === "todo" && (h.askedBy === t.id || t.blockedBy?.includes(h.id)));
+    if ((state === "review" || state === "done") && asking.length)
+      throw new Error(`你还有要用户决定 / 做的 ${asking.map((h) => h.id).join("、")}：等他答了再报${state === "review" ? "验收" : "完成"}（答案会发给你）。只是说进展就用 working 或 post_progress`);
     // Answering the user's own question in the chat: they read it there; don't move the task to "come and look"
     if (state === "review" && sess?.byPerson && t.status === "running") state = undefined;
     const before = new Set((t.waits ?? []).map((w) => w.id));
@@ -212,7 +217,13 @@ export function ask_human(input: any, ctx: Ctx) {
     const t = mine(s, ctx);
     const decision = Array.isArray(input.options) && input.options.length > 0;
     const human = decision ? { ...input, steps: input.steps ?? "", handBack: { kind: "choice", options: input.options.map(String), multi: input.multi === true || undefined, label: "你的决定" } } : input;
+    const reviewed = t.status === "review";
     const h = applyBlock(s, t, { state: "blocked", human, replace: false })!;
+    // Asked right after reporting a result to look at: the result wasn't the end, the choice is. Its feed line stops
+    // saying "等你看" (t52, 2026-11-05)
+    const root = reqOf(s, t);
+    const last = root?.activity?.[root.activity.length - 1];
+    if (reviewed && last?.kind === "review" && last.by === t.id) Object.assign(last, { kind: "progress", text: last.text.replace(/^有结论了，等你看：?/, "") || "有结论了" });
     Object.assign(t, { viaTools: true, reportedAt: Date.now(), nudges: 0, updatedAt: Date.now() });
     endWaits(t, isOutside, "worker 改成问你了");
     if (h.handBack?.kind === "questions") return questionCard(h, ctx);
@@ -269,6 +280,7 @@ export function cancel_human(input: { id: string; reason: string }, ctx: Ctx) {
       if (!q) throw new Error(`${hid} 没有第 ${qid} 个问题`);
       q.dropped = input.reason || "撤回";
       note(h, `worker 撤回了「${q.title}」：${input.reason}`);
+      activity(s, t, { kind: "join", by: t.id, text: `撤回了要你决定的「${q.title}」${input.reason ? `：${input.reason}` : ""}` });
       const left = h.questions.filter((x) => !x.dropped);
       if (!left.length) Object.assign(h, { status: "dropped", doneAt: Date.now() });
       if (!left.length) t.blockedBy = (t.blockedBy ?? []).filter((id) => id !== h.id);
@@ -280,6 +292,8 @@ export function cancel_human(input: { id: string; reason: string }, ctx: Ctx) {
     if (h.status !== "dropped") {
       note(h, `worker 撤回了：${input.reason}`);
       Object.assign(h, { status: "dropped", doneAt: Date.now(), updatedAt: Date.now() });
+      // Said in the feed: the item leaving 等你 with no word was all the user saw (t55, 2026-11-05)
+      activity(s, t, { kind: "join", by: t.id, text: `撤回了要你做的 ${h.id}「${h.title}」${input.reason ? `：${input.reason}` : ""}` });
     }
     t.blockedBy = (t.blockedBy ?? []).filter((id) => id !== h.id);
     return { id: h.id, status: "dropped", gerdrCard: { title: `不用做了：${h.id} ${h.title}`, body: input.reason, tone: "info" } };

@@ -36,7 +36,13 @@ export async function wake(ctx: Ctx, id: string, m: Wake): Promise<Task> {
   const t = update(ctx, (s) => {
     const x = find(s, id);
     if (m.followup) x.followups = [...(x.followups ?? []), m.followup];
-    if (m.ends) endWaits(x, m.ends, m.how);
+    const ended = m.ends ? endWaits(x, m.ends, m.how) : [];
+    // What it waited on outside came (an approval, a reply, a job finished): the feed had "在等 X" and, until
+    // 2026-11-05, never the answer, so a stretch of waiting ended in nothing (t52: 42 minutes between "等审批" and the
+    // next line). Only the world's answers: the user's are logged as theirs (feed), a teammate's as its tell, and
+    // "time's up" is no result.
+    const came = ended.find((w) => w.kind === "reply" || w.kind === "check");
+    if (came) activity(s, x, { kind: "got", by: x.id, text: `等到了：${came.what.replace(/^等待?\s*/, "")}（${m.how}）` });
     const now = Date.now();
     if (m.on) for (const w of open(x)) if (w.on && w.on.source === m.on.source && w.on.key === m.on.key) w.woke = { how: m.how, at: now };
     if (m.resume && x.session && (x.status === "done" || x.status === "review")) {

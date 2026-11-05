@@ -1539,7 +1539,7 @@ function TeamCard({ t, tasks, active, onOpen }: { t: Task; tasks: Task[]; active
 /** When every task started getting a feed (842e672, 2026-11-05): older ones have none to show. */
 const FEEDS_SINCE = new Date("2026-11-05T12:00:00+08:00").getTime();
 
-const KIND: Record<string, string> = { wait: "在等", progress: "进展", tell: "通知", join: "加入", done: "完成", review: "待你看", user: "你", stuck: "卡住" };
+const KIND: Record<string, string> = { wait: "在等", progress: "进展", tell: "通知", join: "加入", done: "完成", review: "待你看", user: "你", stuck: "卡住", got: "等到了" };
 
 /** A member's face in the feed: its repository's initials (order-api → OA); the lead's ringed. A click opens its chat. */
 function Avatar({ m, lead, size = "md" }: { m?: Task; lead?: boolean; size?: "sm" | "md" }) {
@@ -1719,6 +1719,17 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
           <AlertTriangle className="size-3 shrink-0" />
           {who(a.by) ? `${memberLabel(who(a.by))} ` : ""}
           {a.text} · {when(a.at)}
+        </p>
+      );
+    // What a wait came to (an approval, a reply): the board's line, the worker's own result follows it
+    if (a.kind === "got")
+      return (
+        <p className="flex items-center justify-center gap-1.5 px-6 text-center text-[11px] text-ok">
+          <Check className="size-3 shrink-0" />
+          <span className="line-clamp-2">
+            {who(a.by) ? `${memberLabel(who(a.by))} ` : ""}
+            {a.text} · {when(a.at)}
+          </span>
         </p>
       );
     if (a.kind === "join" || !a.by)

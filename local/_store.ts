@@ -26,7 +26,7 @@ export type Question = { id: string; title: string; kind: "choice" | "value"; op
  * and hand-offs only — a member finishing its part, telling a teammate, pulling one in, the user answering.
  * by: the member it's about (a task id); kind: what sort of line, for its icon.
  */
-export type Activity = { at: number; by?: string; kind: "progress" | "tell" | "join" | "done" | "review" | "user" | "stuck" | "wait"; text: string; to?: string };
+export type Activity = { at: number; by?: string; kind: "progress" | "tell" | "join" | "done" | "review" | "user" | "stuck" | "wait" | "got"; text: string; to?: string };
 
 export type Task = {
   id: string;
@@ -48,6 +48,10 @@ export type Task = {
    * until the router decides or leaves it (sweep).
    */
   reroute?: { feedback: string; at: number; router?: string };
+  /** When the user last typed in its worker's chat that the feed has (Gerdr's personSaid): each one is logged once. */
+  heard?: number;
+  /** Dropped by the board because nothing it unblocked was still going (tasks.ts dropOrphans), not by anyone: a handover can take it back. */
+  orphaned?: number;
   /**
    * The conversation that dispatched it: the Superagent's main session (_main.ts; a part split off shares its
    * parent's), or, for older tasks, a one-off router since closed (routerClosed). Kept, so every task traces back to
@@ -288,7 +292,7 @@ export function activity(s: Store, t: Task, a: Omit<Activity, "at">) {
   // Every task's card has a feed, alone or with teammates (DESIGN.md「需求和队友」)
   const root = reqOf(s, t);
   if (!root) return;
-  root.activity = [...(root.activity ?? []), { at: Date.now(), ...a }].slice(-KEEP_ACTIVITY);
+  root.activity = [...(root.activity ?? []), { at: Date.now(), ...a }].sort((x, y) => x.at - y.at).slice(-KEEP_ACTIVITY);
   if (a.kind === "done" || a.kind === "review" || a.kind === "user") root.bounces = 0;
   root.updatedAt = Date.now();
 }
