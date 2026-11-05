@@ -36,7 +36,7 @@ export const tools = {
       "End your turn waiting on someone or something outside, instead of only saying you'll wait (once your turn ends nothing wakes you otherwise). " +
       "wake: what wakes you, a list — whichever comes first wakes you, and ends this wait. Each item is one of: " +
       "{type: message, conversation}: news where a person will answer — the Slack channel / DM id you wrote to (D09…, C0…), a Slack message link, or an MR URL (its reviews, pipelines, merge come too); " +
-      "{type: check, command, every?, cwd?}: a command that tells whether what you wait for has happened (a publish approved, a job finished, a page live) — the board runs it every `every` minutes, exit 0 = it has (you're woken with its output), any other exit = not yet; print one line saying where things stand, it shows on your card; " +
+      "{type: check, command, every?, cwd?}: a command that tells whether what you wait for has happened (a publish approved, a job finished, a page live) — the board runs it every `every` minutes, exit 0 = it has (you're woken with its output), any other exit = not yet; exit 0 as soon as things leave the step you wait in, not only on the end you hope for ([ "$s" != pending_approval ], not [ "$s" = success ]) — rejected, stuck halfway or failed must wake you too; waiting on a person (approve, merge), check that act itself, don't assume what should follow it happens by itself; print one line saying where things stand, it shows on your card; " +
       "{type: time, minutes}: woken anyway after that long, as a backstop; " +
       "{type: teammate, who}: a member of your requirement (its task id, see my_task) tells you something — their tell wakes you. " +
       "Waiting on a person to do something you can see (approve, merge, deploy)? Give both a message and a check. " +
@@ -55,7 +55,7 @@ export const tools = {
               type: { type: "string", enum: ["message", "check", "time", "teammate"] },
               who: { type: "string", description: "teammate: the member's task id (t7)" },
               conversation: { type: "string", description: "message: a Slack channel / DM id, a Slack message link, or an MR URL" },
-              command: { type: "string", description: "check: run with sh -c, 60 s at most; exit 0 = it has happened. Use the tools you already use for this work" },
+              command: { type: "string", description: "check: run with sh -c, 60 s at most; exit 0 = it has happened, or things left the step you wait in (any change from it, not only the hoped-for end). Use the tools you already use for this work" },
               every: { type: "number", description: "check: minutes between runs (1 – 60, default 2)" },
               cwd: { type: "string", description: "check: absolute directory to run it in (default: the task's repository)" },
               minutes: { type: "number", description: "time: woken after this many minutes (1 – 1440)" },
