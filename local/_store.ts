@@ -67,7 +67,7 @@ export type Task = {
   waiting?: { what: string; since: number; source?: string; key?: string; where?: string; recheckAt?: number };
   waitEnd?: unknown;
   origin?: { id: string; source: string; kind: string; key?: string; title?: string; url?: string; reply?: { kind: string; data?: unknown } };
-  /** Split off this task by the router (one of several parts run in parallel). */
+  /** Split off this task: by the router (one of several parts run in parallel), or by its worker (tasks.add from: a part handed on, or the rest of the work when it hands over). */
   from?: string;
   worktree?: boolean;
   /** The worker session now and every one it had (re-runs, hand-offs). */

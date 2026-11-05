@@ -40,7 +40,7 @@
 
 ## worker 怎么汇报：工具，不是文字
 
-worker 拿到一组 面板工具（`local/board.ts`，经 Gerdr 的 `gerdr work mcp` 以 MCP 提供）：
+worker 拿到一组 面板工具（`local/board.ts`，经 Gerdr 的 `gerdr panel mcp` 以 MCP 提供）：
 
 | 工具 | 用途 |
 |---|---|
@@ -259,7 +259,7 @@ worker 说「我在等」却没东西叫醒它（t29），报一句 working 就�
 agent 复盘也要整条链。所以：
 
 - **链是一棵会话树，层数不限**：Gerdr 给每个会话记 `parent`（谁开的它：agent 的 `gerdr session new`，
-  或它跑 `gerdr work run` 调的函数开的）。调度会话跑 `superagent.decide` 开出 worker，worker 再开帮手，帮手再开……
+  或它跑 `gerdr panel run` 调的函数开的）。调度会话跑 `superagent.decide` 开出 worker，worker 再开帮手，帮手再开……
   都在一棵树上。看板不写死「路由 → worker」两层（`local/tasks.ts` 的 `tree`）。
 - **派完不丢**：`router` 留在任务上（调度会话，或旧任务的一次性派活对话，`routerClosed` 标记已关）。
   调度会话派过所有任务，所以它在一个任务的链路里只挂这个任务自己的 worker。

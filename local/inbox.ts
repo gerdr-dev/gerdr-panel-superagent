@@ -43,7 +43,7 @@ function ours(ctx: Ctx): Record<string, Ours> {
       const t = JSON.parse(ctx.fs.read(f.path));
       if (t.fn === FN && t.on) out[t.on] = { path: f.path, key: t.key, allow: Array.isArray(t.input?.allow) ? t.input.allow : undefined, inferred: !!t.input?.inferred };
     } catch {
-      // a broken file is Gerdr's to report (gerdr work triggers)
+      // a broken file is Gerdr's to report (gerdr panel triggers)
     }
   }
   return out;

@@ -43,7 +43,7 @@ const pending = new Map<number, { resolve: (saved: boolean) => void; reject: (e:
 /**
  * Asks for a secret in Gerdr's own dialog and saves it for ctx.secrets.get(name); true when saved, false when
  * cancelled. The page never sees the value. A Gerdr too old for this shows nothing and the promise never settles:
- * the page offers `gerdr work secret set` next to the button for that case.
+ * the page offers `gerdr panel secret set` next to the button for that case.
  */
 export function askSecret(name: string, opts: { label?: string; note?: string } = {}): Promise<boolean> {
   const id = ++seq;

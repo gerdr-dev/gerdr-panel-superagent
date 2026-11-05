@@ -11,7 +11,7 @@ export type { Task };
 
 // Task board data: data/tasks.json (read and written through _store.ts). Agent tasks are handed to coding-agent sessions (workers); human tasks are
 // things only the user can do (UI clicks, accounts, approvals). Everything here is deterministic: the page, the
-// panel agent (`gerdr work run tasks.<fn> '<json>'`) and worker replies all go through these functions.
+// panel agent (`gerdr panel run tasks.<fn> '<json>'`) and worker replies all go through these functions.
 //
 // Workers report through the board's panel tools (board.ts: task_update, ask_human, cancel_human), which Gerdr gives
 // them over MCP. Older workers ended replies with a ```gerdr-task``` JSON block instead; `list` still reads those.
