@@ -8,15 +8,18 @@ export const FILE = `${DATA}/tasks.json`;
 
 /** An artifact (产物): something a step produced, kept with when it came. */
 export type Link = { label: string; url: string; at?: number };
-/** What the user gives back: nothing, a value, a secret (stored, never shown), or one of options (a decision). */
-export type HandBack = { kind: "none" | "value" | "secret" | "choice" | "questions"; name?: string; label?: string; options?: string[] };
+/**
+ * What the user gives back: nothing, a value, a secret (stored, never shown), or one of options (a decision); multi:
+ * any number of the options, handed back one per line.
+ */
+export type HandBack = { kind: "none" | "value" | "secret" | "choice" | "questions"; name?: string; label?: string; options?: string[]; multi?: boolean };
 
 /**
  * One of several things a worker needs the user to decide or give it (a human task with handBack "questions"): a
  * choice (options) or a value. They're one board item because the worker can't go on until all are answered; it
  * hears every answer at once (tasks.answerQuestion).
  */
-export type Question = { id: string; title: string; kind: "choice" | "value"; options?: string[]; label?: string; steps?: string; answer?: string; dropped?: string };
+export type Question = { id: string; title: string; kind: "choice" | "value"; options?: string[]; multi?: boolean; label?: string; steps?: string; answer?: string; dropped?: string };
 
 export type Task = {
   id: string;

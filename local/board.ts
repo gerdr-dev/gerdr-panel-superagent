@@ -18,6 +18,10 @@ const STEP = {
       items: { type: "string" },
       description: "Makes it a decision: the choices, each a short line with its trade-off. The user picks one (or writes their own) on the board, maybe days later; you get their answer as a message.",
     },
+    multi: {
+      type: "boolean",
+      description: "With options: the user may pick several (ticks them, then submits). Their answer is the picked options, one per line. Say so here, not in the title or steps — without it a click on one option is the answer.",
+    },
     steps: {
       type: "string",
       description:
@@ -123,7 +127,7 @@ export function ask_human(input: any, ctx: Ctx) {
   return update(ctx, (s) => {
     const t = mine(s, ctx);
     const decision = Array.isArray(input.options) && input.options.length > 0;
-    const human = decision ? { ...input, steps: input.steps ?? "", handBack: { kind: "choice", options: input.options.map(String), label: "你的决定" } } : input;
+    const human = decision ? { ...input, steps: input.steps ?? "", handBack: { kind: "choice", options: input.options.map(String), multi: input.multi === true || undefined, label: "你的决定" } } : input;
     const h = applyBlock(s, t, { state: "blocked", human, replace: false })!;
     Object.assign(t, { viaTools: true, reportedAt: Date.now(), nudges: 0, updatedAt: Date.now() });
     endWaits(t, isOutside, "worker 改成问你了");
@@ -148,7 +152,7 @@ export function ask_human(input: any, ctx: Ctx) {
             title: h.title,
             body: h.steps || undefined,
             tone: "info",
-            choose: { project: ctx.workspace.project, fn: "tasks.complete", input: { id: h.id }, field: "value", options: (h.handBack as any).options, other: true },
+            choose: { project: ctx.workspace.project, fn: "tasks.complete", input: { id: h.id }, field: "value", options: (h.handBack as any).options, multi: h.handBack?.multi, other: true },
           }
         : {
             type: "task-step",
@@ -242,7 +246,7 @@ function questionCard(h: Task, ctx: Ctx) {
       title: q.title,
       body: [q.steps, !choice && q.label ? `要交回：${q.label}` : ""].filter(Boolean).join("\n\n") || undefined,
       tone: "info",
-      choose: { project: ctx.workspace.project, fn: "tasks.answerQuestion", input: { id: h.id, q: q.id }, field: "value", options: q.options ?? [], other: true },
+      choose: { project: ctx.workspace.project, fn: "tasks.answerQuestion", input: { id: h.id, q: q.id }, field: "value", options: q.options ?? [], multi: q.multi, other: true },
     },
   };
 }

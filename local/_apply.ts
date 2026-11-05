@@ -52,6 +52,7 @@ export function applyBlock(s: Store, t: Task, b: any): Task | null {
           title: String(h.title || "要你决定"),
           kind: h.handBack.kind,
           options: h.handBack.kind === "choice" ? h.handBack.options : undefined,
+          multi: h.handBack.kind === "choice" ? h.handBack.multi : undefined,
           label: h.handBack.kind === "value" ? h.handBack.label : undefined,
           steps: h.steps ? String(h.steps) : undefined,
         };
@@ -82,7 +83,7 @@ export function applyBlock(s: Store, t: Task, b: any): Task | null {
         title: String(h.title || "人工步骤"),
         owner: "human",
         steps: h.steps ? String(h.steps) : undefined,
-        handBack: h.handBack?.kind ? { kind: h.handBack.kind, name: h.handBack.name, label: h.handBack.label, options: h.handBack.options } : { kind: "none" },
+        handBack: h.handBack?.kind ? { kind: h.handBack.kind, name: h.handBack.name, label: h.handBack.label, options: h.handBack.options, multi: h.handBack.multi } : { kind: "none" },
         verify: h.verify ? String(h.verify) : undefined,
         minutes: Number(h.minutes) || undefined,
         urgent: true, // it's holding up a worker

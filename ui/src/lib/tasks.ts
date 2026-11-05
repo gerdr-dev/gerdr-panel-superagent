@@ -33,7 +33,7 @@ export type Task = {
   summary?: string;
   links?: Link[];
   steps?: string;
-  handBack?: { kind: "none" | "value" | "secret" | "choice" | "questions"; name?: string; label?: string; options?: string[] };
+  handBack?: { kind: "none" | "value" | "secret" | "choice" | "questions"; name?: string; label?: string; options?: string[]; multi?: boolean };
   /** handBack "questions": several decisions / values asked at once, each answered on its own (local/_store.ts). */
   /** Everything it waits on now, of every kind (local/_waits.ts): where it stands follows from these; the 在等 view. */
   waits?: Wait[];
@@ -43,7 +43,7 @@ export type Task = {
   helpers?: { id: string; title: string; status: string; waiting?: string; waitingKind?: "permission" | "ask"; /** waits on the user (an approval, or a question its worker left) */ left?: boolean }[];
   said?: string;
   nudges?: number;
-  questions?: { id: string; title: string; kind: "choice" | "value"; options?: string[]; label?: string; steps?: string; answer?: string; dropped?: string }[];
+  questions?: { id: string; title: string; kind: "choice" | "value"; options?: string[]; multi?: boolean; label?: string; steps?: string; answer?: string; dropped?: string }[];
   handedBack?: string;
   verify?: string;
   minutes?: number;

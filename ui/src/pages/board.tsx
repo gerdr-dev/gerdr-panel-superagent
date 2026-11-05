@@ -887,11 +887,19 @@ function Questions({ t, byId, act, onGo }: { t: Task; byId: Record<string, Task>
               {!open ? (
                 <div className="flex items-center gap-2 text-[12px]">
                   <Check className="size-3.5 shrink-0 text-ok" />
-                  <span className="min-w-0 flex-1">{q.answer}</span>
+                  <span className="min-w-0 flex-1 whitespace-pre-wrap">{q.answer}</span>
                   <button className="shrink-0 text-muted-foreground hover:text-foreground" onClick={() => setEditing((e) => ({ ...e, [q.id]: true }))}>
                     改答案
                   </button>
                 </div>
+              ) : q.kind === "choice" && q.multi ? (
+                <MultiPick options={q.options ?? []} answer={q.answer} busy={busy === `q${q.id}`} disabled={!!busy} onSubmit={(v) => answer(q, v)}>
+                  {q.answer && (
+                    <Button variant="ghost" onClick={() => setEditing((e) => ({ ...e, [q.id]: false }))}>
+                      不改
+                    </Button>
+                  )}
+                </MultiPick>
               ) : (
                 <div className="space-y-1.5">
                   {q.kind === "choice" &&
@@ -969,25 +977,69 @@ function Decision({ t, byId, busy, err, onPick, onDrop, onGo }: { t: Task; byId:
       <h3 className="text-[16px] font-medium">{t.title}</h3>
       <Meta t={t} byId={byId} extra={asker ? <span>· {asker.id} {asker.title} 在等这个决定</span> : undefined} />
       {t.steps && <Steps text={t.steps} />}
-      <div className="space-y-1.5">
-        {(t.handBack?.options ?? []).map((o, i) => (
-          <button key={i} disabled={!!busy} onClick={() => onPick(o)} className="flex w-full gap-2 rounded-lg border p-2.5 text-left text-[13px] hover:border-ring hover:bg-accent disabled:opacity-50">
-            <span className="shrink-0 font-mono text-muted-foreground">{i + 1}</span>
-            <span className="whitespace-pre-wrap">{o}</span>
-          </button>
-        ))}
-        <div className="flex gap-2">
-          <input value={own} onChange={(e) => setOwn(e.target.value)} placeholder="其他，自己写…" onKeyDown={(e) => isSubmitEnter(e) && own.trim() && onPick(own.trim())} className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]" />
-          <Button disabled={!own.trim() || !!busy} onClick={() => onPick(own.trim())}>
-            {busy === "complete" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}就这样定
-          </Button>
+      {t.handBack?.multi ? (
+        <MultiPick options={t.handBack.options ?? []} busy={busy === "complete"} disabled={!!busy} onSubmit={onPick} />
+      ) : (
+        <div className="space-y-1.5">
+          {(t.handBack?.options ?? []).map((o, i) => (
+            <button key={i} disabled={!!busy} onClick={() => onPick(o)} className="flex w-full gap-2 rounded-lg border p-2.5 text-left text-[13px] hover:border-ring hover:bg-accent disabled:opacity-50">
+              <span className="shrink-0 font-mono text-muted-foreground">{i + 1}</span>
+              <span className="whitespace-pre-wrap">{o}</span>
+            </button>
+          ))}
+          <div className="flex gap-2">
+            <input value={own} onChange={(e) => setOwn(e.target.value)} placeholder="其他，自己写…" onKeyDown={(e) => isSubmitEnter(e) && own.trim() && onPick(own.trim())} className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]" />
+            <Button disabled={!own.trim() || !!busy} onClick={() => onPick(own.trim())}>
+              {busy === "complete" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}就这样定
+            </Button>
+          </div>
         </div>
-      </div>
+      )}
       {err && <p role="alert" className="text-[12px] text-bad">{err}</p>}
       <div className="flex justify-end">
         <DropButton busy={!!busy} onDrop={onDrop} />
       </div>
     </Card>
+  );
+}
+
+/**
+ * A decision where several options may be picked (ask_human multi): a click ticks, the button sends the ticked ones
+ * (in the options' order) and anything written, one per line — the same shape the chat card sends. A click that
+ * answered at once is what made the user lose a multiple choice to its first pick (t32, 2026-11-05).
+ */
+function MultiPick({ options, answer, busy, disabled, onSubmit, children }: { options: string[]; answer?: string; busy: boolean; disabled: boolean; onSubmit: (v: string) => void; children?: React.ReactNode }) {
+  const was = answer ? answer.split("\n") : [];
+  const [on, setOn] = useState(() => options.filter((o) => was.includes(o)));
+  const [own, setOwn] = useState(() => was.filter((x) => !options.includes(x)).join("；"));
+  const picked = [...options.filter((o) => on.includes(o)), ...(own.trim() ? [own.trim()] : [])];
+  const submit = () => picked.length && onSubmit(picked.join("\n"));
+  return (
+    <div className="space-y-1.5">
+      {options.map((o, i) => {
+        const ticked = on.includes(o);
+        return (
+          <button
+            key={i}
+            disabled={disabled}
+            aria-pressed={ticked}
+            onClick={() => setOn((x) => (ticked ? x.filter((y) => y !== o) : [...x, o]))}
+            className={clsx("flex w-full gap-2 rounded-lg border p-2.5 text-left text-[13px] hover:border-ring hover:bg-accent disabled:opacity-50", ticked && "border-ok bg-ok/10")}
+          >
+            <span className={clsx("mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border", ticked && "border-ok bg-ok text-background")}>{ticked && <Check className="size-3" />}</span>
+            <span className="whitespace-pre-wrap">{o}</span>
+          </button>
+        );
+      })}
+      <div className="flex gap-2">
+        <input value={own} onChange={(e) => setOwn(e.target.value)} placeholder="其他，自己写…（可以和上面的一起交）" onKeyDown={(e) => isSubmitEnter(e) && submit()} className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]" />
+        <Button disabled={!picked.length || disabled} onClick={submit}>
+          {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
+          {picked.length ? `交这 ${picked.length} 项` : "先勾选"}
+        </Button>
+        {children}
+      </div>
+    </div>
   );
 }
 
@@ -1009,7 +1061,7 @@ function DoneDetail({ t, act }: { t: Task; act?: Act }) {
       </div>
       {t.summary && <Md>{t.summary}</Md>}
       {t.steps && <Steps text={t.steps} />}
-      {t.handedBack && <p className="text-[12px] text-muted-foreground">交回：{t.handedBack}</p>}
+      {t.handedBack && <p className="text-[12px] whitespace-pre-wrap text-muted-foreground">交回：{t.handedBack}</p>}
       <Links t={t} />
       {t.notes?.map((n) => (
         <p key={n.at} className="text-[12px] whitespace-pre-wrap text-muted-foreground">
