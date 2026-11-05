@@ -10,6 +10,7 @@ import { waitCard } from "./waits";
 import { endWaits, isOutside, open, question } from "./_waits";
 import { wake } from "./_wake";
 import { add } from "./tasks";
+import { GENERAL, MEMORY, nameOf } from "./_memory";
 
 /**
  * Teammate messages in a row with no part done, nothing for review and no word from the user: past this the members
@@ -142,7 +143,10 @@ export function instructions(input: unknown, ctx: Ctx) {
   return (
     `You are the worker of task ${t.id} ("${t.title}") on the user's Superagent board. They follow it on the board, not in ` +
     `this chat. How to work on it (reporting with these tools, asking them, starting other agents, teammates) is their my-workflow ` +
-    `skill, references/board.md: read it before you report or stop. my_task shows the task as the board sees it.` +
+    `skill, references/board.md: read it before you report or stop. my_task shows the task as the board sees it. ` +
+    `What the user's memory says about this repository and all of them came in your first message; the files are ` +
+    `${ctx.fs.root}/${MEMORY}/${t.repo ? nameOf(t.repo) : "…"}.md and ${GENERAL}.md there — add to them with remember ` +
+    `(when: references/memory.md).` +
     team
   );
 }

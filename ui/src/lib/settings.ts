@@ -2,7 +2,9 @@
 // the MR watcher asks, whether proactive work runs). One file for both sides: the 设置 page edits with it, local/_config.ts reads
 // with it. What a person stores (user/settings.json) is only what they set; everything else is the default here,
 // the careful one, so a later default reaches whoever never chose. How MRs are merged / rebased was a setting here
-// until 2026-11-04, when the watcher still did it; now the worker does, so it's prose in the skill (mr.md, 谁来合).
+// until 2026-11-04, when the watcher still did it; now the worker does, so it's prose in the skill (mr.md). Which
+// repositories take small changes straight (repos[].direct) was one until 2026-11-05: it's a fact about one repository,
+// so it's in the user's memory now (local/_memory.ts), with who merges and who approves a release.
 //
 // Why settings and not variables in the skill: these are values only code acts on, and prose around them was read
 // by nobody (an extra sentence next to {{合并}} changed nothing). How the agents should do things stays prose in
@@ -15,8 +17,6 @@ export type Repo = {
   path: string;
   /** One line for the router: what this repository is (which service / product). */
   note?: string;
-  /** Small changes may be pushed straight to the target branch instead of an MR (the worker is told). */
-  direct?: boolean;
 };
 
 export type Settings = {
@@ -51,7 +51,7 @@ export function normalize(raw: any): Settings {
     const path = str(typeof x === "string" ? x : x?.path, "");
     if (!path || repos.some((y) => y.path === path)) continue;
     const note = str(x?.note, "");
-    repos.push({ path, ...(note ? { note } : {}), ...(x?.direct === true ? { direct: true } : {}) });
+    repos.push({ path, ...(note ? { note } : {}) });
   }
   return {
     router: who(r.router, d.router),

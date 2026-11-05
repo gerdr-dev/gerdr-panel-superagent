@@ -3,6 +3,7 @@
 
 import { DEFAULTS, normalize, type Settings } from "../ui/src/lib/settings";
 import { effective, mine, overlay, USER } from "./_user";
+import { addLine, GENERAL, nameOf } from "./_memory";
 
 export type { Settings, Who, Repo } from "../ui/src/lib/settings";
 
@@ -12,6 +13,8 @@ export const FILE = `${USER}/settings.json`;
 export function stored(ctx: Ctx): { raw: any; etag?: string; broken?: boolean } {
   migrate(ctx);
   mrToSkill(ctx);
+  directToMemory(ctx);
+  whoMergesToMemory(ctx);
   const st = ctx.fs.stat(FILE);
   if (!st) return { raw: {} };
   try {
@@ -81,6 +84,7 @@ function migrate(ctx: Ctx) {
     proactive: said(v("主动工作", "proactive"), { off: ["关", "off"], observe: ["只记录", "observe"], on: ["照做", "on"] }),
   };
   ctx.fs.write(FILE, JSON.stringify(diff(normalize(raw)), null, 2) + "\n");
+  for (const r of raw.repos) if (r.direct) addLine(ctx, nameOf(r.path), DIRECT);
   for (const f of files) {
     if (!f.mine) continue;
     const rel = `skills/${f.rel}`;
@@ -117,7 +121,7 @@ function mrToSkill(ctx: Ctx) {
   if (from && !ctx.fs.stat(mine(MR))) {
     let text = ctx.fs.read(from);
     const n = typeof m.minApprovals === "number" ? m.minApprovals : 1;
-    if (m.merge === "auto") text = text.replace("| 其他仓库 | 先问我 |", "| 其他仓库 | 你直接合 |");
+    if (m.merge === "auto") addLine(ctx, GENERAL, MERGE_ANY);
     if (n !== 1) text = text.replace("至少 1 个人批准过", n === 0 ? "不用等人批准" : `至少 ${n} 个人批准过`);
     if (typeof m.maxRounds === "number") text = text.replace("改了 3 轮", `改了 ${m.maxRounds} 轮`);
     const rebase =
@@ -134,4 +138,60 @@ function mrToSkill(ctx: Ctx) {
   }
   delete raw.mr;
   ctx.fs.write(FILE, JSON.stringify(raw, null, 2) + "\n");
+}
+
+// ---- once: per-repository values into the memory (local/_memory.ts) ----
+
+const DIRECT = "小改动可以直接推到目标分支，不用开 MR；改动大、改了接口或数据结构、拿不准的，还是开 MR（原来是设置里的「小改动可直推」）";
+const MERGE_ANY = "MR 能合了就你直接合，没单独说的仓库都这样（原来是 mr.md「谁来合」表里的「其他仓库」）";
+
+/**
+ * 「小改动可直推」 was a checkbox per repository in the settings (repos[].direct), passed to the worker by the code. It's
+ * a fact about one repository the user may also say in a chat ("这个仓库以后直接推"), so it's memory now: one line in
+ * that repository's file, and the setting goes.
+ */
+function directToMemory(ctx: Ctx) {
+  if (!ctx.fs.stat(FILE)) return;
+  let raw: any;
+  try {
+    raw = JSON.parse(ctx.fs.read(FILE));
+  } catch {
+    return;
+  }
+  if (!Array.isArray(raw?.repos) || !raw.repos.some((r: any) => r && typeof r === "object" && "direct" in r)) return;
+  for (const r of raw.repos) {
+    if (!r || typeof r !== "object" || !("direct" in r)) continue;
+    if (r.direct === true && typeof r.path === "string") addLine(ctx, nameOf(r.path), DIRECT);
+    delete r.direct;
+  }
+  ctx.fs.write(FILE, JSON.stringify(raw, null, 2) + "\n");
+}
+
+/**
+ * mr.md had a 「谁来合」 table (repository → who merges). Who merges is per repository, so it's memory now and the
+ * shared mr.md points there. Someone with their own copy of mr.md still has the table: its rows go into the memory
+ * (「其他仓库」 into the general file, unless it says the default 先问我) and the section is replaced by the shared one.
+ */
+function whoMergesToMemory(ctx: Ctx) {
+  const own = mine(MR);
+  if (!ctx.fs.stat(own)) return;
+  const text = ctx.fs.read(own);
+  const head = "## 可以合并了：谁来合";
+  const at = text.indexOf(head);
+  if (at < 0 || !text.includes("| 仓库 | 谁来合 |")) return;
+  const end = text.indexOf("\n## ", at + head.length);
+  const section = text.slice(at, end < 0 ? undefined : end + 1);
+  for (const m of section.matchAll(/^\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*$/gm)) {
+    const [repo, who] = [m[1], m[2]];
+    if (repo === "仓库" || /^-+$/.test(repo)) continue;
+    if (repo === "其他仓库") {
+      if (who === "你直接合") addLine(ctx, GENERAL, MERGE_ANY);
+      else if (who !== "先问我") addLine(ctx, GENERAL, `MR 能合了：${who}，没单独说的仓库都这样（原来是 mr.md「谁来合」表里的「其他仓库」）`);
+    } else addLine(ctx, nameOf(repo), `MR 能合了谁来合：${who}（原来是 mr.md「谁来合」表里的）`);
+  }
+  const shared = ctx.fs.stat(MR) ? ctx.fs.read(MR) : "";
+  const sAt = shared.indexOf(head);
+  const sEnd = shared.indexOf("\n## ", sAt + head.length);
+  const fresh = sAt < 0 ? "" : shared.slice(sAt, sEnd < 0 ? undefined : sEnd + 1);
+  if (fresh) ctx.fs.write(own, text.replace(section, fresh));
 }

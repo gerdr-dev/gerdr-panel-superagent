@@ -99,7 +99,7 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
             <Repos repos={s.repos} onChange={(v) => put("repos", v)} />
           </Section>
 
-          <Section title="GitLab" note="盯 MR 的定时任务（mrwatch）查 MR 时找的 GitLab（glab 要先在这台电脑上登录过它）。MR 谁来合、要不要变基，写在「流程 → mr」里，由 worker 照着做。">
+          <Section title="GitLab" note="盯 MR 的定时任务（mrwatch）查 MR 时找的 GitLab（glab 要先在这台电脑上登录过它）。要不要变基写在「流程 → mr」里；每个仓库谁来合、能不能直推，在「记忆」里。都由 worker 照着做。">
             <Field label="地址">
               <input className={clsx(input, "font-mono text-[12px]")} value={s.gitlab.host} placeholder="gitlab.com" onChange={(e) => put("gitlab", { host: e.target.value })} />
             </Field>
@@ -194,10 +194,6 @@ function Repos({ repos, onChange }: { repos: Repo[]; onChange: (r: Repo[]) => vo
             <span className="min-w-0 flex-1 truncate text-[13px] font-medium" title={r.path}>
               {r.path.replace(/\/+$/, "").split("/").pop() || r.path}
             </span>
-            <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-[12px]" title="小改动不走 MR，直接推到目标分支；改动大、拿不准的 worker 还是开 MR（「流程 → deliver」）">
-              <input type="checkbox" checked={!!r.direct} onChange={(e) => at(i, { direct: e.target.checked || undefined })} />
-              小改动可直推
-            </label>
             <Button variant="ghost" size="icon" className="-my-1 shrink-0" aria-label={`去掉 ${r.path}`} onClick={() => onChange(repos.filter((_, j) => j !== i))}>
               <X className="size-3.5" />
             </Button>

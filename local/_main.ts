@@ -11,6 +11,7 @@
 // with where it went (user/data/superagent.json items), so "what happened to that message" always has an answer.
 
 import { workflow } from "./_config";
+import { forRouter } from "./memory";
 import { allAgents } from "./_agents";
 import { textOf } from "./playbooks";
 import { DATA, migrate } from "./_user";
@@ -202,7 +203,7 @@ async function brief(ctx: Ctx): Promise<string> {
     .slice(0, 20);
   const w = workflow(ctx);
   const repoText = w.repos.length
-    ? w.repos.map((r) => `- ${r.path}${r.note ? `：${r.note}` : ""}${r.direct ? "（小改动可直推）" : ""}`).join("\n")
+    ? w.repos.map((r) => `- ${r.path}${r.note ? `：${r.note}` : ""}`).join("\n")
     : `（用户没设仓库列表）最近用过的目录：\n${recent.map((p) => `- ${p}`).join("\n")}`;
   const def = (x: { agent: string; model: string; effort: string }) =>
     `${x.agent || "Gerdr 的默认 agent"}，模型 ${x.model || "它的默认"}，思考强度 ${x.effort || "它的默认"}`;
@@ -236,6 +237,7 @@ async function brief(ctx: Ctx): Promise<string> {
     `## 仓库（用户的设置）\n${repoText}`,
     `## agent 和模型\n${modelText}`,
     rules && `## 怎么派（用户自己写的规则）\n${rules}`,
+    forRouter(ctx),
     proactiveText(ctx),
   ]
     .filter(Boolean)

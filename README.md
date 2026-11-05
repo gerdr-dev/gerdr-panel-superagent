@@ -14,6 +14,7 @@
 - 要你处理的在看板上突出：「等你」一列有东西就高亮，派不出去的卡片描黄边；Superagent 自己需要你看的（它在问你、没判断成的消息、主动工作记下的）在看板上方一行一条，正常时不占地方。
 - 看板右上角的齿轮：「设置」是代码照着做的值（谁派活、谁干活、仓库列表、MR 合不合、主动工作开不开），默认都是手动的，按需改；
   「流程」是你用自己的话写的做事方式（`skills/my-workflow/`：怎么交付、review 意见怎么处理、怎么挑仓库），agent 读它。
+  「记忆」是每个仓库的具体情况（走不走 MR、谁来合、发布找谁批）：worker 从你说的话里记下来，以后派到这个仓库的 worker 一开始就带着；错了直接改。
 
 **安装**：Gerdr 设置 → 面板 → 从 GitHub 安装面板，填 `https://github.com/gerdr-dev/gerdr-panel-superagent`。
 更多面板：GitHub 上带 `gerdr-panel` 标签的仓库，见 https://github.com/topics/gerdr-panel 。
@@ -55,8 +56,9 @@
   用一两句话告诉用户发生了什么、需要他做什么（验收、回答问题、做人工任务），并指到看板。不要转贴 worker 的长回复。
 - 用户的工作方式是 `skills/my-workflow/` 这个 skill（「流程」页编辑）：你和你派出去的 worker 都有它，要用时自己读对应的参考
   （怎么交付、MR 上的新情况怎么处理……）。用户说「以后都这样」「改一下规则」：是做事方式就改这个 skill；是代码照着做的值
-  （模型、仓库、自动合并、变基、主动工作的模式）就改设置：`gerdr panel run settings.set '{"mr":{"merge":"auto"}}'`
-  （只给要改的那部分；`settings.get` 看现在的）。都不改代码。
+  （模型、仓库、主动工作的模式）就改设置：`gerdr panel run settings.set '{"proactive":"on"}'`
+  （只给要改的那部分；`settings.get` 看现在的）；是某个仓库的情况（「这个仓库以后直接推」「发布找 xx 批」）就用 `remember`
+  工具记进记忆（`repo` 填仓库路径，对所有仓库都成立的填 `"general"`）。都不改代码。
   worker 交结果分三种：`done`（做完、不用用户看）、`delivering`（开了 MR 在等合并）、`review`（要用户判断结论）。
   `delivering` 的任务由定时任务 `mrwatch` 盯（「定时任务」页）：新 review 意见、挂掉的流水线交给那个 worker，
   变基、合并照「设置」自动做；合不了的（MR 被关、改了好几轮还没过）会变成「等你」。
