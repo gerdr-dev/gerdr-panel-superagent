@@ -1831,7 +1831,7 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
           <div className="min-w-0 flex-1 space-y-1">
             {head(x.m, "问你", x.at, "text-warn")}
             <div className="flex items-start gap-2 rounded-lg rounded-tl-sm border border-warn/50 bg-warn/5 px-3 py-2 text-[13px]">
-              <span className="min-w-0 flex-1 whitespace-pre-wrap">{x.m.question}</span>
+              <Md className="flex-1">{x.m.question ?? ""}</Md>
               {x.m.session && (
                 <Button variant="outline" onClick={() => openChat(x.m.session!, x.m.id)}>
                   <MessageSquare className="size-3.5" />
@@ -1890,7 +1890,10 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
         <Avatar m={m} lead={m?.id === t.id} />
         <div className="min-w-0 flex-1 space-y-1">
           {head(m, `${KIND[a.kind] ?? a.kind}${to ? ` → ${memberLabel(to)}` : ""}`, a.at, a.kind === "done" ? "text-ok" : a.kind === "review" ? "text-warn" : waiting ? "shimmer text-foreground/80" : undefined)}
-          <p className={clsx("inline-block max-w-full rounded-lg rounded-tl-sm px-3 py-2 text-[13px] whitespace-pre-wrap", a.kind === "done" ? "bg-ok/10" : "bg-muted")}>{a.text}</p>
+          {/* What members write is Markdown (code, lists, paths, links): drawn as the chat draws it */}
+          <div className={clsx("w-fit max-w-full rounded-lg rounded-tl-sm px-3 py-2", a.kind === "done" ? "bg-ok/10" : "bg-muted")}>
+            <Md>{a.text}</Md>
+          </div>
         </div>
       </div>
     );
