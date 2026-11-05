@@ -203,16 +203,22 @@ function itemEnd(h?: Task) {
 
 type Kid = { id: string; title?: string; status: string; waiting?: string; waitingKind?: string; user?: boolean };
 
-/** The sessions its workers handed work to (tasks.ts helpers), as waits: open while they run or wait. */
-export function syncSessions(t: Task, kids: Kid[]) {
-  if (t.owner !== "agent" || t.status === "done" || t.status === "dropped") return;
+/**
+ * The sessions its workers handed work to (tasks.ts helpers), as waits: open while they run or wait. → the sessions
+ * it just started waiting on (new, or going again after they reported): the caller puts that in the feed.
+ */
+export function syncSessions(t: Task, kids: Kid[]): Kid[] {
+  if (t.owner !== "agent" || t.status === "done" || t.status === "dropped") return [];
   const live = new Map(kids.map((k) => [k.id, k]));
   endWaits(t, (w) => w.kind === "session" && !live.has(w.session!), "回报了 / 结束了");
+  const started: Kid[] = [];
   for (const k of kids) {
     const what = `它派出的「${k.title || k.id}」${k.status === "waiting" ? `在等：${k.waiting ?? "批准或回答"}` : "在跑"}`;
-    const w = open(t).find((x) => x.kind === "session" && x.session === k.id) ?? addWait(t, { kind: "session", session: k.id, what });
+    let w = open(t).find((x) => x.kind === "session" && x.session === k.id);
+    if (!w) (w = addWait(t, { kind: "session", session: k.id, what })), started.push(k);
     Object.assign(w, { what, user: k.user || undefined });
   }
+  return started;
 }
 
 type Bg = { id: string; type: string; description: string; subagent?: string; toolCallId?: string; parent?: string; status: string };

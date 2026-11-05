@@ -1618,7 +1618,10 @@ function TeamCard({ t, tasks, active, onOpen }: { t: Task; tasks: Task[]; active
  * like any other line while it waited on an approval).
  */
 function stillWaiting(t: Task, a: NonNullable<Task["activity"]>[number], m?: Task) {
-  return a.kind === "wait" && m?.status === "running" && (t.activity ?? []).filter((y) => y.by === a.by).pop() === a && !!m.waits?.some((w) => w.what === a.text);
+  if (!(a.kind === "wait" && m?.status === "running" && (t.activity ?? []).filter((y) => y.by === a.by).pop() === a)) return false;
+  // A session it handed work to (the board's own line, tasks.list): while that session is still out
+  if (a.text.startsWith("交给了「")) return !!m.waits?.some((w) => w.kind === "session");
+  return !!m.waits?.some((w) => w.what === a.text);
 }
 
 /** When a step / question item was last asked: its newest open question's time (older items have none: created). */

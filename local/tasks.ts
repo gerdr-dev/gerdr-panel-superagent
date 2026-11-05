@@ -97,7 +97,15 @@ export async function list(input: unknown, ctx: Ctx) {
         t.heard = ps.at;
         activity(s, t, { kind: "user", by: t.id, text: `你在对话里说：${ps.text.trim()}`, at: ps.at } as any);
       }
-      syncSessions(t, kids[t.id] ?? []);
+      // Handing work to a session is its part handed out and a wait on someone else, like wait_for: a line in the
+      // feed. It never calls wait_for for these (the session reports back by itself), so without this the feed went
+      // silent while the card's 最新 said "在等家里那台帮手"
+      for (const k of syncSessions(t, kids[t.id] ?? [])) {
+        const root = reqOf(s, t);
+        const text = `交给了「${k.title || k.id}」，等它做完回报`;
+        const last = (root?.activity ?? []).filter((a) => a.by === t.id).pop();
+        if (root && !(last?.kind === "wait" && last.text === text)) activity(s, t, { by: t.id, kind: "wait", text });
+      }
       syncAgents(t, t.session, (sess?.tasks ?? []) as any[]);
       if (sess?.status === "running") {
         // The worker is at it again — the user answered in its chat, something woke it, or it carried on. What it asked
