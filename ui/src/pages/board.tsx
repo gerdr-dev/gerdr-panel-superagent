@@ -1483,6 +1483,8 @@ function TeamCard({ t, tasks, active, onOpen }: { t: Task; tasks: Task[]; active
   const byId = Object.fromEntries(tasks.map((x) => [x.id, x]));
   const ms = (t.members ?? []).map((id) => byId[id]).filter(Boolean);
   const last = t.activity?.[t.activity.length - 1];
+  // What it's waiting on right now, if anything: the latest 在等 line still in effect, whoever's it is
+  const waitLine = [...(t.activity ?? [])].reverse().find((a) => a.kind === "wait" && stillWaiting(t, a, a.by ? byId[a.by] : undefined));
   const { steps, stuck } = teamNeeds(t, tasks);
   const first = steps[0] ? `${steps[0].handBack?.kind === "choice" || steps[0].questions ? "待你决定" : "要你做"}：${steps[0].title}` : stuck[0] ? `${memberLabel(stuck[0])} ${stuckText(stuck[0])}` : "";
   const n = steps.length + stuck.length;
@@ -1511,13 +1513,21 @@ function TeamCard({ t, tasks, active, onOpen }: { t: Task; tasks: Task[]; active
         </p>
       )}
       {t.reroute && <p className="text-[12px] text-brand">调度在按你的意见重新安排…</p>}
-      {last && (
+      {last && last !== waitLine && (
         <p className="line-clamp-2 text-[12px] text-muted-foreground">
           {last.by && byId[last.by] && <span className="text-foreground/80">{memberLabel(byId[last.by])}</span>}
           {last.to && byId[last.to] && <span> → {memberLabel(byId[last.to])}</span>}
           {last.by && byId[last.by] ? "：" : ""}
           {last.text}
           <span className="text-muted-foreground/70"> · {ago(last.at)}</span>
+        </p>
+      )}
+      {waitLine && (
+        <p className="line-clamp-2 text-[12px] text-muted-foreground">
+          <span className="shimmer font-medium text-foreground/80">在等</span>
+          {!alone && waitLine.by && byId[waitLine.by] && <span className="text-foreground/80"> · {memberLabel(byId[waitLine.by])}</span>}
+          ：{waitLine.text}
+          <span className="text-muted-foreground/70"> · {ago(waitLine.at)}</span>
         </p>
       )}
       {fallback && <p className="line-clamp-2 text-[12px] text-muted-foreground">{fallback}</p>}
@@ -1534,6 +1544,15 @@ function TeamCard({ t, tasks, active, onOpen }: { t: Task; tasks: Task[]; active
       )}
     </button>
   );
+}
+
+/**
+ * A 在等 line still in effect: its member's latest line, and the member still waits on that (wait_for). Shimmers like
+ * "思考中…", in the feed and on the card: the card is the one place the user glances at (2026-11-05: t54's card read
+ * like any other line while it waited on an approval).
+ */
+function stillWaiting(t: Task, a: NonNullable<Task["activity"]>[number], m?: Task) {
+  return a.kind === "wait" && m?.status === "running" && (t.activity ?? []).filter((y) => y.by === a.by).pop() === a && !!m.waits?.some((w) => w.what === a.text);
 }
 
 /** When every task started getting a feed (842e672, 2026-11-05): older ones have none to show. */
@@ -1742,7 +1761,7 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
     const m = who(a.by);
     const to = who(a.to);
     // A 在等 line still in effect (its member's latest line, and it still waits on that) shimmers like "思考中…"
-    const waiting = a.kind === "wait" && m?.status === "running" && (t.activity ?? []).filter((y) => y.by === a.by).pop() === a && !!m.waits?.some((w) => w.what === a.text);
+    const waiting = stillWaiting(t, a, m);
     return (
       <div className="flex gap-2">
         <Avatar m={m} lead={m?.id === t.id} />
