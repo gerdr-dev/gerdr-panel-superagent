@@ -173,7 +173,7 @@ worker 最新的总结、产物都在需求详情里，老任务没有活动，�
   - **被否掉的做法：调度会话居中协调。** 它只派活、从不等待（见「Superagent」），一协调就要等，后面的消息全堵着；还要转述。
   - **被否掉的做法：一个 worker 用 `tasks.add` 带别人。** 能做，但那个 worker 既要写自己的代码，又要当项目经理；
     看板上还多出一张卡。
-- **谁都能拉队友**（`add_teammate`）：调度会话只在需求里看得出来时一开始就派几个成员（`decide` 带 `team: true`）；
+- **谁都能拉队友**（`add_teammate`）：调度会话只在需求里看得出来时一开始就派几个成员（`tasks.dispatch` / `decide` 带 `team: true`）；
   后端写到一半才发现要改前端，由 worker 自己拉。同一个仓库只有一个成员，再要就 `tell` 它。拉人本身记一笔活动。
 - **活动**（需求上的 `activity`）：代码只自动记事实：拉人、成员报完成 / 待看、成员开始等（`wait_for` 的 `what`，同一个等待
   被叫醒后再等不重复记）、用户的回答、用户标完成 / 放弃、卡住。「开始等」也是事实：手上的做完了，等的是它控制不了的
@@ -219,13 +219,14 @@ worker 最新的总结、产物都在需求详情里，老任务没有活动，�
   - **被否掉的做法：每个任务开一个一次性的派活对话**（标题「派活：tN」，派完关掉）。每次都要开会话、重读同样的规则；
     外面的消息来了也没有一个「谁来判断」的地方。旧任务的 `router` 还指向那些对话（`routerClosed`），链路照样能看。
 - **派活要快**：调度会话要的东西全写在它的第一条消息里（仓库列表和用户挑仓库的说法、每个 agent / 角色是干什么的、
-  模型规则、用户 @ 了谁），一条 `superagent.decide` 给出一批的决定，要拆成几个并行的也在这一条里（第一份就是原任务，其余是
+  模型规则、用户 @ 了谁），外面来的消息用一条 `superagent.decide` 给出一批的决定，看板任务用 `tasks.dispatch`，要拆成几个并行的也在同一条里（第一份就是原任务，其余是
   `from` 指向它的新任务）。
   **被否掉的做法：让它自己去读 README / skill / 看板代码。** 实测一次派活 22 秒，三轮读文件占了 10 秒，读到的东西每次都一样。
-- **看板任务也能停 / 并进别的任务**：用户在看板上写「关闭 t11，新建一个任务来交接」，调度会话以前只能把它当活派出去，
-  结果派了个 worker 去「接手 t11」，t11 照样开着（t52，2026-11-05）。现在看板任务和消息一样能 `stop` / `attach`；
-  `stop` 带 parts 时这条看板任务本身就是交接的任务（`from` 指向停掉的那个，交接里写它的进展和对话 id），不带就只停、它算完成。
-  看板任务没有 `ignore`：用户自己写的就是要做的，看不懂就问。
+- **`superagent.decide` 只管要记去向的条目，看板任务用看板的命令**：外面来的消息（`cN`）要建任务、派出、回原对话、记去向，
+  几步得一起做完，所以有 `decide`；被要求重新安排的卡（`reroute`）也有一个待定状态要收尾，同样走它。别的看板任务就是任务本身，
+  调度会话直接用 `tasks.dispatch` / `drop` / `say` / `edit`，和用户点按钮是同一套。
+  **被否掉的做法：在 `decide` 里给看板任务加 stop / attach**（2026-11-05，t52「关闭 t11，新建一个任务来交接」之后加的）：
+  每个看板命令多一个名字，用户嫌概念太多。交接是 `tasks.dispatch` 的 `from`：带上被接手任务的进展和对话 id。
 - **@ agent**：新任务里输入 @ 点名 agent（`mentions`）。只点了一个就是这个任务的 agent；点了几个交给调度会话安排，
   怎么分、并不并行、谁用便宜模型都由它定。指定了仓库又只点了一个，就不经过调度会话，直接派出。
 - **用哪个 agent、哪个模型**：「设置」里派活的对话和 worker 各一组（agent / 模型 / 思考强度）。任务上指定的优先。那组模型只配那组的 agent：
@@ -252,7 +253,7 @@ worker 最新的总结、产物都在需求详情里，老任务没有活动，�
 |---|---|
 | Source / Trigger / Thread / Channel | Gerdr 的事件（插件、轮询）/ 一个事件 / 事件的 `key` / 事件的 `reply` |
 | Gate（准入，代码判断） | 触发器文件里的 `input.allow`（「只收这些人」），按事件的 `actor` 比（`inbox.onEvent`） |
-| Eval + Main Session | 调度会话（`_main.ts`）：一直开着，只分派，一次 `superagent.decide` 给出一批决定 |
+| Eval + Main Session | 调度会话（`_main.ts`）：一直开着，只分派，消息一次 `superagent.decide` 给出一批决定，看板任务用看板的命令 |
 | Decision：accept / stop / ignore / unavailable | 接（建任务派出）/ 停 / 不接（带理由，可回一句）/ 没判断成；另加「并进」（attach） |
 | Ticket / Assignment | 任务 / 任务的 worker 会话（`sessions`） |
 | Subscription | 任务的 `threads`：这段对话里的后续直接交给它，不再评估 |
@@ -328,7 +329,7 @@ worker 最新的总结、产物都在需求详情里，老任务没有活动，�
 agent 复盘也要整条链。所以：
 
 - **链是一棵会话树，层数不限**：Gerdr 给每个会话记 `parent`（谁开的它：agent 的 `gerdr session new`，
-  或它跑 `gerdr panel run` 调的函数开的）。调度会话跑 `superagent.decide` 开出 worker，worker 再开帮手，帮手再开……
+  或它跑 `gerdr panel run` 调的函数开的）。调度会话跑 `superagent.decide` / `tasks.dispatch` 开出 worker，worker 再开帮手，帮手再开……
   都在一棵树上。看板不写死「路由 → worker」两层（`local/tasks.ts` 的 `tree`）。
 - **派完不丢**：`router` 留在任务上（调度会话，或旧任务的一次性派活对话，`routerClosed` 标记已关）。
   调度会话派过所有任务，所以它在一个任务的链路里只挂这个任务自己的 worker。
@@ -394,7 +395,7 @@ worker 在看板上怎么做（每次停下要汇报、自己开的会话来问�
 | `local/_apply.ts` | worker 汇报怎么落到任务上（工具和旧文字块共用） |
 | `local/tasks.ts` | 看板和 面板助手调用的函数：list / add / start / accept / complete / deliver / redo / drop… |
 | `local/_main.ts` | Superagent 的核心：调度会话、订阅、交回、没判断成、事件的去向记录（`user/data/superagent.json`） |
-| `local/superagent.ts` | 调度会话的 `decide`，「去向」的 `log` / `retry` |
+| `local/superagent.ts` | 调度会话对消息和重新安排的 `decide`，「去向」的 `log` / `retry` |
 | `local/inbox.ts` | 触发器的设置和 `onEvent`（准入 → 订阅 → 评估） |
 | `local/board.ts` | 给 worker 的 面板工具 |
 | `local/mrwatch.ts` | MR 的事件来源 |

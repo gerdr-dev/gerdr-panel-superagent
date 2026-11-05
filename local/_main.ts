@@ -217,11 +217,16 @@ async function brief(ctx: Ctx): Promise<string> {
     // How it judges is the user's prose (流程 → my-workflow/references/dispatch.md), theirs to read and change; only the
     // command and the facts below are the code's
     textOf(ctx, DISPATCH) || `判断规则（用户的 dispatch.md）不见了：只分派，不自己动手、不等待；拿不准就问用户。`,
-    `## 一条命令给出这一批全部的决定\n` +
-      `gerdr panel run superagent.decide '${ex({ decisions: [{ item: "t12", parts: [{ repo: "/绝对路径" }] }, { item: "c3", decision: "accept", title: "十几个字的标题", parts: [{ repo: "/绝对路径" }] }, { item: "c4", decision: "ignore", reason: "道谢" }] })}'\n\n` +
+    `## 外面来的消息 [消息 cN]：一条命令给出这一批的决定\n` +
+      `gerdr panel run superagent.decide '${ex({ decisions: [{ item: "c3", decision: "accept", title: "十几个字的标题", parts: [{ repo: "/绝对路径" }] }, { item: "c4", decision: "ignore", reason: "道谢" }] })}'\n\n` +
       `- attach：${ex({ item: "c5", decision: "attach", task: "t9" })}；stop：${ex({ item: "c6", decision: "stop", task: "t9", reason: "…" })}\n` +
-      `- 看板任务也能 stop / attach（它是在管别的任务）：停掉 t9、t12 本身派去交接 ${ex({ item: "t12", decision: "stop", task: "t9", reason: "…", parts: [{ repo: "/绝对路径" }] })}；不带 parts 就只停，t12 算完成。attach 把 t12 的话转给 t9，t12 算完成。\n` +
-      `- 用户对某张卡的安排有意见（[重新安排 tN]，比如仓库错了）：照反馈重新安排这张卡，item 就是 tN。重新派给 parts（新的完整安排：要留下的已有 worker 那份写 "task": "它的 id"，会收到反馈和这份的 prompt；没留下的停掉；没写 task 的开新 worker，都在这张卡上，第一份新的接负责人的位置）；只是让现在的 worker 自己改，写 "decision": "attach"（task 不写就给负责人）；整件事不做了，写 "decision": "stop" 和 reason。\n` +
+      `- decide 会替你建任务、派出去、回原对话一句、记下这条消息的去向。\n\n` +
+      `## 看板任务 [任务 tN]：用看板的命令（和用户点按钮是同一套）\n` +
+      `- 派出去：gerdr panel run tasks.dispatch '${ex({ id: "t12", parts: [{ repo: "/绝对路径" }] })}'（可加 title、team）\n` +
+      `- 它是在管别的任务：停掉 tasks.drop '${ex({ id: "t9", reason: "…" })}'；转告 tasks.say '${ex({ id: "t9", text: "…" })}'；` +
+      `接手一个停掉的任务，派的时候加 "from": "t9"，会带上它的进展和对话；tN 只是条指令、照做完了：tasks.edit '${ex({ id: "t12", status: "done", summary: "停了 t9" })}'\n` +
+      `- 用户对某张卡的安排有意见（[重新安排 tN]，比如仓库错了）：用 superagent.decide 照反馈重新安排这张卡，item 就是 tN（它要记下这次安排完了没有）。重新派给 parts（新的完整安排：要留下的已有 worker 那份写 "task": "它的 id"，会收到反馈和这份的 prompt；没留下的停掉；没写 task 的开新 worker，都在这张卡上，第一份新的接负责人的位置）；只是让现在的 worker 自己改，写 "decision": "attach"（task 不写就给负责人）；整件事不做了，写 "decision": "stop" 和 reason。\n` +
+      `\n## parts（decide 的 accept 和 tasks.dispatch 一样）\n` +
       `- parts 每项一份活：repo 必填；agent、model、effort 不写就用下面的默认，简单的活可以给便宜的模型；worktree 默认 false。\n` +
       `- 只有一份：就是这件事本身，不用写 prompt。拆成几份并行（用户 @ 了几个 agent，或者活明显能分开做）：每份写 title（十几个字）和 prompt（这一份做什么、和别的份怎么配合）；同一个仓库有两份以上时都写 "worktree": true。\n` +
       `- 几份是同一个需求、要互相配合（前端接后端的新接口）：加 "team": true，成了一张卡片、几个成员，第一份是负责人，成员之间直接对话，不经过你。互不相干的几件事不加，各是一张卡。看不出要动别的仓库就只派一份，worker 发现了会自己拉队友。\n` +

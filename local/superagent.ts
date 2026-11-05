@@ -207,21 +207,6 @@ async function rearrange(d: Decision, self: Task, ctx: Ctx) {
   return { item: self.id, tasks: now.map((m) => m.id) };
 }
 
-/** What a handover worker is told about the task it takes over: what it was for, how far it got, where to read more. */
-function handover(t: Task, said: string) {
-  return [
-    `## 交接：接手 ${t.id}「${t.title}」（它已停掉）`,
-    `它要做的：${t.request ?? t.prompt ?? t.title}`,
-    t.repo && `它的仓库：${t.repo}${t.worktree ? "（在 worktree 里，改动可能还在那个分支上）" : ""}`,
-    t.summary && `它最后的进展：${t.summary}`,
-    t.links?.length && `它的产物：\n${t.links.map((l) => `- ${l.label}：${l.url}`).join("\n")}`,
-    said && `它最后说：${said}`,
-    t.session && `它做到哪、试过什么，读它的对话：gerdr session read ${t.session}。先接着它的进度做，别从头再来。`,
-  ]
-    .filter(Boolean)
-    .join("\n");
-}
-
 /**
  * Accepting an event: a task from it, following its conversation, sent out as the parts say, and "taken" said where
  * it came from. Taken under a proactive rule (nobody asked): the worker is told to stay within that rule, and nobody
@@ -250,7 +235,7 @@ async function accept(ctx: Ctx, it: Item, title: string | undefined, parts: Part
   } catch (err: any) {
     // Accepted all the same: the task is on the board; only sending it out is to redo, as a board task
     settle({ state: "accepted", tasks: ids, rule, reason: undefined });
-    throw new Error(`建了任务 ${t.id}，但没派出去：${err?.message ?? err}。改了用 {"item":"${t.id}","parts":[…]} 再派`);
+    throw new Error(`建了任务 ${t.id}，但没派出去：${err?.message ?? err}。改了用 tasks.dispatch {"id":"${t.id}","parts":[…]} 再派`);
   }
   settle({ state: "accepted", tasks: ids, rule, reason: undefined });
   if (!it.inferred) answer(ctx, it, `收到，建了任务 ${t.id}「${find(load(ctx).store, t.id).title}」，有结果会在这里说。`);

@@ -41,8 +41,8 @@
   它会在那个仓库开 worker（带上回报格式、`task=<id>` 标签，回报给你），并在看板上出现。`worktree: true` 给它一个独立
   worktree（同一个仓库同时有两个 worker 时用）。`agent` / `model` / `effort` 不填就用「设置」里给 worker 定的。
 - 用户在看板上派活时不选仓库、外面来了消息：都交给 Superagent 的调度会话（标题「Superagent 调度」，一直开着，
-  local/_main.ts）。它的第一条消息带齐了仓库、agent、模型规则，之后每条消息是一批 `[任务 tN]` / `[消息 cN]`，一条
-  `gerdr panel run superagent.decide '{"decisions":[…]}'` 给出全部决定。你不是它：你是陪用户说话的那个。
+  local/_main.ts）。它的第一条消息带齐了仓库、agent、模型规则，之后每条消息是一批 `[任务 tN]` / `[消息 cN]`：消息用
+  `gerdr panel run superagent.decide '{"decisions":[…]}'` 给出决定，看板任务用看板的命令（`tasks.dispatch` / `drop` / `say`）。你不是它：你是陪用户说话的那个。
   可选的仓库用 `gerdr panel run tasks.repos` 看。你自己派活（`tasks.add`）时也可以不给 `repo`，但你本来就知道该去哪，直接给上。
 - 用户要亲手做的步骤（网页后台点开关、准备账号、审批）记成人工任务：
   `gerdr panel run tasks.add '{"title":"…","owner":"human","steps":"带直达链接的步骤","handBack":{"kind":"none|value|secret","label":"…","name":"SECRET_NAME"},"verify":"agent 怎么核验","minutes":5,"blockedBy":[]}'`

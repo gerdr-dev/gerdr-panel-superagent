@@ -318,6 +318,8 @@ export function edit(input: Partial<Task> & { id: string }, ctx: Ctx) {
   return update(ctx, (s) => {
     const t = find(s, input.id);
     const { id, createdAt, ...rest } = input as any;
+    // Marked done here (a board task that was only an instruction, carried out): when, as every other way to done does
+    if ((rest.status === "done" || rest.status === "dropped") && !t.doneAt) rest.doneAt = Date.now();
     Object.assign(t, rest, { updatedAt: Date.now() });
     return t;
   });
@@ -597,6 +599,21 @@ function oneLine(s: string, n: number) {
   return [...x].length > n ? [...x].slice(0, n).join("") + "…" : x;
 }
 
+/** What a handover worker is told about the task it takes over: what it was for, how far it got, where to read more. */
+function handover(t: Task, said: string) {
+  return [
+    `## 交接：接手 ${t.id}「${t.title}」（它已停掉）`,
+    `它要做的：${t.request ?? t.prompt ?? t.title}`,
+    t.repo && `它的仓库：${t.repo}${t.worktree ? "（在 worktree 里，改动可能还在那个分支上）" : ""}`,
+    t.summary && `它最后的进展：${t.summary}`,
+    t.links?.length && `它的产物：\n${t.links.map((l) => `- ${l.label}：${l.url}`).join("\n")}`,
+    said && `它最后说：${said}`,
+    t.session && `它做到哪、试过什么，读它的对话：gerdr session read ${t.session}。先接着它的进度做，别从头再来。`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 /**
  * Undoes 放弃: { id } — back to where it was (its worker's conversation was only closed: the next message opens it
  * again, and a session it handed work to still reports back to it).
@@ -616,7 +633,7 @@ export function restore(input: { id: string }, ctx: Ctx) {
 
 /**
  * No repository given: the Superagent's main session picks one (and the agent, the model, a split into parallel
- * parts) and sends it out with superagent.decide. The prompt is saved first, so a failed hand-off leaves a plain
+ * parts) and sends it out with tasks.dispatch. The prompt is saved first, so a failed hand-off leaves a plain
  * todo to dispatch again.
  */
 async function route(id: string, prompt: string, ctx: Ctx) {
@@ -633,8 +650,9 @@ type Part = { repo: string; agent?: string; model?: string; effort?: string; wor
  * Sends a task out in one go, as the router decided: { id, title?, parts: [{ repo, agent?, model?, effort?, worktree?,
  * title?, prompt? }] }. One part is the task itself. Several run in parallel: the first stays this task (its title /
  * prompt narrowed to that part), each other one becomes a new task split off it (`from`), with the same attachments.
+ * from: a task this one takes over (usually just dropped with tasks.drop): its progress and conversation go in the prompt.
  */
-export async function dispatch(input: { id: string; title?: string; parts: Part[]; team?: boolean }, ctx: Ctx) {
+export async function dispatch(input: { id: string; title?: string; parts: Part[]; team?: boolean; from?: string }, ctx: Ctx) {
   const parts = input?.parts ?? [];
   if (!parts.length) throw new Error(`parts 至少一份：{"id":"${input?.id}","parts":[{"repo":"/绝对路径"}]}`);
   for (const p of parts) {
@@ -643,6 +661,17 @@ export async function dispatch(input: { id: string; title?: string; parts: Part[
   }
   const split = parts.length > 1;
   if (split && parts.some((p) => !p.prompt?.trim())) throw new Error("拆成几份时每份都要写 prompt：这一份做什么");
+  // A handover ("关闭 t11，新建一个任务来交接"): this task takes over `from`, told how far it got — in its prompt, or
+  // in the first part's when split (that is what its worker is told then). Once: a retry finds `from` already set.
+  if (input?.from) {
+    if (input.from === input.id) throw new Error("from 是它要接手的那个任务，不是它自己");
+    const old = find(load(ctx).store, input.from);
+    const t = find(load(ctx).store, input.id);
+    const told = handover(old, lastWords(String((old.session && ctx.sessions.get(old.session)?.reply) ?? "")));
+    if (split) parts[0] = { ...parts[0], prompt: `${parts[0].prompt}\n\n${told}` };
+    else if (t.from !== old.id) edit({ id: t.id, prompt: `${t.prompt ?? t.title}\n\n${told}` }, ctx);
+    edit({ id: t.id, from: old.id }, ctx);
+  }
   const { store } = load(ctx);
   const t = find(store, input.id);
   const [first, ...rest] = parts;
