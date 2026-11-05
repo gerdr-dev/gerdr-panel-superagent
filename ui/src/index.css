@@ -136,3 +136,33 @@
     /* No antialiased (grayscale smoothing), same as Gerdr's own UI: on macOS it thins glyphs, so text reads lighter and blurrier. */
   }
 }
+
+/* A label with a light band sweeping across it, like Gerdr's "思考中…" (.gerdr-shimmer in @gerdr/chat, which panels
+   don't load): the text keeps its real color and a moving mask dims all but the band. Not transparent text through
+   background-clip, which phones' Chromium sometimes never paints. Used on a 在等 line while that wait still holds. */
+.shimmer {
+  -webkit-mask-image: linear-gradient(90deg, rgb(0 0 0 / 0.45) calc(50% - 16px), #000 50%, rgb(0 0 0 / 0.45) calc(50% + 16px));
+  mask-image: linear-gradient(90deg, rgb(0 0 0 / 0.45) calc(50% - 16px), #000 50%, rgb(0 0 0 / 0.45) calc(50% + 16px));
+  -webkit-mask-size: 250% 100%;
+  mask-size: 250% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  animation: shimmer 2s linear infinite;
+}
+@keyframes shimmer {
+  from {
+    -webkit-mask-position: 100% center;
+    mask-position: 100% center;
+  }
+  to {
+    -webkit-mask-position: 0% center;
+    mask-position: 0% center;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shimmer {
+    animation: none;
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+}

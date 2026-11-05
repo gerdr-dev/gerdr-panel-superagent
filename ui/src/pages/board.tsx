@@ -1730,11 +1730,13 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
       );
     const m = who(a.by);
     const to = who(a.to);
+    // A 在等 line still in effect (its member's latest line, and it still waits on that) shimmers like "思考中…"
+    const waiting = a.kind === "wait" && m?.status === "running" && (t.activity ?? []).filter((y) => y.by === a.by).pop() === a && !!m.waits?.some((w) => w.what === a.text);
     return (
       <div className="flex gap-2">
         <Avatar m={m} lead={m?.id === t.id} />
         <div className="min-w-0 flex-1 space-y-1">
-          {head(m, `${KIND[a.kind] ?? a.kind}${to ? ` → ${memberLabel(to)}` : ""}`, a.at, a.kind === "done" ? "text-ok" : a.kind === "review" ? "text-warn" : undefined)}
+          {head(m, `${KIND[a.kind] ?? a.kind}${to ? ` → ${memberLabel(to)}` : ""}`, a.at, a.kind === "done" ? "text-ok" : a.kind === "review" ? "text-warn" : waiting ? "shimmer text-foreground/80" : undefined)}
           <p className={clsx("inline-block max-w-full rounded-lg rounded-tl-sm px-3 py-2 text-[13px] whitespace-pre-wrap", a.kind === "done" ? "bg-ok/10" : "bg-muted")}>{a.text}</p>
         </div>
       </div>
