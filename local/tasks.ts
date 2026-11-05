@@ -1,5 +1,6 @@
 import { tellInbox } from "./_inbox";
 import { workflow } from "./_config";
+import { forWorker } from "./memory";
 import { activity, blockersDone, find, load, members, newTask, note, reqOf, update, type Question, type Store, type Task } from "./_store";
 import { applyBlock } from "./_apply";
 import { askUser, endQuestions, endWaits, isOutside, open, question, syncAgents, syncSessions, wakeText, type Wait } from "./_waits";
@@ -51,7 +52,8 @@ export async function list(input: unknown, ctx: Ctx) {
   const live: Record<string, any> = {};
   const { store } = load(ctx);
   // Read sessions outside the write: ctx.sessions.get is cheap, but keep the locked part small
-  for (const t of store.tasks) if (t.session && t.status !== "done" && t.status !== "dropped") live[t.session] = ctx.sessions.get(t.session);
+  // Done ones too: the user may give a finished worker more to do in its chat (below)
+  for (const t of store.tasks) if (t.session && t.status !== "dropped") live[t.session] = ctx.sessions.get(t.session);
   // Sessions the workers handed work to (reportTo / parent / a task tag), here or on another computer: waits of their
   // task (_waits.ts syncSessions)
   const all = ctx.sessions.list() as (Session & { parent?: string; reportTo?: string })[];
@@ -72,6 +74,22 @@ export async function list(input: unknown, ctx: Ctx) {
     nudge.length = 0; // update retries this function on a write race: decide afresh each time
     for (const t of s.tasks) {
       const sess = t.session && live[t.session];
+      // The user wrote to a finished worker in its chat and it's at it again (t54, 2026-11-05: "把这个做了" after it
+      // was done, the card stayed in 已完成): the task is going again. Only the user's own message: code waking a
+      // parked worker (a follow-up) decides that itself (wake resume).
+      if (t.status === "done" && t.owner === "agent" && sess?.status === "running" && t.doneAt) {
+        const said = (sess as any).personSaid as { at: number } | undefined;
+        if ((said?.at ?? 0) > t.doneAt || (sess.byPerson && (sess.turnStartedAt ?? 0) > t.doneAt)) {
+          Object.assign(t, { status: "running", doneAt: undefined, updatedAt: Date.now() });
+          // Its requirement was closed with it: open again, without judging the lead's own (idle) session afresh
+          const root = reqOf(s, t);
+          if (root && root !== t && root.status === "done") {
+            Object.assign(root, { status: "running", doneAt: undefined, updatedAt: Date.now() });
+            const rs = root.session && live[root.session];
+            if (rs) root.synced = rs.updatedAt;
+          }
+        }
+      }
       // What the user typed in its chat (Gerdr's personSaid): the feed shows it, or the lines after it make no sense
       // (t52: "等扶摇审批" with nothing saying the user asked for 扶摇)
       const ps = (sess as any)?.personSaid as { text: string; at: number } | undefined;
@@ -371,7 +389,7 @@ export async function start(
     ...who,
     mode: input.mode,
     title: t.title,
-    prompt: (prompt || "看附件，照里面的做。") + WORKER_PROTOCOL.split("{id}").join(t.id) + directNote(ctx, repo),
+    prompt: (prompt || "看附件，照里面的做。") + WORKER_PROTOCOL.split("{id}").join(t.id) + forWorker(ctx, repo),
     attachments: (t.attachments ?? []).map((a) => a.path),
     tags: { task: t.id },
     // Followed on the board (its drawer shows the chat), not in Code: no tab of it appears there
@@ -388,17 +406,6 @@ export async function start(
     if (input.effort) x.effort = input.effort;
     return x;
   });
-}
-
-/**
- * The user marked this repository "small changes may be pushed straight" (设置 → 仓库): the worker is told, since
- * the skill (deliver.md) says when to do so but not where; nothing else in its context would say.
- */
-function directNote(ctx: Ctx, repo: string) {
-  const r = workflow(ctx).repos.find((x) => ctx.dirs.stat(x.path)?.path === repo);
-  return r?.direct
-    ? `In this repository the user allows small changes to be pushed straight to the target branch instead of an MR (see the delivery rules in their skill).\n`
-    : "";
 }
 
 /**
@@ -527,6 +534,47 @@ export async function say(input: { id: string; text: string }, ctx: Ctx) {
   const t = find(load(ctx).store, input.id);
   await tell(ctx, t, input.text.trim());
   return { sent: t.id, session: t.session };
+}
+
+/**
+ * The user writes to members of a requirement from its drawer, as in a chat: { id (any task of the card), to: [member
+ * ids], text, attachments?: [{ path, name }] }. Each one gets it right away (now, even mid-step) and picks the task up
+ * again if it had ended; the feed has one line for it. Several at once are each told who else got it, so they don't
+ * both act on it. With one member, `to` may be left out.
+ */
+export async function message(input: { id: string; to?: string[]; text: string; attachments?: { path: string; name?: string }[] }, ctx: Ctx) {
+  const text = input.text?.trim() ?? "";
+  const files = (input.attachments ?? []).filter((a) => a?.path);
+  if (!text && !files.length) throw new Error("消息是空的");
+  const { store } = load(ctx);
+  const root = reqOf(store, find(store, input.id));
+  if (!root) throw new Error(`${input.id} 不是 agent 的任务`);
+  const all = members(store, root).filter((m) => m.status !== "dropped" && m.session);
+  let to = [...new Set(input.to ?? [])];
+  if (!to.length) {
+    if (all.length !== 1) throw new Error(`这个需求有 ${all.length} 个成员，要 @ 发给谁（${all.map((m) => m.id).join("、")}）`);
+    to = [all[0].id];
+  }
+  const targets = to.map((id) => {
+    const m = all.find((x) => x.id === id);
+    if (!m) throw new Error(`${id} 不是这个需求里还在的成员（${all.map((x) => x.id).join("、")}）`);
+    return m;
+  });
+  const name = (m: Task) => m.repo?.split("/").pop() || m.id;
+  const list = files.length ? `\n附件：\n${files.map((a) => `- ${a.name ?? a.path.split("/").pop()}：${a.path}`).join("\n")}` : "";
+  const feed = `你对 ${targets.map(name).join("、")} 说：${text || "（附件）"}${files.length ? `（${files.length} 个附件）` : ""}`;
+  for (const [i, m] of targets.entries()) {
+    const others = targets.filter((x) => x !== m);
+    await wake(ctx, m.id, {
+      how: "你发了消息",
+      text: `[看板] 用户在需求的面板里对你说${others.length ? `（同时发给了 ${others.map((x) => `${x.id}（${name(x)}）`).join("、")}，谁做哪部分不清楚就先和它说好）` : ""}：\n\n${text}${list}`,
+      files: files.map((a) => a.path),
+      resume: true,
+      // One line for all of them, written with the first
+      feed: i === 0 ? feed : undefined,
+    });
+  }
+  return { sent: targets.map((m) => m.id) };
 }
 
 /** Drops a task (not doing it). { id, reason? } */

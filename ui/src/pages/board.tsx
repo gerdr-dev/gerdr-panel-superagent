@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowRight, Bot, Users, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ListTodo, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Route, Send, Settings, Undo2, X } from "lucide-react";
+import { AlertTriangle, ArrowRight, ArrowUp, Bot, Users, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ListTodo, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Route, Send, Settings, Undo2, X } from "lucide-react";
 import clsx from "clsx";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { Button } from "../components/Button";
@@ -1302,8 +1302,16 @@ function MentionArea({
   onSubmit,
   className,
   placeholder,
+  up = false,
+  autoFocus = true,
+  byName = false,
 }: {
+  /** Picking inserts @name (a member's repository: what people call it), not @id. */
+  byName?: boolean;
   agents: AgentInfo[];
+  /** The @ list opens above the box (a box at the bottom of the screen). */
+  up?: boolean;
+  autoFocus?: boolean;
   value: string;
   onChange: (v: string) => void;
   /** Enter (not Shift+Enter, not an input method's): send. With the @ list open, Enter picks from it instead. */
@@ -1325,16 +1333,17 @@ function MentionArea({
   const pick = (a: AgentInfo) => {
     if (!q) return;
     const end = q.at + 1 + q.word.length;
-    onChange(value.slice(0, q.at) + "@" + a.id + " " + value.slice(end));
+    const word = byName ? a.name : a.id;
+    onChange(value.slice(0, q.at) + "@" + word + " " + value.slice(end));
     setQ(null);
-    const caret = q.at + a.id.length + 2;
+    const caret = q.at + word.length + 2;
     requestAnimationFrame(() => ref.current?.setSelectionRange(caret, caret));
   };
   return (
     <div className="relative">
       <textarea
         ref={ref}
-        autoFocus
+        autoFocus={autoFocus}
         className={className}
         placeholder={placeholder}
         value={value}
@@ -1367,7 +1376,7 @@ function MentionArea({
         }}
       />
       {found.length > 0 && (
-        <div data-mention-list className="absolute inset-x-2 top-full z-50 mt-1 overflow-hidden rounded-md border bg-popover text-[13px] text-popover-foreground shadow-md">
+        <div data-mention-list className={clsx("absolute inset-x-2 z-50 overflow-hidden", up ? "bottom-full mb-1" : "top-full mt-1", "rounded-md border bg-popover text-[13px] text-popover-foreground shadow-md")}>
           {found.map((a, i) => (
             <button
               key={a.id}
@@ -1585,6 +1594,68 @@ type FeedItem = { at: number; key: string } & ({ type: "act"; a: NonNullable<Tas
  * asked. It opens on the latest thing waiting on the user, else at the bottom. 放弃 / 标为完成 are for the whole
  * requirement; chats are only behind the avatars.
  */
+/**
+ * Writing to the requirement's members from its drawer, like the chat's input box: one member gets it without an @;
+ * with several, @ picks who (one or more). Each gets it right away (tasks.message), and the feed has the line.
+ */
+function FeedComposer({ t, ms, act }: { t: Task; ms: Task[]; act: Act }) {
+  const [text, setText] = useState("");
+  const [files, setFiles] = useState<Attachment[]>([]);
+  const attach = useAttach(files, setFiles);
+  const { busy, err, go } = useAction(act);
+  const pick = useRef<HTMLInputElement>(null);
+  const live = ms.filter((m) => m.status !== "dropped" && m.session);
+  const people: AgentInfo[] = live.map((m) => ({ id: m.id, name: memberLabel(m) }));
+  const to = mentionsOf(text, people);
+  const alone = live.length === 1;
+  const ready = !attach.uploading && (text.trim() || files.length) && (alone || to.length > 0) && !busy;
+  if (!live.length) return null;
+  const send = async () => {
+    if (!ready) return;
+    const ok = await go("message", "message", {
+      id: t.id,
+      to: alone ? undefined : to.map((a) => a.id),
+      text,
+      attachments: files.filter((a) => a.path).map((a) => ({ path: a.path, name: a.name })),
+    });
+    if (ok) (setText(""), setFiles([]));
+  };
+  const hint = alone ? `发给 ${memberLabel(live[0])}` : to.length ? `发给 ${to.map((a) => a.name).join("、")}` : "@ 选择发给谁（可以 @ 几个）";
+  return (
+    <div className="px-3 pt-2 pb-1" onDrop={attach.onDrop} onDragOver={attach.onDragOver}>
+      <div className="rounded-2xl border border-border/60 bg-card shadow-md transition-colors focus-within:border-ring/60">
+        {files.length > 0 && (
+          <div className="px-3 pt-3">
+            <AttachmentBar items={files} onChange={setFiles} onPick={attach.add} />
+          </div>
+        )}
+        <MentionArea
+          agents={people}
+          value={text}
+          onChange={setText}
+          onPaste={attach.onPaste}
+          onSubmit={() => void send()}
+          up
+          byName
+          autoFocus={false}
+          className="block max-h-40 min-h-[2.75rem] w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-[14px] leading-relaxed outline-none [field-sizing:content] placeholder:text-muted-foreground max-md:text-[16px]"
+          placeholder={alone ? "发消息给它（回车发送，Shift+回车换行）" : "输入 @ 选成员，再写要说的（回车发送）"}
+        />
+        <div className="flex items-center gap-1 px-2.5 pb-2.5">
+          <button aria-label="加图片或文件" onClick={() => pick.current?.click()} className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
+            <Paperclip className="size-4" />
+          </button>
+          <input ref={pick} type="file" multiple hidden onChange={(e) => (attach.add([...(e.target.files ?? [])]), (e.target.value = ""))} />
+          <span className={clsx("min-w-0 flex-1 truncate text-[12px]", err ? "text-bad" : !alone && !to.length && text.trim() ? "text-warn" : "text-muted-foreground")}>{err || hint}</span>
+          <Button size="icon" className="size-8 rounded-full" aria-label="发送" disabled={!ready} onClick={() => void send()}>
+            {busy ? <Loader2 className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Task[]; byId: Record<string, Task>; act: Act; onClose: () => void; onGo: (id: string) => void }) {
   const { busy, err, go } = useAction(act);
   const [rejecting, setRejecting] = useState(false);
@@ -1870,6 +1941,7 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
           )}
         </div>
         </div>
+        {t.status !== "dropped" && <FeedComposer t={t} ms={ms} act={act} />}
         <div className="flex flex-wrap items-center justify-end gap-2 border-t px-4 py-2.5">
           {err && <p role="alert" className="mr-auto text-[12px] text-bad">{err}</p>}
           {rejecting && (
