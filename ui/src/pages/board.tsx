@@ -148,15 +148,12 @@ export default function BoardPage() {
   // A conversation opened from a panel ("回到 tN 的对话", a finished task's chat): the chat alone, over the panel,
   // with its task's 链路 when it has one
   const [peek, setPeek] = useState<{ session: string; task?: string; sub?: string; from?: string } | null>(null);
-  // Opening a conversation from a task's panel closes the panel: it sat on top and hid the chat (on a phone, all of it).
-  // The panel it came from is kept, for the chat's way back (a member's avatar in a requirement's drawer)
+  // A conversation opened from a task's drawer (a member's avatar in a requirement) is a second layer over that drawer,
+  // which stays open underneath: the user goes back and forth between the two often, and closing the chat (its way
+  // back, Esc) just slides it off the drawer again instead of swapping one drawer for another
   const openRef = useRef(open);
   openRef.current = open;
-  openChat = (session: string, task?: string) => {
-    const from = openRef.current || undefined;
-    setOpen("");
-    setPeek({ session, task, from });
-  };
+  openChat = (session: string, task?: string) => setPeek({ session, task, from: openRef.current || undefined });
   // A worker's conversation brought up from elsewhere in Gerdr (a notification, the inbox): it's this board's, so it
   // opens here, as its task's drawer (or just the chat when no task has it)
   const tasksRef = useRef(tasks);
@@ -274,7 +271,7 @@ export default function BoardPage() {
       )}
       <Linger>{sel && isTeam(sel) && <TeamDrawer t={sel} tasks={tasks ?? []} byId={byId} act={act} onClose={() => setOpen("")} onGo={setOpen} />}</Linger>
       <Linger>{sel && !inChat && !isTeam(sel) && <Drawer t={sel} byId={byId} act={act} onClose={() => setOpen("")} onGo={setOpen} />}</Linger>
-      <Linger>{panel && sel && viewing && view && !peek && (
+      <Linger>{panel && sel && viewing && view && (
         <ChatDrawer
           session={view.session}
           sub={view.sub}

@@ -55,6 +55,7 @@ function SheetContent({
   side?: "top" | "right" | "bottom" | "left"
   showCloseButton?: boolean
 }) {
+  const self = React.useRef<HTMLDivElement>(null)
   return (
     <SheetPortal>
       <SheetOverlay />
@@ -72,9 +73,16 @@ function SheetContent({
             "inset-x-0 bottom-0 h-auto border-t data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
           className
         )}
+        ref={self}
         // Same as DialogContent: picking an item in the app's context menu, or touching a toast, isn't a click outside
         onInteractOutside={(e) => {
           if ((e.target as Element | null)?.closest?.("[data-app-context-menu],[data-sonner-toaster]")) e.preventDefault()
+          // Sheets stacked (a chat over the drawer it came from): only the top one goes. A click in another sheet (the
+          // top one's own buttons, its way back — it may be closing by now) isn't outside this one
+          const sheet = (e.target as Element | null)?.closest?.("[data-slot=sheet-content]")
+          if (sheet && sheet !== self.current) return e.preventDefault()
+          const open = document.querySelectorAll("[data-slot=sheet-content][data-state=open]")
+          if (open.length > 1 && open[open.length - 1] !== self.current) return e.preventDefault()
           onInteractOutside?.(e)
         }}
         style={{ ...keepLayer, ...style }}
