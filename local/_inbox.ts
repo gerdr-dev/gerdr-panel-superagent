@@ -9,6 +9,7 @@ type Listed = Task & {
   column: string;
   question?: string;
   stopped?: boolean;
+  stopWhy?: string;
   said?: string;
   live?: { status: string; waiting?: string } | null;
   helpers?: { title: string; waiting?: string; waitingKind?: string; left?: boolean }[];
@@ -37,7 +38,7 @@ export function tellInbox(ctx: Ctx, tasks: Listed[]) {
       : k
         ? `它派出去的「${k.title}」${k.waitingKind === "ask" ? "在问" : "要你批准"}：${k.waiting ?? ""}`
         : t.stopped
-          ? `停下了${t.said ? `：${t.said}` : "，没说接下来要什么"}`
+          ? `${t.stopWhy ?? "停下了"}${t.said ? `。它最后说：${t.said}` : ""}`
           : "在等你";
     items.push({ id: t.id, title: `${t.id} ${cut(line)}`, body: t.title, session: t.session });
   }

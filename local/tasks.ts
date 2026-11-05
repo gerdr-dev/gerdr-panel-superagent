@@ -83,6 +83,10 @@ export async function list(input: unknown, ctx: Ctx) {
         endWaits(t, (w) => isOutside(w) && w.since < turn, "接着做了");
         if (t.status === "review") Object.assign(t, { status: "running", updatedAt: Date.now() });
       }
+      // Stopped by the user (or Gerdr restarting): theirs, not a worker that went quiet. No "it stopped without
+      // reporting" for them to answer, and no reminder — a reminder would start it again against their stop
+      const cancelled = (sess as any)?.stopReason === "cancelled";
+      if (cancelled && sess.status === "idle") endWaits(t, (w) => w.kind === "user" && !w.item && w.what.startsWith(STOPPED_ASK), "你停下了它");
       if (!sess || (sess.status !== "idle" && sess.status !== "error")) continue;
       if (t.synced === sess.updatedAt) continue;
       t.synced = sess.updatedAt;
@@ -92,8 +96,8 @@ export async function list(input: unknown, ctx: Ctx) {
       // question / blocked still apply: they say something changed or is needed.
       if (b && sess.byPerson && b.state === "review" && t.status === "running") applyBlock(s, t, { ...b, state: undefined });
       else if (b) applyBlock(s, t, b);
-      else if (t.status === "running" && sess.status === "idle" && !t.viaTools) askUser(t, "Worker 停下了，但没在看板上汇报进展：去对话里看看它说了什么，让它接着做，或者直接「标为完成」");
-      else if (t.status === "running" && sess.status === "idle" && silentStop(t)) {
+      else if (t.status === "running" && sess.status === "idle" && !t.viaTools && !cancelled) askUser(t, `${STOPPED_ASK}：去对话里看看它说了什么，让它接着做，或者直接「标为完成」`);
+      else if (t.status === "running" && sess.status === "idle" && silentStop(t) && !cancelled) {
         // It stopped with nothing to wait on — a question written only in its reply (t3, 2026-11-04), "I'll wait" with
         // nothing to wake it (t29), "working" reported and then nothing (t30). Reminded once to say on the board
         // what's next; if it stops like that again, the user is told, with what it last said.
@@ -130,7 +134,10 @@ export async function list(input: unknown, ctx: Ctx) {
   const tasks = s.tasks.map((t) => {
       const sess = t.session ? live[t.session] : null;
       const halted = stopped(t, sess);
-      const said = halted ? String(sess?.reply ?? "").replace(/\s+/g, " ").trim() : "";
+      // What it last said, for any card that has it stopped (or asking about a stop): its last paragraph, without
+      // Gerdr's note on how the turn ended (that's stopWhy)
+      const idle = sess && (sess.status === "idle" || sess.status === "error");
+      const said = idle && (halted || question(t)?.startsWith(STOPPED_ASK)) ? lastWords(String(sess?.reply ?? "")) : "";
       const ks = kids[t.id] ?? [];
       return {
         ...t,
@@ -145,7 +152,8 @@ export async function list(input: unknown, ctx: Ctx) {
         ready: blockersDone(s, t),
         // Stopped with nothing to wait on (shown under 等你): what it last said, for the card
         stopped: halted || undefined,
-        said: said ? [...said].slice(0, 200).join("") + ([...said].length > 200 ? "…" : "") : undefined,
+        stopWhy: halted ? stopWhy(t, sess) : undefined,
+        said: said || undefined,
       };
     });
   // What waits on the user, in Gerdr's inbox too (_inbox.ts): each member and step on its own, as before
@@ -173,6 +181,31 @@ function teams<T extends Task & { column: string }>(s: Store, tasks: T[]) {
     if (col !== "done") for (const x of mine) if ((rank[x.column] ?? 0) > (rank[col] ?? 0)) col = x.column;
     return { ...t, teamColumn: col, members: members(s, byId.get(t.id)!).map((m) => m.id) };
   });
+}
+
+/** The board's own question when a worker stops without reporting (older tasks have it): told apart from a real one. */
+const STOPPED_ASK = "Worker 停下了，但没在看板上汇报进展";
+
+/** Gerdr's note at the end of a reply on how the turn ended (lastReply in its workhost.go): not the worker's words. */
+const ENDING = /^(这一轮结束：|Turn ended: |出错：|Error: )/;
+
+/** The worker's last paragraph, whitespace folded, its end kept when long (the card shows two lines). */
+function lastWords(reply: string) {
+  const ps = reply.split(/\n\s*\n/).map((p) => p.replace(/\s+/g, " ").trim()).filter((p) => p && !ENDING.test(p));
+  const p = ps[ps.length - 1] ?? "";
+  return [...p].length > 240 ? "…" + [...p].slice(-240).join("") : p;
+}
+
+/** Why a worker stopped with nothing going on, for the card: the user's stop, a restart, an error, or nothing said. */
+function stopWhy(t: Task, sess: any) {
+  if (sess?.status === "error") return `出错了${sess.error ? `：${sess.error}` : ""}`;
+  if (sess?.stopReason === "cancelled") {
+    const err = String(sess.reply ?? "").split(/\n\s*\n/).reverse().find((p) => /^(出错：|Error: )/.test(p.trim()));
+    return err ? err.trim().replace(/^(出错：|Error: )/, "") : "你停下了它";
+  }
+  if (sess?.stopReason && sess.stopReason !== "end_turn") return `这一轮没正常结束（${sess.stopReason}）`;
+  if (!sess) return "对话关掉了";
+  return `停下了，没在看板上说接下来要什么${(t.nudges ?? 0) > 0 ? "（提醒过一次）" : ""}`;
 }
 
 /**

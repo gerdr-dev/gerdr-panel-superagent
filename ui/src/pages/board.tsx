@@ -424,7 +424,7 @@ function chatPanel(t: Task, byId: Record<string, Task>): { label: string; action
             : t.question
               ? `它问你：${t.question}`
               : t.stopped
-                ? `停下了，没在看板上说接下来要什么${(t.nudges ?? 0) > 0 ? "（已提醒它补上）" : ""}${t.said ? `。它最后说：「${t.said}」` : ""}`
+                ? `${t.stopWhy ?? "停下了"}${t.said ? `。它最后说：「${t.said}」` : ""}`
                 : "它在等你，见最后一条回复"
       }`,
       actions: [drop, done],
@@ -476,7 +476,7 @@ function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, T
       </div>
       <p className={clsx("line-clamp-2 text-[13px] font-medium", t.status === "dropped" && "text-muted-foreground line-through")}>{t.title}</p>
       {t.question && colOf(t) === "you" && <p className="line-clamp-2 text-[12px] text-warn">{t.question}</p>}
-      {!t.question && t.stopped && <p className="line-clamp-2 text-[12px] text-warn">停下了{t.said ? `：${t.said}` : "，没说接下来要什么"}</p>}
+      {!t.question && t.stopped && <p className="line-clamp-2 text-[12px] text-warn">{t.stopWhy ?? "停下了"}{t.said ? `：${t.said}` : ""}</p>}
       {!t.question && t.status === "running" && outside(t)[0] && <p className="line-clamp-2 text-[12px] text-muted-foreground">等：{outside(t)[0].what}</p>}
       {!t.question &&
         t.helpers
@@ -1411,8 +1411,10 @@ function stuckText(x: Task) {
   if (x.live?.status === "waiting") return `等你批准 / 回答${x.live.waiting ? `：${x.live.waiting}` : ""}`;
   if (x.live?.status === "error") return `出错了：${x.live.error ?? ""}`;
   if (k) return `它派出的「${k.title}」${k.waitingKind === "ask" ? "在问" : "要你批准"}：${k.waiting ?? ""}`;
+  // The board's own ask on older tasks when a worker stopped without reporting: a stop, not a question from it
+  if (x.question?.startsWith("Worker 停下了")) return "停下了，没在看板上汇报";
   if (x.question) return `问你：${x.question}`;
-  if (x.stopped) return `停下了${x.said ? `：${x.said}` : "，没说接下来要什么"}`;
+  if (x.stopped) return x.stopWhy ?? "停下了";
   return "在等你";
 }
 
@@ -1571,7 +1573,11 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
           <div className="min-w-0 flex-1 space-y-1">
             {head(x.m, "在等你", x.at, "text-warn")}
             <div className="flex items-start gap-2 rounded-lg rounded-tl-sm border border-warn/50 bg-warn/5 px-3 py-2 text-[13px]">
-              <span className="min-w-0 flex-1 whitespace-pre-wrap">{stuckText(x.m)}</span>
+              <span className="min-w-0 flex-1 space-y-0.5">
+                <span className="block whitespace-pre-wrap">{stuckText(x.m)}</span>
+                {/* Where it left off: its last words, two lines at most (the rest is one click away, in its chat) */}
+                {x.m.said && <span className="line-clamp-2 block text-[12px] text-muted-foreground">它最后说：{x.m.said}</span>}
+              </span>
               {x.m.session && (
                 <Button variant="outline" onClick={() => openChat(x.m.session!, x.m.id)}>
                   <MessageSquare className="size-3.5" />

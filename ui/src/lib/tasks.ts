@@ -41,6 +41,8 @@ export type Task = {
   waits?: Wait[];
   /** Its worker stopped with nothing to wait on (tasks.ts list): under 等你, with what it last said. */
   stopped?: boolean;
+  /** Why it stopped, in words (tasks.ts stopWhy): the user's stop, a restart, an error, or nothing said. */
+  stopWhy?: string;
   /** Sessions its worker handed work to, still going: it waits on them. */
   helpers?: { id: string; title: string; status: string; waiting?: string; waitingKind?: "permission" | "ask"; /** waits on the user (an approval, or a question its worker left) */ left?: boolean }[];
   said?: string;
