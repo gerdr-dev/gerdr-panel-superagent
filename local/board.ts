@@ -70,6 +70,23 @@ export const tools = {
   },
 };
 
+/**
+ * What Gerdr gives a conversation of this panel with these tools (its MCP instructions). Its system prompt keeps it,
+ * so a worker still knows which task it is after /clear or compaction; the brief in its first message is gone by then
+ * (t31 after /clear went looking for "question features in taskboard", 2026-11-05). "" for a conversation that
+ * isn't a task's worker (a helper a worker started).
+ */
+export function instructions(input: unknown, ctx: Ctx) {
+  const who = ctx.caller.session;
+  const t = who && load(ctx).store.tasks.find((x) => x.owner === "agent" && (x.session === who || x.sessions?.includes(who)));
+  if (!t) return "";
+  return (
+    `You are the worker of task ${t.id} ("${t.title}") on the user's Superagent board. They follow it on the board, not in ` +
+    `this chat. How to work on it (reporting with these tools, asking them, starting other agents) is their my-workflow ` +
+    `skill, references/board.md: read it before you report or stop. my_task shows the task as the board sees it.`
+  );
+}
+
 /** The task whose worker is the calling conversation. */
 export function mine(s: Store, ctx: Ctx): Task {
   const who = ctx.caller.session;
