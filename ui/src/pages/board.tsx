@@ -1455,7 +1455,7 @@ function TeamCard({ t, tasks, active, onOpen }: { t: Task; tasks: Task[]; active
   );
 }
 
-const KIND: Record<string, string> = { progress: "进展", tell: "通知", join: "加入", done: "完成", review: "待你看", user: "你", stuck: "卡住" };
+const KIND: Record<string, string> = { wait: "在等", progress: "进展", tell: "通知", join: "加入", done: "完成", review: "待你看", user: "你", stuck: "卡住" };
 
 /**
  * Opening a requirement: what waits on the user first (answered right here), then its members (a click opens one's

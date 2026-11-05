@@ -16,7 +16,7 @@
 // Meanwhile the card stays in 进行中 showing what it waits on and the latest check; the worker running again (woken, or
 // the user writing to it) ends the wait — it calls wait_for again if it still waits.
 
-import { load, memberName, members, note, teamOf, update, type Task } from "./_store";
+import { activity, load, memberName, members, note, teamOf, update, type Task } from "./_store";
 import { isOutside, mrConversation, open, waitOn, wakeText, type Wait, type WakeOn } from "./_waits";
 import { wake } from "./_wake";
 import { followUp, record, subscribers, compact } from "./_main";
@@ -154,6 +154,11 @@ export function wait_for(
     });
     const ws = waitOn(t, what, on);
     note(t, `等：${what}（${ws.map((w) => wakeText(w)).join("；")}）`);
+    // Its own part is done and it waits on something it doesn't control (CI, a teammate, a colleague): a fact for the
+    // requirement's feed, like a part done. The same wait again (woken, still waiting) isn't news.
+    const root = teamOf(s, t);
+    const last = (root?.activity ?? []).filter((a) => a.by === t.id).pop();
+    if (root && !(last?.kind === "wait" && last.text === what)) activity(s, t, { by: t.id, kind: "wait", text: what });
     Object.assign(t, { viaTools: true, reportedAt: now, nudges: 0, updatedAt: now });
     return { t, ws };
   });
