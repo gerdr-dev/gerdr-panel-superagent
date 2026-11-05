@@ -102,20 +102,20 @@ export const tools = {
   },
   tell: {
     description:
-      "Tell a teammate (another member of your requirement) something it must know now: your part is ready (with the doc / MR link), what failed when you tried theirs (with the error), a change of plan. It gets it right away, even mid-step (a build it should stop). A line goes in the requirement's activity for the user. Waiting for its answer: wait_for with {type: teammate}.",
+      "Tell a teammate (another member of your requirement) something it must know now: your part is ready (with the doc / MR link), what failed when you tried theirs (with the error), a change of plan. It gets it right away, even mid-step (a build it should stop). With summary, a line goes in the requirement's activity for the user. Waiting for its answer: wait_for with {type: teammate}.",
     input: {
       type: "object",
       properties: {
         to: { type: "string", description: "The teammate's task id (my_task lists them)" },
         text: { type: "string", description: "The message, complete: what it needs to act on, links rather than pasted contents" },
-        summary: { type: "string", description: "One line for the user's activity feed (接口好了，已告诉前端去联调). Default: the first line of text" },
+        summary: { type: "string", description: "A line for the requirement's activity feed, which the user reads. Only when the user's rules say this message belongs there (the my-workflow skill, references/activity.md); left out, the message stays between you two" },
       },
       required: ["to", "text"],
     },
   },
   post_progress: {
     description:
-      "A milestone in your requirement's activity feed, which is what the user follows instead of your chat: one line, a step that matters to them (接口和文档好了；联调通过；发现要改表结构). Not every command or file: a few lines per requirement. Finishing (task_update done / review), telling a teammate and asking the user add their own lines; don't repeat them here.",
+      "A line in your requirement's activity feed, which the user follows instead of your chat. What deserves a line, and what never does, is the user's own rule: the my-workflow skill, references/activity.md — read it before writing one. Finishing (task_update done / review), asking the user and pulling in a teammate add their own lines; don't repeat them here.",
     input: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
   },
 };
@@ -137,7 +137,7 @@ export function instructions(input: unknown, ctx: Ctx) {
     ? ` You are one member of requirement ${root.id} ("${root.title}")${root.id === t.id ? ", and its lead: you say when the whole of it is done" : `, led by ${memberName(root)}`}. ` +
       `Teammates, each in its own repository: ${mates.map((x) => `${memberName(x)} "${x.title}"`).join("; ") || "none yet"}. ` +
       `Talk to them straight with tell (it reaches them at once), wait for them with wait_for {type: teammate}; ` +
-      `the user follows the requirement's activity feed, not your chats (post_progress for a milestone).`
+      `the user follows the requirement's activity feed, not your chats — what goes in it is their my-workflow skill, references/activity.md.`
     : "";
   return (
     `You are the worker of task ${t.id} ("${t.title}") on the user's Superagent board. They follow it on the board, not in ` +
@@ -366,8 +366,9 @@ export async function tell(input: { to: string; text: string; summary?: string }
       return { stuck: root.bounces };
     }
     root.bounces = (root.bounces ?? 0) + 1;
-    const line = input.summary?.trim() || firstLine(text);
-    activity(s, from, { by: from.id, to: to.id, kind: "tell", text: line });
+    // In the feed only when the member says so (its summary, by the user's activity.md): the talk itself is theirs
+    const line = input.summary?.trim();
+    if (line) activity(s, from, { by: from.id, to: to.id, kind: "tell", text: line });
     Object.assign(from, { viaTools: true, reportedAt: Date.now() });
     return { from, to };
   });
@@ -401,12 +402,6 @@ export function post_progress(input: { text: string }, ctx: Ctx) {
     return { ok: true };
   });
 }
-
-function firstLine(text: string) {
-  const line = text.split("\n")[0].trim();
-  return [...line].length > 80 ? [...line].slice(0, 80).join("") + "…" : line;
-}
-
 export async function hand_back(input: { event: string; reason: string }, ctx: Ctx) {
   const { store } = load(ctx);
   const t = mine(store, ctx);
