@@ -326,19 +326,27 @@ function takeBack(s: Store, t: Task, id: string, reason: string) {
       status: "dropped",
       left: left.filter((x) => !x.answer).map((x) => `${hid}#${x.id}`),
       ...(answered ? { answers: left.map((x) => ({ id: `${hid}#${x.id}`, title: x.title, answer: x.answer })), note: "其余的问题用户都答了，答案在 answers 里：照这些接着做" } : {}),
-      gerdrCard: { title: `不用答了：${q.title}`, body: reason, tone: "info" },
+      gerdrCard: takenBack(`${hid}#${q.id}`, q.title, reason),
     };
   }
   if (h.owner !== "human" || (h.askedBy !== t.id && !t.blockedBy?.includes(h.id))) throw new Error(`${h.id} 不是你这个任务要的人工步骤`);
   if (h.status === "done") throw new Error(`${h.id} 用户已经做完了${h.handedBack ? `（交回：${h.handedBack}）` : ""}`);
   if (h.status !== "dropped") {
     note(h, `worker 撤回了：${reason}`);
-    Object.assign(h, { status: "dropped", doneAt: Date.now(), updatedAt: Date.now() });
+    Object.assign(h, { status: "dropped", doneAt: Date.now(), updatedAt: Date.now(), dropReason: reason });
     // Said in the feed: the item leaving 等你 with no word was all the user saw (t55, 2026-11-05)
     activity(s, t, { kind: "join", by: t.id, text: `撤回了要你做的 ${h.id}「${h.title}」${reason ? `：${reason}` : ""}` });
   }
   t.blockedBy = (t.blockedBy ?? []).filter((x) => x !== h.id);
-  return { id: h.id, status: "dropped", gerdrCard: { title: `不用做了：${h.id} ${h.title}`, body: reason, tone: "info" } };
+  return { id: h.id, status: "dropped", gerdrCard: takenBack(h.id, h.title, reason) };
+}
+
+/**
+ * The chat's record of a step / question taken back: one quiet line (ui/src/cards.tsx "task-taken-back"), not a card
+ * shaped like a new ask — it read as one more thing to do, next to the ask's own card already saying 已撤回.
+ */
+function takenBack(id: string, title: string, reason: string) {
+  return { type: "task-taken-back", ref: `${id}:taken-back`, title: `撤回了 ${id}「${title}」`, body: reason || undefined, tone: "info" };
 }
 
 /** What t still asks the user, each with when it was asked: whole steps (t5) and open questions (t5#2). */

@@ -6,7 +6,7 @@ import { run } from "./lib/gerdr";
 // Cards the board's panel tools put in a worker's chat (local/board.ts). Gerdr loads this file at start, so they're drawn
 // this way wherever the chat is shown: the board's drawer, or the worker's tab in Code.
 
-type Step = { status: string; handedBack?: string; title?: string; kind?: string };
+type Step = { status: string; handedBack?: string; title?: string; kind?: string; reason?: string };
 
 /**
  * A step or decision the worker put on the board (ask_human): the built-in card while it waits, so it can be answered
@@ -56,12 +56,15 @@ function TaskStep({ card }: CardProps) {
   if (st?.status === "done" || st?.status === "dropped") {
     const done = st.status === "done";
     return (
-      <div className="my-1.5 flex items-center gap-2 rounded-lg border border-l-2 border-l-ok bg-card px-3 py-2 text-[12px] text-muted-foreground">
+      // Done: a green edge; taken back: a grey one, with why — two different ends, not one look
+      <div className={`my-1.5 flex items-center gap-2 rounded-lg border border-l-2 bg-card px-3 py-2 text-[12px] text-muted-foreground ${done ? "border-l-ok" : "border-l-muted-foreground/40"}`}>
         {done ? <Check className="size-3.5 shrink-0 text-ok" /> : <Undo2 className="size-3.5 shrink-0" />}
         <span className="min-w-0 flex-1 truncate">
           {id} {card.title}
         </span>
-        <span className="min-w-0 shrink truncate">{done ? (st.handedBack ? `已处理：${st.handedBack}` : "已处理") : "已撤回"}</span>
+        <span className="min-w-0 shrink truncate" title={st.reason}>
+          {done ? (st.handedBack ? `已处理：${st.handedBack}` : "已处理") : st.reason ? `已撤回：${st.reason}` : "已撤回"}
+        </span>
         {changeable && (
           <button className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 hover:bg-accent hover:text-foreground" title="答错了？改成别的，worker 会收到新旧两个答案" onClick={() => setChanging(st.handedBack ?? "")}>
             <Pencil className="size-3" />
@@ -75,6 +78,21 @@ function TaskStep({ card }: CardProps) {
 }
 
 registerCard("task-step", TaskStep);
+
+/** A step / question the worker took back (cancel_human): a quiet line in its chat, with why. */
+function TaskTakenBack({ card }: CardProps) {
+  return (
+    <div className="my-1 flex items-baseline gap-1.5 px-1 text-[12px] text-muted-foreground">
+      <Undo2 className="size-3 shrink-0 translate-y-0.5" />
+      <span className="min-w-0">
+        {card.title}
+        {card.body ? `：${card.body}` : ""}
+      </span>
+    </div>
+  );
+}
+
+registerCard("task-taken-back", TaskTakenBack);
 
 /** One thing that wakes it (local/_waits.ts wakeItem). */
 type Wake = { kind: string; text: string; code?: string };

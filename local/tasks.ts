@@ -944,10 +944,10 @@ export function status(input: { id: string }, ctx: Ctx) {
     const q = t.questions?.find((x) => x.id === qid);
     if (!q) return { status: "missing" };
     const status = q.dropped || t.status === "dropped" ? "dropped" : q.answer ? "done" : "todo";
-    return { status, title: q.title, handedBack: q.answer, kind: q.kind };
+    return { status, title: q.title, handedBack: q.answer, kind: q.kind, reason: q.dropped };
   }
   const back = t.handBack?.kind === "secret" ? undefined : t.handedBack;
-  return { status: t.status, title: t.title, handedBack: back, kind: t.handBack?.kind };
+  return { status: t.status, title: t.title, handedBack: back, kind: t.handBack?.kind, reason: t.dropReason };
 }
 
 /**

@@ -125,6 +125,8 @@ export type Task = {
   questions?: Question[];
   /** When the user asked its worker to bring it up to date (tasks.refreshAsk): the drawer says so until it changes. */
   refreshing?: number;
+  /** Why its worker took it back (cancel_human): the card in the worker's chat says so once it ended. */
+  dropReason?: string;
   handedBack?: string;
   verify?: string;
   minutes?: number;
