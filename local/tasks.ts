@@ -5,7 +5,7 @@ import { applyBlock } from "./_apply";
 import { askUser, endQuestions, endWaits, isOutside, open, question, syncAgents, syncSessions, wakeText, type Wait } from "./_waits";
 import { wake } from "./_wake";
 import { allAgents, mentionsIn } from "./_agents";
-import { isMain, routeTask, sweep } from "./_main";
+import { isMain, rerouteTask, routeTask, sweep } from "./_main";
 
 export type { Task };
 
@@ -541,6 +541,60 @@ export async function drop(input: { id: string; reason?: string }, ctx: Ctx) {
   });
   for (const id of closing) if ((ctx.sessions as any).close) await (ctx.sessions as any).close(id).catch(() => {});
   return t;
+}
+
+/**
+ * The user tells the router what's wrong with how a card was handed out ("仓库错了，应该在 operation"): { id,
+ * feedback }. The router decides what to do with it (superagent.ts boardTask, reroute): another repository, several
+ * workers, keep or stop the old ones, or only pass it on to the worker. The user doesn't pick repositories here, as
+ * they don't when creating a task. The workers keep going until it decides.
+ */
+export async function reroute(input: { id: string; feedback: string }, ctx: Ctx) {
+  const feedback = input.feedback?.trim();
+  if (!feedback) throw new Error("写一下哪里不对，调度照这个重新安排");
+  const { store } = load(ctx);
+  const root = reqOf(store, find(store, input.id));
+  if (!root || root.owner !== "agent") throw new Error(`${input.id} 不是派给 agent 的任务`);
+  if (root.status === "todo" && !root.session) throw new Error(`${root.id} 还没派出去：直接改任务内容再派`);
+  if (root.status === "done" || root.status === "dropped") throw new Error(`${root.id} 已经${root.status === "done" ? "完成" : "放弃"}了`);
+  const lines = members(store, root)
+    .filter((m) => m.status !== "dropped" && (m === root || m.status !== "done"))
+    .map((m) => {
+      const sess = m.session ? ctx.sessions.get(m.session) : undefined;
+      const said = lastWords(String((sess as any)?.reply ?? ""));
+      return [
+        `- ${m.id}${m === root ? "（负责人）" : ""}：仓库 ${m.repo ?? "（无）"}，${m.status}${m.agent ? `，agent ${m.agent}` : ""}`,
+        m !== root && m.prompt ? `  它这份：${oneLine(m.prompt, 200)}` : "",
+        m.summary ? `  进展：${m.summary}` : "",
+        said ? `  最后说：${said}` : "",
+        m.session ? `  对话：gerdr session read ${m.session}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+    });
+  const block = [
+    `[重新安排 ${root.id}] ${root.title}`,
+    `原始需求：${root.request ?? root.prompt ?? root.title}`,
+    `现在的安排：\n${lines.join("\n")}`,
+    `用户的反馈：${feedback}`,
+    `照反馈重新安排这张卡，item 写 "${root.id}"（parts / attach / stop，见上面的说明）。`,
+  ].join("\n");
+  update(ctx, (s) => {
+    const t = find(s, root.id);
+    t.reroute = { feedback, at: Date.now() };
+    activity(s, t, { kind: "user", by: t.id, text: `你让调度重新安排：${feedback}` });
+  });
+  try {
+    return await rerouteTask(ctx, root.id, block);
+  } catch (e) {
+    update(ctx, (s) => (find(s, root.id).reroute = undefined));
+    throw e;
+  }
+}
+
+function oneLine(s: string, n: number) {
+  const x = s.replace(/\s+/g, " ").trim();
+  return [...x].length > n ? [...x].slice(0, n).join("") + "…" : x;
 }
 
 /**

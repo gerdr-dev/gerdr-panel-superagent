@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowRight, Bot, Users, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ListTodo, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Send, Settings, Undo2, X } from "lucide-react";
+import { AlertTriangle, ArrowRight, Bot, Users, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ListTodo, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Route, Send, Settings, Undo2, X } from "lucide-react";
 import clsx from "clsx";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { Button } from "../components/Button";
@@ -1510,6 +1510,7 @@ function TeamCard({ t, tasks, active, onOpen }: { t: Task; tasks: Task[]; active
           {first}
         </p>
       )}
+      {t.reroute && <p className="text-[12px] text-brand">调度在按你的意见重新安排…</p>}
       {last && (
         <p className="line-clamp-2 text-[12px] text-muted-foreground">
           {last.by && byId[last.by] && <span className="text-foreground/80">{memberLabel(byId[last.by])}</span>}
@@ -1569,6 +1570,10 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
   const { busy, err, go } = useAction(act);
   const [rejecting, setRejecting] = useState(false);
   const [feedback, setFeedback] = useState("");
+  // 重新安排: what's wrong with how it was handed out goes to the router, which decides what to do (another
+  // repository, several, keep or stop the old workers); the user doesn't pick repositories, as when creating a task
+  const [rerouting, setRerouting] = useState(false);
+  const [why, setWhy] = useState("");
   const ms = (t.members ?? []).map((id) => byId[id]).filter(Boolean);
   const { steps, stuck } = teamNeeds(t, tasks);
   const over = t.status === "done" || t.status === "dropped";
@@ -1820,6 +1825,17 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
             // A task from before feeds has none: say where its story is instead of looking broken
             <p className="py-8 text-center text-[12px] text-muted-foreground">{t.createdAt < FEEDS_SINCE ? "这是有活动记录之前的任务：看上面的「最新」，或点头像看对话" : "还没有活动"}</p>
           )}
+          {t.reroute && (
+            <p className="flex items-center justify-center gap-1.5 px-6 text-center text-[11px] text-muted-foreground">
+              <Loader2 className="size-3 shrink-0 animate-spin" />
+              调度在重新安排
+              {t.reroute.router && (
+                <button className="text-brand hover:underline" onClick={() => openChat(t.reroute!.router!)}>
+                  看它怎么想
+                </button>
+              )}
+            </p>
+          )}
         </div>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2 border-t px-4 py-2.5">
@@ -1835,6 +1851,23 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
                 <X className="size-4" />
               </Button>
             </div>
+          )}
+          {rerouting && (
+            <div className="flex w-full gap-2">
+              <input autoFocus value={why} onChange={(e) => setWhy(e.target.value)} placeholder="跟调度说哪里不对，比如：仓库错了，应该在 operation" className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]" />
+              <Button disabled={!why.trim() || !!busy} onClick={async () => (await go("reroute", "reroute", { id: t.id, feedback: why })) && (setWhy(""), setRerouting(false))}>
+                {busy === "reroute" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}发给调度
+              </Button>
+              <Button variant="ghost" size="icon" aria-label="取消" onClick={() => setRerouting(false)}>
+                <X className="size-4" />
+              </Button>
+            </div>
+          )}
+          {!over && !t.reroute && !rerouting && !rejecting && (
+            <Button variant="ghost" className="mr-auto" disabled={!!busy} title="派得不对（仓库、agent、该几个人做）：告诉调度，它来重新安排" onClick={() => setRerouting(true)}>
+              <Route className="size-3.5" />
+              重新安排
+            </Button>
           )}
           {t.status === "review" && !rejecting && (
             <>

@@ -17,6 +17,8 @@ export type Task = {
   owner: "agent" | "human";
   status: "todo" | "running" | "review" | "done" | "dropped";
   routing?: number;
+  /** The user asked the router to rearrange this card; set until it decides. */
+  reroute?: { feedback: string; at: number; router?: string };
   router?: string;
   routerClosed?: boolean;
   prompt?: string;

@@ -14,7 +14,7 @@ import { workflow } from "./_config";
 import { allAgents } from "./_agents";
 import { textOf } from "./playbooks";
 import { DATA, migrate } from "./_user";
-import { find, load as loadTasks, note, update as updateTasks, type Task } from "./_store";
+import { activity, find, load as loadTasks, note, update as updateTasks, type Task } from "./_store";
 import { wake } from "./_wake";
 import { isOutside, waitingOn } from "./_waits";
 
@@ -221,6 +221,7 @@ async function brief(ctx: Ctx): Promise<string> {
       `gerdr panel run superagent.decide '${ex({ decisions: [{ item: "t12", parts: [{ repo: "/绝对路径" }] }, { item: "c3", decision: "accept", title: "十几个字的标题", parts: [{ repo: "/绝对路径" }] }, { item: "c4", decision: "ignore", reason: "道谢" }] })}'\n\n` +
       `- attach：${ex({ item: "c5", decision: "attach", task: "t9" })}；stop：${ex({ item: "c6", decision: "stop", task: "t9", reason: "…" })}\n` +
       `- 看板任务也能 stop / attach（它是在管别的任务）：停掉 t9、t12 本身派去交接 ${ex({ item: "t12", decision: "stop", task: "t9", reason: "…", parts: [{ repo: "/绝对路径" }] })}；不带 parts 就只停，t12 算完成。attach 把 t12 的话转给 t9，t12 算完成。\n` +
+      `- 用户对某张卡的安排有意见（[重新安排 tN]，比如仓库错了）：照反馈重新安排这张卡，item 就是 tN。重新派给 parts（新的完整安排：要留下的已有 worker 那份写 "task": "它的 id"，会收到反馈和这份的 prompt；没留下的停掉；没写 task 的开新 worker，都在这张卡上，第一份新的接负责人的位置）；只是让现在的 worker 自己改，写 "decision": "attach"（task 不写就给负责人）；整件事不做了，写 "decision": "stop" 和 reason。\n` +
       `- parts 每项一份活：repo 必填；agent、model、effort 不写就用下面的默认，简单的活可以给便宜的模型；worktree 默认 false。\n` +
       `- 只有一份：就是这件事本身，不用写 prompt。拆成几份并行（用户 @ 了几个 agent，或者活明显能分开做）：每份写 title（十几个字）和 prompt（这一份做什么、和别的份怎么配合）；同一个仓库有两份以上时都写 "worktree": true。\n` +
       `- 几份是同一个需求、要互相配合（前端接后端的新接口）：加 "team": true，成了一张卡片、几个成员，第一份是负责人，成员之间直接对话，不经过你。互不相干的几件事不加，各是一张卡。看不出要动别的仓库就只派一份，worker 发现了会自己拉队友。\n` +
@@ -362,6 +363,19 @@ export async function routeTask(ctx: Ctx, id: string) {
   return updateTasks(ctx, (s) => Object.assign(find(s, id), { routing: Date.now(), router: main, routerClosed: undefined, updatedAt: Date.now() }));
 }
 
+/**
+ * The user's feedback on how a card was handed out, to the main session to rearrange it (superagent.ts boardTask,
+ * reroute). The block (the card's workers, what they said, the feedback) is built by tasks.reroute.
+ */
+export async function rerouteTask(ctx: Ctx, id: string, block: string) {
+  const main = await toMain(ctx, [block]);
+  return updateTasks(ctx, (s) => {
+    const t = find(s, id);
+    if (t.reroute) t.reroute.router = main;
+    return t;
+  });
+}
+
 /** Events to judge (pending items, by id): to the main session in one message. */
 export async function evaluate(ctx: Ctx, ids: string[], tasks: Task[]) {
   const s = state(ctx);
@@ -412,9 +426,15 @@ export function sweep(ctx: Ctx) {
     });
   }
   const stuck = (t: Task) => t.status === "todo" && !!t.routing && t.router === s.main && left(t.routing);
-  if (!loadTasks(ctx).store.tasks.some(stuck)) return;
+  const unanswered = (t: Task) => !!t.reroute && t.reroute.router === s.main && left(t.reroute.at);
+  if (!loadTasks(ctx).store.tasks.some((t) => stuck(t) || unanswered(t))) return;
   updateTasks(ctx, (st) => {
     for (const t of st.tasks) {
+      if (unanswered(t)) {
+        // Its workers were left as they were: the card goes on, the user can send the feedback again
+        activity(st, t, { kind: "stuck", text: "调度这一轮结束了，没重新安排：再说一次，或去它的对话里问问" });
+        t.reroute = undefined;
+      }
       if (!stuck(t)) continue;
       note(t, "Superagent 这一轮结束了也没派出去：再派一次，或在它的对话里问问");
       Object.assign(t, { routing: undefined, updatedAt: Date.now() });

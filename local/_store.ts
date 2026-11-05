@@ -43,6 +43,12 @@ export type Task = {
   /** When it was handed to the panel's agent to pick the repository / agent (the user dispatched it without one). */
   routing?: number;
   /**
+   * The user sent the router feedback on how this card was handed out (仓库错了…): it is rearranging the card, and
+   * decides how (another repository, several, keep or stop the old workers). Set on the card (the requirement root)
+   * until the router decides or leaves it (sweep).
+   */
+  reroute?: { feedback: string; at: number; router?: string };
+  /**
    * The conversation that dispatched it: the Superagent's main session (_main.ts; a part split off shares its
    * parent's), or, for older tasks, a one-off router since closed (routerClosed). Kept, so every task traces back to
    * the decision that sent it out.

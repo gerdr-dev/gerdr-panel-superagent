@@ -1,12 +1,13 @@
 // The Superagent's decisions and its log: what the main session calls (decide) and what the page reads (log,
 // retry). How it works is in _main.ts; why, in DESIGN.md「Superagent」.
 
-import { add, dispatch, drop, edit, lastWords, say } from "./tasks";
-import { find, load, update, type Task } from "./_store";
+import { add, dispatch, drop, edit, lastWords, say, start } from "./tasks";
+import { activity, find, load, memberName, members, note, update, type Task } from "./_store";
 import { evaluate, findItem, followUp, mainId, state, updateState, type Item } from "./_main";
 import { workflow } from "./_config";
 
-type Part = { repo: string; agent?: string; model?: string; effort?: string; worktree?: boolean; title?: string; prompt?: string };
+/** task: on a reroute, an existing worker of the card kept for this part (it is told, not restarted). */
+type Part = { repo: string; agent?: string; model?: string; effort?: string; worktree?: boolean; title?: string; prompt?: string; task?: string };
 type Decision = { item: string; decision?: "accept" | "attach" | "stop" | "ignore"; title?: string; parts?: Part[]; team?: boolean; task?: string; reason?: string; reply?: string; rule?: string };
 
 /**
@@ -84,55 +85,126 @@ async function one(d: Decision, ctx: Ctx) {
 }
 
 /**
- * A board task. Usually work to send out (parts). Sometimes the user is steering the board itself in it: "关闭 t11，
- * 新建一个任务来交接", "t9 顺便把 X 也做了". Until 2026-11-05 a board task could only be sent out, so the router,
- * told to stop t11, sent out a worker "to take over t11" and left t11 running (t52). Now, as for a message:
- * - stop (task, reason): that task is dropped. With parts this task is sent out as its handover (told what the dropped
- *   one was doing and where its conversation is); without, this task is done (it was only the instruction).
- * - attach (task): this task's words go to that task's worker; this one is done.
- * No ignore: the user wrote it on their own board, so it's meant; what's unclear is asked, not dropped.
+ * A board task in a decision: only a card the user asked the router to rearrange (tasks.reroute). That one is the
+ * router's to settle, like a message: it has a pending state (reroute) the sweep watches. Any other board task is
+ * the board's own: the router uses the board's commands (tasks.dispatch / drop / say / add / edit), the ones the
+ * user's buttons use. Until 2026-11-05 decide also sent board tasks out, then also stopped / attached for them
+ * (t52: "关闭 t11，新建一个任务来交接"): a second name for each board command, which the user found to be needless
+ * concepts.
  */
 async function boardTask(d: Decision, ctx: Ctx) {
   const self = find(load(ctx).store, d.item);
-  if (self.status !== "todo") throw new Error(`${self.id} 已经${self.status === "dropped" ? "放弃了" : "派出去了"}`);
-  const send = async () => ((await dispatch({ id: self.id, title: d.title, parts: d.parts!, team: d.team }, ctx)) as Task[]).map((t) => t.id);
-  const finish = (summary: string) =>
-    edit({ id: self.id, status: "done", routing: undefined, summary, doneAt: Date.now(), ...(d.title ? { title: d.title } : {}) }, ctx);
-  switch (d.decision ?? "accept") {
-    case "accept":
-      if (!d.parts?.length) throw new Error("看板上的任务要派出去就给 parts；它是在停 / 并进别的任务就写 decision: stop / attach 和 task");
-      return { item: self.id, tasks: await send() };
-    case "stop": {
-      const t = other(ctx, self, d.task);
-      if (!d.reason) throw new Error("stop 要写 reason");
-      const said = lastWords(String((t.session && ctx.sessions.get(t.session)?.reply) ?? ""));
-      await drop({ id: t.id, reason: `你在 ${self.id} 里说停：${d.reason}` }, ctx);
-      if (!d.parts?.length) {
-        finish(`停了 ${t.id}「${t.title}」`);
-        return { item: self.id, stopped: t.id };
-      }
-      edit({ id: self.id, from: t.id, prompt: `${self.prompt ?? self.title}\n\n${handover(t, said)}` }, ctx);
-      return { item: self.id, stopped: t.id, tasks: await send() };
-    }
-    case "attach": {
-      const t = other(ctx, self, d.task);
-      const files = self.attachments?.length ? `\n附件：\n${self.attachments.map((a) => `- ${a.name}：${a.path}`).join("\n")}` : "";
-      const text = `用户在看板上补充（${self.id}）：${self.prompt ?? self.title}${files}`;
-      if (t.session) await say({ id: t.id, text }, ctx);
-      // Not sent out yet: it becomes part of what its worker is told
-      else edit({ id: t.id, prompt: `${t.prompt ?? t.title}\n\n${text}`, attachments: [...(t.attachments ?? []), ...(self.attachments ?? [])] }, ctx);
-      finish(`并进了 ${t.id}「${t.title}」`);
-      return { item: self.id, tasks: [t.id] };
-    }
-    default:
-      throw new Error(`看板上的任务 decision 是 accept / stop / attach 之一，不是「${d.decision}」`);
-  }
+  if (self.reroute) return rearrange(d, self, ctx);
+  throw new Error(
+    `看板任务不用 decide，用看板的命令：派出去 tasks.dispatch {"id":"${self.id}","parts":[…]}；停掉别的任务 tasks.drop {"id":"tN","reason":"…"}；` +
+      `转告 tasks.say {"id":"tN","text":"…"}；它只是条指令、照做完了 tasks.edit {"id":"${self.id}","status":"done","summary":"…"}`,
+  );
 }
 
-/** The task a board task acts on: another one, still alive. */
-function other(ctx: Ctx, self: Task, id?: string) {
-  if (id === self.id) throw new Error(`task 是它要停 / 并进的那个任务，不是 ${self.id} 自己`);
-  return live(ctx, id);
+/**
+ * The user's feedback on a card (tasks.reroute), decided by the router, the way it decides a new task: the user
+ * doesn't pick repositories. On the same card, so the requirement keeps its feed and its id:
+ * - parts: the new arrangement. A part with task keeps that worker (told the feedback and its part); workers left
+ *   out are stopped; parts without task get new workers, the first one taking the lead's place if the lead is out.
+ * - attach (task?, the lead by default): the feedback goes to that worker, to adjust itself.
+ * - stop (reason): the whole requirement is dropped.
+ */
+async function rearrange(d: Decision, self: Task, ctx: Ctx) {
+  const fb = self.reroute!.feedback;
+  const settle = (text: string) =>
+    update(ctx, (s) => {
+      const t = find(s, self.id);
+      t.reroute = undefined;
+      activity(s, t, { kind: "join", text });
+    });
+  const card = members(load(ctx).store, self).filter((m) => m.status !== "dropped" && (m === self || m.status !== "done"));
+  const onCard = (id: string) => {
+    const m = card.find((x) => x.id === id);
+    if (!m) throw new Error(`${id} 不在 ${self.id} 这张卡上（${card.map((x) => x.id).join("、")}）`);
+    return m;
+  };
+  switch (d.decision ?? "accept") {
+    case "attach": {
+      const t = d.task ? onCard(d.task) : self;
+      await say({ id: t.id, text: `用户对这件事的安排有意见，调度转给你，照着调整：${fb}${d.reason ? `\n调度补充：${d.reason}` : ""}` }, ctx);
+      settle(`调度把你的意见转给了 ${memberName(t)}，让它自己调整`);
+      return { item: self.id, tasks: [t.id] };
+    }
+    case "stop": {
+      if (!d.reason) throw new Error("stop 要写 reason");
+      update(ctx, (s) => (find(s, self.id).reroute = undefined));
+      await drop({ id: self.id, reason: `调度照你的意见停了：${d.reason}` }, ctx);
+      return { item: self.id, stopped: self.id };
+    }
+    case "accept":
+      break;
+    default:
+      throw new Error(`重新安排的 decision 是 accept（给 parts）/ attach / stop 之一，不是「${d.decision}」`);
+  }
+  const parts = d.parts ?? [];
+  if (!parts.length) throw new Error(`重新派要给 parts（新的完整安排）；只让现在的 worker 自己改就写 "decision": "attach"`);
+  const kept = new Map<string, Part>();
+  for (const p of parts) {
+    if (p.task) {
+      onCard(p.task);
+      if (kept.has(p.task)) throw new Error(`${p.task} 在 parts 里出现了两次`);
+      kept.set(p.task, p);
+    } else if (!p.repo?.trim() || !ctx.dirs.stat(p.repo)?.dir) throw new Error(`仓库目录不存在：${p.repo ?? "（没写 repo）"}`);
+  }
+  const fresh = parts.filter((p) => !p.task);
+  if (!kept.has(self.id) && !fresh.length) throw new Error(`负责人 ${self.id} 不留，就要有一份新的（不写 task）接它的位置`);
+  if (fresh.length + kept.size > 1 && fresh.some((p) => !p.prompt?.trim())) throw new Error("几份一起做时，新的每份都要写 prompt：这一份做什么、和别的怎么配合");
+  const gone = card.filter((m) => !kept.has(m.id));
+  const req = self.request ?? self.prompt ?? self.title;
+  if (!self.request && self.prompt) edit({ id: self.id, request: self.prompt }, ctx);
+  // What the stopped ones got to, read before their conversations close
+  const before = gone.map((m) => {
+    const said = lastWords(String((m.session && ctx.sessions.get(m.session)?.reply) ?? ""));
+    return [`- ${m.id} 在 ${m.repo ?? "（无仓库）"}`, said && `，最后说：${said}`, m.session && `（对话：gerdr session read ${m.session}）`].filter(Boolean).join("");
+  });
+  for (const m of gone) if (m.session) await ctx.sessions.close(m.session).catch(() => {});
+  update(ctx, (s) => {
+    for (const m of gone) {
+      if (m.id === self.id) continue;
+      const x = find(s, m.id);
+      note(x, `调度重新安排时停掉了：${fb}`);
+      x.droppedFrom = x.status;
+      Object.assign(x, { status: "dropped", doneAt: Date.now(), updatedAt: Date.now() });
+    }
+  });
+  const told = `\n\n## 用户对上一次安排的意见\n${fb}` + (before.length ? `\n\n停掉的之前的 worker（有用的结论可以去它的对话里找，但按上面的意见做，别沿用它错的前提）：\n${before.join("\n")}` : "");
+  const changes: string[] = [];
+  const errors: string[] = [];
+  let rest = fresh;
+  if (!kept.has(self.id)) {
+    const [p, ...r] = fresh;
+    rest = r;
+    const was = self.repo?.split("/").pop();
+    await start({ id: self.id, repo: p.repo, agent: p.agent, model: p.model, effort: p.effort, worktree: p.worktree, prompt: `${p.prompt?.trim() || req}${told}` }, ctx);
+    changes.push(`${self.id} 从 ${was ?? "（无）"} 换到 ${p.repo.split("/").pop()}`);
+  }
+  for (const p of rest) {
+    try {
+      const t = (await add(
+        { title: p.title, prompt: `${p.prompt?.trim() || req}${told}`, repo: p.repo, agent: p.agent, model: p.model, effort: p.effort, worktree: p.worktree, attachments: self.attachments, from: self.id, router: self.router, routerClosed: true, start: true, team: self.id },
+        ctx,
+      )) as Task;
+      changes.push(`加了 ${memberName(t)}`);
+    } catch (e: any) {
+      errors.push(`${p.title ?? p.repo}：${e?.message ?? e}`);
+    }
+  }
+  for (const m of gone) if (m.id !== self.id) changes.push(`停了 ${memberName(m)}`);
+  const now = members(load(ctx).store, self).filter((m) => m.status !== "dropped" && m.status !== "done");
+  for (const [id, p] of kept) {
+    const m = find(load(ctx).store, id);
+    const yours = p.prompt?.trim() ? `\n你这份现在是：${p.prompt.trim()}` : "";
+    await say({ id, text: `调度按用户的意见重新安排了这件事。用户说：${fb}${yours}\n现在一起做的：${now.map(memberName).join("、")}（my_task 里有）。` }, ctx).catch((e: any) => errors.push(`${id}：${e?.message ?? e}`));
+    if (p.prompt?.trim()) changes.push(`${memberName(m)} 改做：${p.prompt.trim().slice(0, 40)}`);
+  }
+  settle(`调度重新安排：${changes.join("；") || "保持不变"}`);
+  if (errors.length) throw new Error(`已重新安排 ${self.id}；没成的：\n${errors.join("\n")}`);
+  return { item: self.id, tasks: now.map((m) => m.id) };
 }
 
 /** What a handover worker is told about the task it takes over: what it was for, how far it got, where to read more. */
