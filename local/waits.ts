@@ -20,6 +20,8 @@
 
 import { activity, load, memberName, members, note, reqOf, teamOf, update, type Task } from "./_store";
 import { isOutside, mrConversation, open, waitOn, wakeItem, wakeText, type Wait, type WakeOn } from "./_waits";
+
+const sessionTitle = (w: Wait) => w.what.replace(/^它派出的「(.*?)」.*$/, "$1");
 import { wake } from "./_wake";
 import { followUp, follows, record, subscribers, compact } from "./_main";
 import { mine, staleAsks } from "./board";
@@ -37,8 +39,9 @@ export const tools = {
       "wake: what wakes you, a list — whichever comes first wakes you, and ends this wait. Each item is one of: " +
       "{type: message, conversation}: news where a person will answer — the Slack channel / DM id you wrote to (D09…, C0…), a Slack message link, or an MR URL (its reviews, pipelines, merge come too); " +
       "{type: check, command, every?, cwd?}: a command that tells whether what you wait for has happened (a publish approved, a job finished, a page live) — the board runs it every `every` minutes, exit 0 = it has (you're woken with its output), any other exit = not yet; exit 0 as soon as things leave the step you wait in, not only on the end you hope for ([ \"$s\" != pending_approval ], not [ \"$s\" = success ]) — rejected, stuck halfway or failed must wake you too; waiting on a person (approve, merge), check that act itself, don't assume what should follow it happens by itself; print one line saying where things stand, it shows on your card; " +
-      "{type: time, minutes}: woken anyway after that long, as a backstop; " +
+      "{type: time, minutes}: the timeout, required: woken after that long if nothing else came; " +
       "{type: teammate, who}: a member of your requirement (its task id, see my_task) tells you something — their tell wakes you. " +
+      "Every wait needs a time item as its timeout (how long it should take): whoever you wait on may never answer — stuck, offline, forgot; a wait without one is refused. Handed work to a session you started (gerdr session new, here or on another computer) or to a teammate? You are the one who waits for it, the same way: its report wakes you first; past the timeout, go and see where it's stuck. " +
       "Waiting on a person to do something you can see (approve, merge, deploy)? Give both a message and a check. " +
       "Your card stays in progress meanwhile, showing `what`. When the last thing you waited on came and you got something done with it (it went live, a check passed), post_progress that result first: the feed already shows \"等到了\", not what came of it. Then end your turn; when woken and still waiting, call it again (it replaces the last one). When to use: the my-workflow skill, references/board.md.",
     input: {
@@ -154,6 +157,15 @@ export function wait_for(
       if (!cwd.startsWith("/")) throw new Error("check 的 cwd 要是绝对路径（任务没有仓库时必须给）");
       return { type: "check", command: p.command, every: p.every, cwd };
     });
+    // Every wait has a deadline: whoever it waits on (a colleague, a session it handed work to, a teammate, a job) may
+    // never answer — stuck, gone offline, forgot. Past it the worker is woken and looks, instead of waiting for good.
+    if (!parsed.some((p) => p.type === "time")) {
+      const out = open(t).filter((w) => w.kind === "session");
+      throw new Error(
+        `wake 里要有一项 {"type":"time","minutes":N} 作超时（按对方要多久估，1–1440）：等的人可能一直不回、卡住、下线。` +
+          (out.length ? `你派出的${out.map((w) => `「${sessionTitle(w)}」`).join("、")}回报会先叫醒你；到了超时还没回报，你去看它卡在哪（gerdr session read）。` : "到点没等到，你去看怎么回事，再决定接着等、换做法还是 ask_human。"),
+      );
+    }
     const ws = waitOn(t, what, on);
     note(t, `等：${what}（${ws.map((w) => wakeText(w)).join("；")}）`);
     // Its own part is done and it waits on something it doesn't control (CI, a teammate, a colleague): a fact for the
@@ -288,9 +300,14 @@ export async function tick(input: unknown, ctx: Ctx) {
   const woke: string[] = [];
   for (const { t, w } of due) {
     try {
+      // Work it handed out that hasn't come back by now: the timeout it set. Say so, and what to do about it
+      const out = open(t).filter((x) => x.kind === "session");
+      const late = out.length
+        ? `\n你派出的还没回报：${out.map((x) => x.what.replace(/^它派出的/, "")).join("；")}。用 gerdr session read 看它卡在哪：在等批准就 ask_human 让用户批；卡住了、那台电脑下线了、做偏了，就换个做法、自己接手或 ask_human，别再原样干等。`
+        : "";
       await wake(ctx, t.id, {
         how: "到点了，回来看",
-        text: `[看板] 到时间了，回来看一下（任务 ${t.id}）：${w.what}。有结果就照常做、用 task_update 汇报；还没好就再 wait_for。`,
+        text: `[看板] 到时间了，回来看一下（任务 ${t.id}）：${w.what}。有结果就照常做、用 task_update 汇报；还没好就再 wait_for（带超时）。${late}`,
         // The whole wait_for ends: it looks again and waits again if it must
         ends: isOutside,
       });

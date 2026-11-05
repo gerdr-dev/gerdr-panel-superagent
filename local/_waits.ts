@@ -3,7 +3,7 @@
 // Before (until 2026-11-04) each kind had its own field, its own wake-up path and its own rules for "is it stopped?":
 // a worker's question in t.question, a wait_for in t.waiting, an MR in t.delivery, the user's steps in t.blockedBy,
 // the sessions it handed work to only in Gerdr's session list. Every new kind meant touching column(), stopped(),
-// silentStop(), the card, the chat card and the 在等 list — and the gaps were the bugs: a worker saying "I'll wait"
+// settled(), the card, the chat card and the 在等 list — and the gaps were the bugs: a worker saying "I'll wait"
 // with nothing to wake it (t29), one reporting "working" and stopping (t30), an MR wait nobody could see in the chat.
 //
 // Now a task has `waits`: each says what it waits for, whether that's the user, and what ends it. Two kinds are

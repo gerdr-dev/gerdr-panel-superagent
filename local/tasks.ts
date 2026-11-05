@@ -69,7 +69,7 @@ export async function list(input: unknown, ctx: Ctx) {
     }));
   const kids: Record<string, ReturnType<typeof kidsOf>> = {};
   for (const t of store.tasks) if (t.owner === "agent" && t.status !== "done" && t.status !== "dropped") kids[t.id] = kidsOf(t);
-  const nudge: { session: string; id: string }[] = [];
+  const nudge: { session: string; id: string; out: string[] }[] = [];
   const s = update(ctx, (s) => {
     nudge.length = 0; // update retries this function on a write race: decide afresh each time
     for (const t of s.tasks) {
@@ -97,15 +97,7 @@ export async function list(input: unknown, ctx: Ctx) {
         t.heard = ps.at;
         activity(s, t, { kind: "user", by: t.id, text: `你在对话里说：${ps.text.trim()}`, at: ps.at } as any);
       }
-      // Handing work to a session is its part handed out and a wait on someone else, like wait_for: a line in the
-      // feed. It never calls wait_for for these (the session reports back by itself), so without this the feed went
-      // silent while the card's 最新 said "在等家里那台帮手"
-      for (const k of syncSessions(t, kids[t.id] ?? [])) {
-        const root = reqOf(s, t);
-        const text = `交给了「${k.title || k.id}」，等它做完回报`;
-        const last = (root?.activity ?? []).filter((a) => a.by === t.id).pop();
-        if (root && !(last?.kind === "wait" && last.text === text)) activity(s, t, { by: t.id, kind: "wait", text });
-      }
+      syncSessions(t, kids[t.id] ?? []);
       syncAgents(t, t.session, (sess?.tasks ?? []) as any[]);
       if (sess?.status === "running") {
         // The worker is at it again — the user answered in its chat, something woke it, or it carried on. What it asked
@@ -130,13 +122,18 @@ export async function list(input: unknown, ctx: Ctx) {
       if (b && sess.byPerson && b.state === "review" && t.status === "running") applyBlock(s, t, { ...b, state: undefined });
       else if (b) applyBlock(s, t, b);
       else if (t.status === "running" && sess.status === "idle" && !t.viaTools && !cancelled) askUser(t, `${STOPPED_ASK}：去对话里看看它说了什么，让它接着做，或者直接「标为完成」`);
-      else if (t.status === "running" && sess.status === "idle" && silentStop(t) && !cancelled) {
-        // It stopped with nothing to wait on — a question written only in its reply (t3, 2026-11-04), "I'll wait" with
-        // nothing to wake it (t29), "working" reported and then nothing (t30). Reminded once to say on the board
-        // what's next; if it stops like that again, the user is told, with what it last said.
+      else if (t.status === "running" && sess.status === "idle" && t.viaTools && !settled(t) && !cancelled) {
+        // It stopped in no state the board knows: a question written only in its reply (t3, 2026-11-04), "I'll wait"
+        // with nothing to wake it (t29), "working" reported and then nothing (t30), work handed to a session with no
+        // timeout on it (#1, 2026-11-06). Reminded once to put itself in one; if it stops like that again, it is put in
+        // one for it: waiting on the user, with what it last said. Either way it never sits in 进行中 with nothing to
+        // wake it.
+        const out = open(t).filter((w) => w.kind === "session");
         if ((t.nudges ?? 0) < 1) {
           t.nudges = (t.nudges ?? 0) + 1;
-          nudge.push({ session: sess.id, id: t.id });
+          nudge.push({ session: sess.id, id: t.id, out: out.map((w) => w.what.replace(/^它派出的/, "")) });
+        } else if (out.length) {
+          askUser(t, `派出去了没人盯：${out.map((w) => w.what.replace(/^它派出的/, "")).join("；")}。提醒过它带超时等，它还是停下了：去对话里让它 wait_for，或者你来接手`);
         } else {
           const said = String(sess.reply ?? "").replace(/\s+/g, " ").trim();
           askUser(t, `Worker 停下了，没在看板上汇报。它最后说：「${[...said].slice(0, 160).join("")}${[...said].length > 160 ? "…" : ""}」`);
@@ -151,11 +148,15 @@ export async function list(input: unknown, ctx: Ctx) {
     await ctx.sessions
       .send(
         n.session,
-        `[看板] 你这一轮停下了，但看板上看不出接下来要什么（任务 ${n.id}）。用户看的是看板，不看聊天：\n` +
+        n.out.length
+          ? `[看板] 你把活派出去了，但没有等它（任务 ${n.id}）：${n.out.join("；")}。\n` +
+              `派活的人要自己盯着：现在用 wait_for 等它，what 写等谁做什么，wake 里一定要有 {"type":"time","minutes":N} 作超时（按它要做多久估）。` +
+              `它回报会先叫醒你；到了超时还没回报，你去看它卡在哪（gerdr session read），卡住或那台电脑下线了就换个做法或 ask_human。然后结束这一轮。`
+          : `[看板] 你这一轮停下了，但看板上看不出接下来要什么（任务 ${n.id}）。用户看的是看板，不看聊天：\n` +
           `- 要用户决定 / 给东西：用 ask_human 登记（决定带 options），然后结束这一轮；\n` +
           `- 做完了、交付了、要用户验收：用 task_update 报对应的 state；\n` +
-          `- 在等别人（同事回话、job / 发布跑完）：用 wait_for 说等什么、在哪个对话等回复或几分钟后回来看，然后结束这一轮；\n` +
-          `- 在等队友（同一个需求的另一个成员）：先 tell 它要什么，再 wait_for {"type":"teammate"}，然后结束这一轮；\n` +
+          `- 在等别人（同事回话、job / 发布跑完）：用 wait_for 说等什么、在哪个对话等回复，一定带 {"type":"time"} 超时，然后结束这一轮；\n` +
+          `- 在等队友（同一个需求的另一个成员）：先 tell 它要什么，再 wait_for {"type":"teammate"} 加超时，然后结束这一轮；\n` +
           `- 还有能做的：接着做，别停。\n` +
           `只补汇报，别重复聊天里说过的话。`,
       )
@@ -256,8 +257,18 @@ export async function sync(input: unknown, ctx: Ctx) {
  * "working" on the way doesn't matter (t30). A turn the user started in its chat counts too: they say a few words, close
  * the chat and don't come back to it — what the answer left open must be on the board as well.
  */
-function silentStop(t: Task) {
-  return !!t.viaTools && !open(t).length;
+/**
+ * The states a worker may stop in (2026-11-06, the user: an agent that stops is either waiting or done — nothing in
+ * between). Done / review are its status; while running, one of:
+ * - waiting on the user: a question, a step it asked for, an approval its helper needs (a wait with user);
+ * - waiting on something outside with a deadline: wait_for, which always has a time item (waits.ts);
+ * - its own subagents / background commands still going: Claude Code wakes it when they finish;
+ * - another board task it's blocked by: that one finishing wakes it.
+ * Work handed to a session it started is none of these by itself: the session reporting back is all that would wake
+ * it, and one stuck or on a computer gone offline never does — the hander waits for it with wait_for, timeout and all.
+ */
+function settled(t: Task) {
+  return open(t).some((w) => w.user || w.kind === "time" || w.kind === "agent" || w.kind === "task");
 }
 
 /**

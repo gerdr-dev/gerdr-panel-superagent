@@ -110,7 +110,7 @@ export const tools = {
   },
   tell: {
     description:
-      "Tell a teammate (another member of your requirement) something it must know now: your part is ready (with the doc / MR link), what failed when you tried theirs (with the error), a change of plan. It gets it right away, even mid-step (a build it should stop). With summary, a line goes in the requirement's activity for the user. Waiting for its answer: wait_for with {type: teammate}.",
+      "Tell a teammate (another member of your requirement) something it must know now: your part is ready (with the doc / MR link), what failed when you tried theirs (with the error), a change of plan. It gets it right away, even mid-step (a build it should stop). With summary, a line goes in the requirement's activity for the user. Waiting for its answer: wait_for with {type: teammate} and a {type: time} timeout.",
     input: {
       type: "object",
       properties: {
@@ -144,7 +144,7 @@ export function instructions(input: unknown, ctx: Ctx) {
   const team = root
     ? ` You are one member of requirement ${root.id} ("${root.title}")${root.id === t.id ? ", and its lead: you say when the whole of it is done" : `, led by ${memberName(root)}`}. ` +
       `Teammates, each in its own repository: ${mates.map((x) => `${memberName(x)} "${x.title}"`).join("; ") || "none yet"}. ` +
-      `Talk to them straight with tell (it reaches them at once), wait for them with wait_for {type: teammate}; ` +
+      `Talk to them straight with tell (it reaches them at once), wait for them with wait_for {type: teammate} plus a {type: time} timeout; ` +
       `the user follows the requirement's activity feed, not your chats — what goes in it is their my-workflow skill, references/activity.md.`
     : "";
   return (
@@ -184,7 +184,7 @@ export async function task_update(input: { state: string; summary?: string; link
     const before = new Set((t.waits ?? []).map((w) => w.id));
     applyBlock(s, t, { ...input, state });
     // "working" says nothing about what's next: it doesn't reset the reminder count, or a worker that answers each
-    // reminder with "still working" and stops would be reminded forever (tasks.ts silentStop)
+    // reminder with "still working" and stops would be reminded forever (tasks.ts settled)
     Object.assign(t, { viaTools: true, synced: undefined, reportedAt: Date.now(), updatedAt: Date.now() });
     // A new state is what's next: the reminder count starts over, and a wait_for before it no longer says what it waits on.
     // "delivering" (older workers: an MR out) is a wait_for on the MR (_apply.ts), shown in the chat as wait_for's is
@@ -439,7 +439,7 @@ export async function add_teammate(input: { repo: string; title?: string; prompt
     ctx,
   )) as Task;
   update(ctx, (s) => activity(s, find(s, m.id), { by: t.id, to: m.id, kind: "join", text: `拉了 ${memberName(m)} 进来：${m.title}` }));
-  return { id: m.id, title: m.title, gerdrCard: eventCard(ctx, t.id, "join", `${memberName(m)}：${m.title}`), note: `${m.id} 已经开始做了。它会直接 tell 你；你要等它的结果就 wait_for {"type":"teammate","who":"${m.id}"}，然后结束这一轮。` };
+  return { id: m.id, title: m.title, gerdrCard: eventCard(ctx, t.id, "join", `${memberName(m)}：${m.title}`), note: `${m.id} 已经开始做了。它会直接 tell 你；你要等它的结果就 wait_for [{"type":"teammate","who":"${m.id}"},{"type":"time","minutes":N}]（N 是超时），然后结束这一轮。` };
 }
 
 export async function tell(input: { to: string; text: string; summary?: string }, ctx: Ctx) {
@@ -481,7 +481,7 @@ export async function tell(input: { to: string; text: string; summary?: string }
     ends: isOutside,
     resume: true,
   });
-  return { sent: to.id, gerdrCard: eventCard(ctx, from.id, "tell", `给 ${memberName(to)}：${input.summary?.trim() || text}`), note: `已送到 ${memberName(to)}。要等它回话：wait_for {"type":"teammate","who":"${to.id}"}，然后结束这一轮。` };
+  return { sent: to.id, gerdrCard: eventCard(ctx, from.id, "tell", `给 ${memberName(to)}：${input.summary?.trim() || text}`), note: `已送到 ${memberName(to)}。要等它回话：wait_for [{"type":"teammate","who":"${to.id}"},{"type":"time","minutes":N}]（N 是超时），然后结束这一轮。` };
 }
 
 export function post_progress(input: { text: string }, ctx: Ctx) {
