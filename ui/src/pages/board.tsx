@@ -633,6 +633,21 @@ function Meta({ t, byId, extra }: { t: Task; byId: Record<string, Task>; extra?:
   );
 }
 
+// Gerdr's file viewer for local paths (newer Gerdr only)
+const openPath = (core as unknown as { openPath?: (path: string) => Promise<void> }).openPath;
+
+/** The path a link to a file on this computer names (file:// or a bare absolute / ~ path), else null. */
+function localPath(url: string) {
+  if (url.startsWith("file://")) {
+    try {
+      return decodeURIComponent(new URL(url).pathname);
+    } catch {
+      return null;
+    }
+  }
+  return url.startsWith("/") || url.startsWith("~/") ? url : null;
+}
+
 /** 产物: what the task's steps produced, oldest first, all kept so the way it went can be followed back. */
 function Links({ t }: { t: Task }) {
   if (!t.links?.length) return null;
@@ -644,7 +659,21 @@ function Links({ t }: { t: Task }) {
         {t.links.map((l, i) => (
           <li key={l.url} className="relative flex items-baseline gap-2 text-[12px]">
             <span className={clsx("absolute top-1.5 -left-[16.5px] size-2 rounded-full border-2 border-background", i === t.links!.length - 1 ? "bg-brand" : "bg-muted-foreground/50")} />
-            <a href={l.url} target="_blank" rel="noreferrer" className="inline-flex min-w-0 items-center gap-1 hover:underline">
+            <a
+              href={l.url}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(e) => {
+                // A file on this computer (a rendered video): a file:// link opens nothing from Gerdr's page, and nothing
+                // at all on a phone, so open it in Gerdr's viewer. A Gerdr without openPath keeps the plain link.
+                const path = localPath(l.url);
+                if (path && openPath) {
+                  e.preventDefault();
+                  void openPath(path);
+                }
+              }}
+              className="inline-flex min-w-0 items-center gap-1 hover:underline"
+            >
               <ExternalLink className="size-3 shrink-0 text-muted-foreground" />
               <span className="truncate">{l.label}</span>
             </a>
@@ -1470,6 +1499,30 @@ function realQuestion(x: Task) {
   return !!x.question && !x.question.startsWith("Worker 停下了");
 }
 
+/**
+ * What a waiting conversation needs, settled right here: the approval's own buttons (allow / deny…) or a single
+ * question's choices, the same ones as gerdr's inbox, for a conversation on this computer or another. Anything else (a
+ * plan, several questions), or a gerdr too old to have the buttons: the way to its conversation.
+ */
+const usePending = (core as Partial<typeof core>).usePending;
+const PendingActions = (core as Partial<typeof core>).PendingActions;
+function Waiting({ session, task }: { session: string; task?: string }) {
+  const p = usePending ? usePending(session) : [];
+  const chat = (
+    <button className="inline-flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground" onClick={() => openChat(session, task)}>
+      <MessageSquare className="size-3.5" />
+      {p[0]?.inline ? "看对话" : "去对话处理"}
+    </button>
+  );
+  if (!PendingActions || !p[0]?.inline) return <div className="pl-5">{chat}</div>;
+  return (
+    <div className="space-y-1 pl-5">
+      <PendingActions id={session} />
+      {chat}
+    </div>
+  );
+}
+
 /** What a member stuck on the user needs, in a line. */
 function stuckText(x: Task) {
   const k = x.helpers?.find((h) => h.left);
@@ -1882,25 +1935,32 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
         // Its last words are its own: quoted under the line, two lines at most (the rest is in its chat)
         x.m.said && <p className="ml-5 line-clamp-2 border-l-2 pl-2 text-[12px] text-muted-foreground">{x.m.said}</p>
       );
-      if (!realQuestion(x.m))
+      if (!realQuestion(x.m)) {
+        // The conversation that waits: its own, or the helper it started that wants an approval (maybe on another
+        // computer). Opening the member's own chat there left the user nowhere near the button to press
+        const waiter = x.m.live?.status === "waiting" ? x.m.session : x.m.helpers?.find((k) => k.left)?.id;
         return (
           <div className="space-y-1.5">
-            <div className="flex items-center gap-2 rounded-md border border-warn/40 bg-warn/5 px-3 py-1.5 text-[12px]">
-              <AlertTriangle className="size-3.5 shrink-0 text-warn" />
-              <span className="min-w-0 flex-1">
-                <span className="font-medium">{memberLabel(x.m)}</span> · {stuckText(x.m)}
-                <span className="text-muted-foreground tabular-nums"> · {when(x.at)}</span>
-              </span>
-              {x.m.session && (
-                <Button variant="outline" onClick={() => openChat(x.m.session!, x.m.id)}>
-                  <MessageSquare className="size-3.5" />
-                  去对话
-                </Button>
-              )}
+            <div className="space-y-1.5 rounded-md border border-warn/40 bg-warn/5 px-3 py-1.5 text-[12px]">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="size-3.5 shrink-0 text-warn" />
+                <span className="min-w-0 flex-1">
+                  <span className="font-medium">{memberLabel(x.m)}</span> · {stuckText(x.m)}
+                  <span className="text-muted-foreground tabular-nums"> · {when(x.at)}</span>
+                </span>
+                {!waiter && x.m.session && (
+                  <Button variant="outline" onClick={() => openChat(x.m.session!, x.m.id)}>
+                    <MessageSquare className="size-3.5" />
+                    去对话
+                  </Button>
+                )}
+              </div>
+              {waiter && <Waiting session={waiter} task={waiter === x.m.session ? x.m.id : undefined} />}
             </div>
             {said}
           </div>
         );
+      }
       return (
         <div className="flex gap-2">
           <Avatar m={x.m} lead={x.m.id === t.id} />
@@ -2038,10 +2098,11 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
         <SheetTitle className="sr-only">{t.title}</SheetTitle>
         <div className="flex items-center gap-2 border-b px-4 py-2.5 text-[12px] text-muted-foreground">
           {ms.length > 1 ? <Users className="size-3.5" /> : <Bot className="size-3.5" />}
-          <span className="font-mono">{t.id}</span>
-          <span>· {COLS.find((c) => c.id === colOf(t))?.title}</span>
+          <span className="shrink-0 font-mono">{t.id}</span>
+          {/* nowrap: on a phone the dates below took the room and "已完成" broke over two lines */}
+          <span className="shrink-0 whitespace-nowrap">· {COLS.find((c) => c.id === colOf(t))?.title}</span>
           {/* When it was asked for (and finished): the feed starts later, or not at all for older tasks */}
-          <span className="truncate tabular-nums" title={new Date(t.createdAt).toLocaleString("zh-CN")}>
+          <span className="min-w-0 truncate tabular-nums" title={new Date(t.createdAt).toLocaleString("zh-CN")}>
             · {when(t.createdAt)} 建{t.status === "done" && t.doneAt ? ` · ${when(t.doneAt)} 完成` : ""}
           </span>
           <span className="ml-auto" />
