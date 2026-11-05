@@ -306,6 +306,15 @@ export function memberName(t: Task) {
   return t.repo ? `${t.id}（${t.repo.split("/").pop()}）` : t.id;
 }
 
+/**
+ * "t5#2" → ["t5", "2"]: one question of a task asking several. The "#" that starts a team id (#1, #1-1, #1-1#2) is
+ * part of the id, not the separator: splitting on the first "#" turned #1-1 into "", so no team step could be taken back.
+ */
+export function splitRef(ref: string): [string, string | undefined] {
+  const i = ref.indexOf("#", 1);
+  return i < 0 ? [ref, undefined] : [ref.slice(0, i), ref.slice(i + 1)];
+}
+
 export function find(s: Store, id: string): Task {
   const t = s.tasks.find((x) => x.id === id);
   if (!t) throw new Error(`没有任务 ${id}`);

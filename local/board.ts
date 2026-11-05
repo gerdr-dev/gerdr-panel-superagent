@@ -4,7 +4,7 @@
 // block couldn't do: take back a human step the user no longer needs to do, and answer with ids.
 
 import { applyBlock } from "./_apply";
-import { activity, find, load, memberName, members, note, reqOf, teamOf, update, type Store, type Task } from "./_store";
+import { activity, find, load, memberName, members, note, reqOf, splitRef, teamOf, update, type Store, type Task } from "./_store";
 import { handBack } from "./_main";
 import { waitCard } from "./waits";
 import { eventCard } from "./_cards";
@@ -301,7 +301,7 @@ export function cancel_human(input: { id: string; reason: string }, ctx: Ctx) {
 
 /** Takes back a step or one question (t5#2) that t asked the user: off their board, a line in the feed. */
 function takeBack(s: Store, t: Task, id: string, reason: string) {
-  const [hid, qid] = id.split("#");
+  const [hid, qid] = splitRef(id);
   const h = find(s, hid);
   // One question of several (t5#2): only it goes; the item stays for the rest (or goes when nothing is left)
   if (qid && h.questions) {

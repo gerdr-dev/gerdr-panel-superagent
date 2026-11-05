@@ -1,7 +1,7 @@
 import { tellInbox } from "./_inbox";
 import { workflow } from "./_config";
 import { forWorker } from "./memory";
-import { activity, blockersDone, find, load, members, newTask, note, reqOf, update, type Question, type Store, type Task } from "./_store";
+import { activity, blockersDone, find, load, members, newTask, note, reqOf, splitRef, update, type Question, type Store, type Task } from "./_store";
 import { applyBlock } from "./_apply";
 import { askUser, endQuestions, endWaits, isOutside, open, question, syncAgents, syncSessions, wakeText, type Wait } from "./_waits";
 import { wake } from "./_wake";
@@ -937,7 +937,7 @@ async function closeRouters(ctx: Ctx, live: Record<string, any>) {
 export function status(input: { id: string }, ctx: Ctx) {
   const { store } = load(ctx);
   // "t5#2": one question of a task asking several (the chat has a card per question)
-  const [tid, qid] = String(input?.id ?? "").split("#");
+  const [tid, qid] = splitRef(String(input?.id ?? ""));
   const t = store.tasks.find((x) => x.id === tid);
   if (!t) return { status: "missing" };
   if (qid) {

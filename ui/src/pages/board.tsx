@@ -1883,7 +1883,8 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
               // The same card as in its chat (Gerdr's built-in one): answered right here, one card per question
               <>
                 {cards.map((c) => {
-                  const qid = String(c.ref).split("#")[1];
+                  // After the step's own id: a team id starts with "#" itself (#1-1#2)
+                  const qid = String(c.ref).slice(x.h.id.length + 1);
                   const q = x.h.questions?.find((y) => y.id === qid);
                   const several = (x.h.questions ?? []).filter((y) => !y.dropped).length > 1;
                   return (
