@@ -112,6 +112,9 @@ worker 拿到一组 面板工具（`local/board.ts`，经 Gerdr 的 `gerdr panel
     却不撤回）。所以每个问题记着问的时间：worker 之后 post_progress / task_update / wait_for 时，工具结果提醒它处理这些问题；
     `ask_human` 带 `replaces` 一步撤旧问新；抽屉里过时的问题旁边有「按最新情况更新」（tasks.refreshAsk 叫醒 worker 去处理）。
     动态里一项按它最新那个没答的问题排，后问的问题不会躲在上面。
+  - 一项里的问题默认还是全部答完一起发。只想答一个：另一个点「这个不用答了」（用户撤掉，worker 收到时知道它过时了），
+    或者「先把已答的发给它」，没答的留着。worker 自己撤回最后一个没答的、其余都已答时，答案直接在 cancel_human 的结果里给它
+    （t63：#2 答了、#1 过时没人撤，答案一直压着没发）。
 
 ## 交付和等待：一份「在等」，MR 不是特殊流程
 

@@ -973,8 +973,7 @@ export async function answerQuestion(input: { id: string; q: string; value: stri
       note(h, `改了「${q.title}」的答案：${old} → ${value}`);
     } else if (asked(h).every((x) => x.answer)) {
       finished = true;
-      Object.assign(h, { status: "done", handedBack: summary(h), doneAt: Date.now() });
-      activity(s, h, { kind: "user", by: h.askedBy, text: `你答了 ${asked(h).length} 个问题：${summary(h)}` });
+      finish(s, h);
     }
     if (h.status === "done") h.handedBack = summary(h);
     h.updatedAt = Date.now();
@@ -983,13 +982,92 @@ export async function answerQuestion(input: { id: string; q: string; value: stri
   const { store } = load(ctx);
   const workers = store.tasks.filter((t) => t.owner === "agent" && t.session && t.status !== "dropped" && t.status !== "done" && (t.id === h.askedBy || t.blockedBy?.includes(h.id)));
   if (finished) {
-    for (const t of workers.filter((t) => blockersDone(store, t) || t.id === h.askedBy))
-      await wake(ctx, t.id, { how: `你答了 ${asked(h).length} 个问题`, text: `你问的 ${asked(h).length} 个问题（${h.id}），用户都答了：\n${asked(h).map((q, i) => `${i + 1}. ${q.title}\n   → ${q.answer}`).join("\n")}\n照这些接着做。` }).catch(() => {});
+    await deliver(ctx, h);
   } else if (changed) {
     const c = changed as { q: Question; old: string };
     for (const t of workers) await tell(ctx, t, `用户改了「${c.q.title}」（${h.id}）的答案：原来是「${c.old}」，现在是「${value}」。\n按新的来；已经照旧答案做了的，改过来。`).catch(() => {});
   }
   return { task: h, done: h.status === "done" };
+}
+
+/** All of h's questions are answered or set aside: it's done, and the feed says what the user answered. */
+function finish(s: Store, h: Task) {
+  Object.assign(h, { status: "done", handedBack: summary(h), doneAt: Date.now() });
+  for (const q of asked(h)) q.sent = true;
+  activity(s, h, { kind: "user", by: h.askedBy, text: `你答了 ${asked(h).length} 个问题：${summary(h)}` });
+}
+
+/** The answers of a finished item go to its worker (and anyone it held up), with the questions the user set aside. */
+async function deliver(ctx: Ctx, h: Task) {
+  const { store } = load(ctx);
+  const workers = store.tasks.filter((t) => t.owner === "agent" && t.session && t.status !== "dropped" && t.status !== "done" && (t.id === h.askedBy || t.blockedBy?.includes(h.id)));
+  const skipped = (h.questions ?? []).filter((q) => q.skipped);
+  const text =
+    `你问的问题（${h.id}），用户${asked(h).length ? "答了" : "都没答"}：\n${asked(h).map((q, i) => `${i + 1}. ${q.title}\n   → ${q.answer}`).join("\n")}` +
+    (skipped.length ? `\n用户说不用答了（已经过时，别再按它们做）：${skipped.map((q) => `「${q.title}」`).join("、")}` : "") +
+    `\n照这些接着做。`;
+  for (const t of workers.filter((t) => blockersDone(store, t) || t.id === h.askedBy)) await wake(ctx, t.id, { how: `你答了 ${h.id}`, text }).catch(() => {});
+}
+
+/**
+ * The user sets a question aside (不用答了): it went moot and the worker didn't take it back (t63#1, 2026-11-05).
+ * { id, q }. When the rest are answered, everything goes to the worker now, saying this one was set aside.
+ */
+export async function skipQuestion(input: { id: string; q: string }, ctx: Ctx) {
+  let finished = false;
+  update(ctx, (s) => {
+    const h = find(s, input.id);
+    const q = h.questions?.find((x) => x.id === String(input.q));
+    if (!q) throw new Error(`${h.id} 没有第 ${input.q} 个问题`);
+    if (h.status !== "todo" || q.dropped) throw new Error(`${h.id} 的这个问题已经不在等你了`);
+    if (q.answer != null) throw new Error(`这个问题你已经答了：${q.answer}`);
+    Object.assign(q, { dropped: "你说不用答了", skipped: true });
+    note(h, `用户说「${q.title}」不用答了`);
+    activity(s, h, { kind: "user", by: h.askedBy, text: `你说「${q.title}」不用答了` });
+    const left = asked(h);
+    if (!left.length) {
+      // Nothing left to ask: the item goes, and its worker hears that none of it is needed
+      Object.assign(h, { status: "dropped", doneAt: Date.now() });
+      for (const t of s.tasks) if (t.blockedBy?.includes(h.id)) t.blockedBy = t.blockedBy.filter((x) => x !== h.id);
+      finished = true;
+    } else if (left.every((x) => x.answer != null)) {
+      finished = true;
+      finish(s, h);
+    }
+    h.updatedAt = Date.now();
+  });
+  if (finished) await deliver(ctx, find(load(ctx).store, input.id));
+  return { ok: true };
+}
+
+/**
+ * 先把已答的发给它: the answers given so far go to the worker now, the rest stay on the board for later. { id }.
+ * Answering all at once stays the default (the worker usually needs them together); this is for going on meanwhile.
+ */
+export async function sendAnswered(input: { id: string }, ctx: Ctx) {
+  let fresh: Question[] = [];
+  let rest: Question[] = [];
+  const h = update(ctx, (s) => {
+    const h = find(s, input.id);
+    if (h.status !== "todo" || !h.questions) throw new Error(`${h.id} 已经不在等你了`);
+    fresh = asked(h).filter((q) => q.answer != null && !q.sent);
+    rest = asked(h).filter((q) => q.answer == null);
+    if (!fresh.length) throw new Error("还没有答了没发的");
+    for (const q of fresh) q.sent = true;
+    activity(s, h, { kind: "user", by: h.askedBy, text: `你先发了答案：${fresh.map((q) => `${q.title}：${q.answer}`).join("；")}` });
+    h.updatedAt = Date.now();
+    return h;
+  });
+  const w = h.askedBy;
+  if (w)
+    await wake(ctx, w, {
+      how: `你先发了 ${h.id} 已答的`,
+      text:
+        `用户先把答了的发给你（${h.id}）：\n${fresh.map((q) => `- ${q.title}\n  → ${q.answer}`).join("\n")}\n` +
+        `还没答、之后再答的：${rest.map((q) => `${h.id}#${q.id}「${q.title}」`).join("、")}（答了会再发给你）。能照已答的先做的就先做；还没答的里已经不用问的，cancel_human 它。`,
+      resume: true,
+    }).catch(() => {});
+  return { sent: fresh.length };
 }
 
 /** The questions still asked (not taken back). */

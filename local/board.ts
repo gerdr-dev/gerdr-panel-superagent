@@ -311,7 +311,23 @@ function takeBack(s: Store, t: Task, id: string, reason: string) {
     if (!left.length) Object.assign(h, { status: "dropped", doneAt: Date.now() });
     if (!left.length) t.blockedBy = (t.blockedBy ?? []).filter((x) => x !== h.id);
     h.updatedAt = Date.now();
-    return { id, status: "dropped", left: left.filter((x) => !x.answer).map((x) => `${hid}#${x.id}`), gerdrCard: { title: `不用答了：${q.title}`, body: reason, tone: "info" } };
+    // The rest were answered already (held until all were): this was the last one open, so the answers are the
+    // caller's now, in this result — it is the worker, mid-turn
+    const answered = left.length > 0 && left.every((x) => x.answer != null);
+    if (answered) {
+      const sum = left.map((x) => `${x.title}：${x.answer}`).join("；");
+      Object.assign(h, { status: "done", handedBack: sum, doneAt: Date.now() });
+      for (const x of left) x.sent = true;
+      t.blockedBy = (t.blockedBy ?? []).filter((x) => x !== h.id);
+      activity(s, t, { kind: "user", by: t.id, text: `你答了 ${left.length} 个问题：${sum}` });
+    }
+    return {
+      id,
+      status: "dropped",
+      left: left.filter((x) => !x.answer).map((x) => `${hid}#${x.id}`),
+      ...(answered ? { answers: left.map((x) => ({ id: `${hid}#${x.id}`, title: x.title, answer: x.answer })), note: "其余的问题用户都答了，答案在 answers 里：照这些接着做" } : {}),
+      gerdrCard: { title: `不用答了：${q.title}`, body: reason, tone: "info" },
+    };
   }
   if (h.owner !== "human" || (h.askedBy !== t.id && !t.blockedBy?.includes(h.id))) throw new Error(`${h.id} 不是你这个任务要的人工步骤`);
   if (h.status === "done") throw new Error(`${h.id} 用户已经做完了${h.handedBack ? `（交回：${h.handedBack}）` : ""}`);

@@ -1,4 +1,4 @@
-import { ArrowDownRight, MoreHorizontal, X } from "lucide-react";
+import { ArrowDownRight, ArrowLeft, MoreHorizontal, X } from "lucide-react";
 import clsx from "clsx";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Sheet, SheetContent, SheetTitle } from "./ui/sheet";
@@ -27,7 +27,10 @@ export function ChatDrawer({
   trail,
   onAction,
   onClose,
+  back,
 }: {
+  /** Where it was opened from (a requirement's drawer, by a member's avatar): a way back there in the title row. */
+  back?: { label: string; onBack: () => void };
   session: string;
   /** One of its subagents' conversation instead (a toolCallId), and where 查看对话 / the way back go (null = main). */
   sub?: string;
@@ -68,6 +71,12 @@ export function ChatDrawer({
   );
   const header = (toggle: ReactNode) => (
     <div className="relative z-30 flex h-10 shrink-0 items-center gap-1 border-b px-3">
+      {back && (
+        <Button variant="ghost" className="-ml-1.5 h-7 shrink-0 gap-1 px-1.5 text-[12px] text-muted-foreground" title={back.label} onClick={back.onBack}>
+          <ArrowLeft className="size-3.5" />
+          <span className="max-w-[10rem] truncate">{back.label}</span>
+        </Button>
+      )}
       <span className={clsx("mr-1 size-2 shrink-0 rounded-full", s?.status === "running" ? "bg-ok" : s?.status === "waiting" || s?.status === "error" ? "bg-warn" : "bg-muted-foreground/40")} />
       <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{s?.title || session}</span>
       {toggle}

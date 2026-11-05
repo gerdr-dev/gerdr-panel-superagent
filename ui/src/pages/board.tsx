@@ -147,11 +147,15 @@ export default function BoardPage() {
       : null;
   // A conversation opened from a panel ("回到 tN 的对话", a finished task's chat): the chat alone, over the panel,
   // with its task's 链路 when it has one
-  const [peek, setPeek] = useState<{ session: string; task?: string; sub?: string } | null>(null);
-  // Opening a conversation from a task's panel closes the panel: it sat on top and hid the chat (on a phone, all of it)
+  const [peek, setPeek] = useState<{ session: string; task?: string; sub?: string; from?: string } | null>(null);
+  // Opening a conversation from a task's panel closes the panel: it sat on top and hid the chat (on a phone, all of it).
+  // The panel it came from is kept, for the chat's way back (a member's avatar in a requirement's drawer)
+  const openRef = useRef(open);
+  openRef.current = open;
   openChat = (session: string, task?: string) => {
+    const from = openRef.current || undefined;
     setOpen("");
-    setPeek({ session, task });
+    setPeek({ session, task, from });
   };
   // A worker's conversation brought up from elsewhere in Gerdr (a notification, the inbox): it's this board's, so it
   // opens here, as its task's drawer (or just the chat when no task has it)
@@ -299,6 +303,7 @@ export default function BoardPage() {
                 }
               : undefined
           }
+          back={peek.from && byId[peek.from] ? { label: `回到 ${peek.from} ${byId[peek.from].title}`, onBack: () => (setPeek(null), setOpen(peek.from!)) } : undefined}
           onClose={() => setPeek(null)}
         />
       )}</Linger>
@@ -1430,7 +1435,8 @@ function askCards(h: Task): Record<string, unknown>[] | null {
       const choice = q.kind === "choice";
       out.push({
         ref: `${h.id}#${q.id}`,
-        kicker: `${choice ? "等你决定" : "要你给"} · ${h.id}${qs.length > 1 ? ` · 第 ${i + 1} / ${qs.length} 个` : ""}${q.answer ? ` · 已答：${q.answer}` : ""}`,
+        // Answered ones wait for the rest (sent together) unless the user sends them first: say which
+        kicker: `${choice ? "等你决定" : "要你给"} · ${h.id}${qs.length > 1 ? ` · 第 ${i + 1} / ${qs.length} 个` : ""}${q.answer ? ` · 已答${q.sent || qs.length === 1 ? "" : "，等其它的答完一起发"}：${q.answer}` : ""}`,
         title: q.title,
         body: [q.steps, !choice && q.label ? `要交回：${q.label}` : ""].filter(Boolean).join("\n\n") || undefined,
         tone: "info",
@@ -1825,7 +1831,42 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
             </div>
             {cards ? (
               // The same card as in its chat (Gerdr's built-in one): answered right here, one card per question
-              cards.map((c) => <DefaultCard key={String(c.ref)} card={c as any} />)
+              <>
+                {cards.map((c) => {
+                  const qid = String(c.ref).split("#")[1];
+                  const q = x.h.questions?.find((y) => y.id === qid);
+                  const several = (x.h.questions ?? []).filter((y) => !y.dropped).length > 1;
+                  return (
+                    <div key={String(c.ref)}>
+                      <DefaultCard card={c as any} />
+                      {/* One of several gone moot (the worker didn't take it back): set it aside, the rest go when answered */}
+                      {q && several && q.answer == null && (
+                        <button
+                          className="mt-1 ml-1 text-[11px] text-muted-foreground hover:text-foreground hover:underline disabled:opacity-50"
+                          disabled={!!busy}
+                          onClick={() => go(`skip${c.ref}`, "skipQuestion", { id: x.h.id, q: qid })}
+                        >
+                          {busy === `skip${c.ref}` ? "…" : "这个不用答了"}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+                {(() => {
+                  // Some answered, some not: the answers wait for the rest unless sent now
+                  const qs = (x.h.questions ?? []).filter((y) => !y.dropped);
+                  const ready = qs.filter((y) => y.answer != null && !y.sent).length;
+                  const left = qs.filter((y) => y.answer == null).length;
+                  return ready > 0 && left > 0 ? (
+                    <div className="flex items-center gap-2 px-1 text-[11px] text-muted-foreground">
+                      <span>已答 {qs.length - left} / {qs.length}，答完一起发给它</span>
+                      <button className="text-brand hover:underline disabled:opacity-50" disabled={!!busy} onClick={() => go(`send${x.h.id}`, "sendAnswered", { id: x.h.id })}>
+                        {busy === `send${x.h.id}` ? "发送中…" : "先把已答的发给它"}
+                      </button>
+                    </div>
+                  ) : null;
+                })()}
+              </>
             ) : (
               <div className="rounded-lg rounded-tl-sm border border-warn/50 bg-card p-3">
                 <InFeed.Provider value>

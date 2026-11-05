@@ -19,7 +19,7 @@ export type HandBack = { kind: "none" | "value" | "secret" | "choice" | "questio
  * choice (options) or a value. They're one board item because the worker can't go on until all are answered; it
  * hears every answer at once (tasks.answerQuestion).
  */
-export type Question = { id: string; title: string; kind: "choice" | "value"; options?: string[]; multi?: boolean; label?: string; steps?: string; answer?: string; dropped?: string; at?: number };
+export type Question = { id: string; title: string; kind: "choice" | "value"; options?: string[]; multi?: boolean; label?: string; steps?: string; answer?: string; dropped?: string; at?: number; skipped?: boolean; sent?: boolean };
 
 /**
  * One line in a requirement's activity feed (活动): what the user follows instead of its workers' chats. Milestones
