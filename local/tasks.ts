@@ -1,6 +1,5 @@
 import { tellInbox } from "./_inbox";
 import { workflow } from "./_config";
-import { forWorker } from "./memory";
 import { activity, blockersDone, find, load, members, newTask, note, reqOf, update, type Question, type Store, type Task } from "./_store";
 import { applyBlock } from "./_apply";
 import { askUser, endQuestions, endWaits, isOutside, open, question, syncAgents, syncSessions, wakeText, type Wait } from "./_waits";
@@ -389,7 +388,7 @@ export async function start(
     ...who,
     mode: input.mode,
     title: t.title,
-    prompt: (prompt || "看附件，照里面的做。") + WORKER_PROTOCOL.split("{id}").join(t.id) + forWorker(ctx, repo),
+    prompt: (prompt || "看附件，照里面的做。") + WORKER_PROTOCOL.split("{id}").join(t.id) + directNote(ctx, repo),
     attachments: (t.attachments ?? []).map((a) => a.path),
     tags: { task: t.id },
     // Followed on the board (its drawer shows the chat), not in Code: no tab of it appears there
@@ -406,6 +405,17 @@ export async function start(
     if (input.effort) x.effort = input.effort;
     return x;
   });
+}
+
+/**
+ * The user marked this repository "small changes may be pushed straight" (设置 → 仓库): the worker is told, since
+ * the skill (deliver.md) says when to do so but not where; nothing else in its context would say.
+ */
+function directNote(ctx: Ctx, repo: string) {
+  const r = workflow(ctx).repos.find((x) => ctx.dirs.stat(x.path)?.path === repo);
+  return r?.direct
+    ? `In this repository the user allows small changes to be pushed straight to the target branch instead of an MR (see the delivery rules in their skill).\n`
+    : "";
 }
 
 /**
