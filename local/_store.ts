@@ -26,7 +26,7 @@ export type Question = { id: string; title: string; kind: "choice" | "value"; op
  * and hand-offs only — a member finishing its part, telling a teammate, pulling one in, the user answering.
  * by: the member it's about (a task id); kind: what sort of line, for its icon.
  */
-export type Activity = { at: number; by?: string; kind: "progress" | "tell" | "join" | "done" | "review" | "user" | "stuck" | "wait" | "got"; text: string; to?: string };
+export type Activity = { at: number; by?: string; kind: "progress" | "tell" | "join" | "done" | "review" | "user" | "stuck" | "wait" | "got"; text: string; to?: string; files?: { path: string; name?: string }[] };
 
 export type Task = {
   id: string;

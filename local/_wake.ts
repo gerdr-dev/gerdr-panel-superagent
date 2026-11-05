@@ -29,6 +29,8 @@ export type Wake = {
   also?: (t: Task) => void;
   /** A line for the activity feed of its requirement, when it has teammates (the user's answer, say). */
   feed?: string;
+  /** What the user attached to that line (shown with it in the feed). */
+  feedFiles?: { path: string; name?: string }[];
 };
 
 /** Wakes task `id`'s worker (a task not sent out yet only gets the record). Returns the task as written. */
@@ -50,7 +52,7 @@ export async function wake(ctx: Ctx, id: string, m: Wake): Promise<Task> {
       x.doneAt = undefined;
     }
     m.also?.(x);
-    if (m.feed) activity(s, x, { kind: "user", by: x.id, text: m.feed });
+    if (m.feed) activity(s, x, { kind: "user", by: x.id, text: m.feed, ...(m.feedFiles?.length ? { files: m.feedFiles } : {}) });
     x.updatedAt = now;
     return x;
   });

@@ -562,7 +562,8 @@ export async function message(input: { id: string; to?: string[]; text: string; 
   });
   const name = (m: Task) => m.repo?.split("/").pop() || m.id;
   const list = files.length ? `\n附件：\n${files.map((a) => `- ${a.name ?? a.path.split("/").pop()}：${a.path}`).join("\n")}` : "";
-  const feed = `你对 ${targets.map(name).join("、")} 说：${text || "（附件）"}${files.length ? `（${files.length} 个附件）` : ""}`;
+  // The files go with the line (feedFiles): the feed shows them under the words, as the chat does
+  const feed = `你对 ${targets.map(name).join("、")} 说：${text}`;
   for (const [i, m] of targets.entries()) {
     const others = targets.filter((x) => x !== m);
     await wake(ctx, m.id, {
@@ -572,6 +573,7 @@ export async function message(input: { id: string; to?: string[]; text: string; 
       resume: true,
       // One line for all of them, written with the first
       feed: i === 0 ? feed : undefined,
+      feedFiles: i === 0 ? files : undefined,
     });
   }
   return { sent: targets.map((m) => m.id) };

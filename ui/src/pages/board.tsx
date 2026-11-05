@@ -1,6 +1,6 @@
 import { AlertTriangle, ArrowRight, ArrowUp, Bot, Users, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ListTodo, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Route, Send, Settings, Undo2, X } from "lucide-react";
 import clsx from "clsx";
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../components/Button";
 import { Dialog, DialogContent, DialogTitle } from "../components/ui/dialog";
 import { Sheet, SheetContent, SheetTitle } from "../components/ui/sheet";
@@ -13,6 +13,7 @@ import { SettingsSheet, TABS, type SettingsTab } from "../components/SettingsShe
 import { phoneMenu, usePhoneMenu } from "../lib/phoneMenu";
 import { ago, day, since, type Task, useTasks, waitedSince } from "../lib/tasks";
 import { project, run } from "../lib/gerdr";
+import * as core from "@gerdr/core";
 import { DefaultCard, onShowSession } from "@gerdr/core";
 import { isSubmitEnter } from "../lib/utils";
 import { Md } from "../lib/markdown";
@@ -1656,6 +1657,31 @@ function FeedComposer({ t, ms, act }: { t: Task; ms: Task[]; act: Act }) {
   );
 }
 
+// Gerdr's FeedChat (the feed drawn and answered as a chat: lightbox, ↓ to the newest, its input box). A Gerdr from
+// before it has none: the drawer keeps its own list and FeedComposer then.
+type FeedEntry = { key: string; at: number; user?: { text: string; files?: { path: string; name?: string; mime?: string }[] } };
+const FeedChat = (core as unknown as { FeedChat?: <E extends FeedEntry>(p: {
+  id: string;
+  entries: E[];
+  render: (e: E) => React.ReactNode;
+  onSend: (m: { text: string; files: { path: string; name?: string }[] }) => Promise<void>;
+  mentions?: string[];
+  hint?: (text: string) => React.ReactNode;
+  placeholder?: string;
+  jump?: { key: string; seq: number };
+  children?: React.ReactNode;
+}) => React.ReactNode }).FeedChat;
+const PixelLoader = (core as unknown as { PixelLoader?: (p: { className?: string }) => React.ReactNode }).PixelLoader;
+
+/** The user's line as a chat message: 「你对 a、b 说：…」 reads as "@a @b …" in their own bubble. */
+function userText(text: string) {
+  const m = /^你对 (.+?) 说：([\s\S]*)$/.exec(text);
+  return m ? `${m[1].split("、").map((n) => `@${n}`).join(" ")} ${m[2]}`.trim() : text;
+}
+
+/** What the feed's rows are in FeedChat: its items, plus who's working now and the router rearranging, at the end. */
+type FeedRow = FeedEntry & ({ type: "item"; x: FeedItem } | { type: "working"; ms: Task[] } | { type: "reroute" } | { type: "empty" });
+
 function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Task[]; byId: Record<string, Task>; act: Act; onClose: () => void; onGo: (id: string) => void }) {
   const { busy, err, go } = useAction(act);
   const [rejecting, setRejecting] = useState(false);
@@ -1679,14 +1705,29 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
   ].sort((a, b) => a.at - b.at);
   const pending = items.filter((x) => x.type !== "act");
   const scroller = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLDivElement>(null);
+  const [jumpTo, setJumpTo] = useState<{ key: string; seq: number }>();
+  const working = ms.filter((m) => m.live?.status === "running");
+  const rows: FeedRow[] = [
+    ...items.map((x): FeedRow => (x.type === "act" && x.a.kind === "user" ? { key: x.key, at: x.at, type: "item", x, user: { text: userText(x.a.text), files: x.a.files } } : { key: x.key, at: x.at, type: "item", x })),
+    ...(!items.length ? [{ key: "empty", at: t.createdAt, type: "empty" as const }] : []),
+    ...(t.reroute ? [{ key: "reroute", at: Date.now(), type: "reroute" as const }] : []),
+    // Who's on it right now, like the chat's "working…" line: always last
+    ...(working.length && !over ? [{ key: `working:${working.map((m) => m.id).join(",")}`, at: Date.now(), type: "working" as const, ms: working }] : []),
+  ];
+  const rowsKey = JSON.stringify(rows.map((r) => [r.key, r.type === "item" && r.x.type === "act" ? r.x.a.text : r.type === "item" && r.x.type !== "act" ? (r.x.type === "ask" ? r.x.h.updatedAt : r.x.m.updatedAt) : r.type === "working" ? r.ms.map((m) => m.live?.turnStartedAt) : 0]));
+  // The same array until something in it changes: a new one redraws the whole chat list
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const entries = useMemo(() => rows, [rowsKey]);
   // The jump rows are for what's out of sight: a thing already on screen in the feed would be shown twice (t48: one
   // line in its feed, the same line again above it)
   // Where each thing waiting on the user is: on screen, or above / below it (the pill's arrow points there)
   const [where, setWhere] = useState<Record<string, "in" | "above" | "below">>({});
   const pendingKeys = pending.map((x) => x.key).join(",");
   useEffect(() => {
-    const root = scroller.current;
-    if (!root || !pendingKeys) return;
+    const host = FeedChat ? box.current : scroller.current;
+    const root = FeedChat ? null : scroller.current;
+    if (!host || !pendingKeys) return;
     const io = new IntersectionObserver(
       (es) =>
         setWhere((cur) => {
@@ -1699,15 +1740,23 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
         }),
       { root, threshold: 0.3 },
     );
-    for (const k of pendingKeys.split(",")) {
-      const el = root.querySelector(`[data-feed="${k}"]`);
-      if (el) io.observe(el);
-    }
-    return () => io.disconnect();
+    // FeedChat's rows mount as they're drawn (and scroll in): watch for them
+    const seen = new WeakSet<Element>();
+    const scan = () => {
+      for (const k of pendingKeys.split(",")) {
+        const el = host.querySelector(`[data-feed="${k}"]`);
+        if (el && !seen.has(el)) (seen.add(el), io.observe(el));
+      }
+    };
+    scan();
+    const mo = new MutationObserver(scan);
+    mo.observe(host, { childList: true, subtree: true });
+    return () => (io.disconnect(), mo.disconnect());
   }, [pendingKeys]);
   // Until the observer has said, nothing counts as away: no pill flashing up on open
   const away = pending.filter((x) => where[x.key] && where[x.key] !== "in");
-  const jump = (key: string, smooth = true) => scroller.current?.querySelector(`[data-feed="${key}"]`)?.scrollIntoView({ block: "center", behavior: smooth ? "smooth" : "auto" });
+  const jump = (key: string, smooth = true) =>
+    FeedChat ? setJumpTo((j) => ({ key, seq: (j?.seq ?? 0) + 1 })) : scroller.current?.querySelector(`[data-feed="${key}"]`)?.scrollIntoView({ block: "center", behavior: smooth ? "smooth" : "auto" });
   // Once per opening, not on every refresh: the latest thing waiting on the user, else the newest line
   useEffect(() => {
     const id = requestAnimationFrame(() => {
@@ -1846,6 +1895,56 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
       </div>
     );
   };
+  // Writing from the drawer (FeedChat's box): to its one member as is; with several, to the ones @-ed
+  const live = ms.filter((m) => m.status !== "dropped" && m.session);
+  const people: AgentInfo[] = live.map((m) => ({ id: m.id, name: memberLabel(m) }));
+  const send = async ({ text, files }: { text: string; files: { path: string; name?: string }[] }) => {
+    if (t.status === "dropped") throw new Error("这个需求已经放弃了");
+    if (!live.length) throw new Error("还没有成员在做：等调度派出去再发");
+    const to = mentionsOf(text, people);
+    if (live.length > 1 && !to.length) throw new Error("有几个成员：@ 选发给谁（可以 @ 几个）");
+    await act("message", { id: t.id, to: live.length > 1 ? to.map((a) => a.id) : undefined, text, attachments: files });
+  };
+  const hint = (text: string) => {
+    if (!live.length) return null;
+    const to = mentionsOf(text, people);
+    const alone = live.length === 1;
+    return (
+      <span className={clsx("truncate px-1 text-[12px]", !alone && !to.length && text.trim() ? "text-warn" : "text-muted-foreground")}>
+        {alone ? `发给 ${memberLabel(live[0])}` : to.length ? `发给 ${to.map((a) => a.name).join("、")}` : "@ 选择发给谁（可以 @ 几个）"}
+      </span>
+    );
+  };
+  const feedRow = (r: FeedRow) => {
+    if (r.type === "item") return row(r.x);
+    if (r.type === "empty")
+      return <p className="py-8 text-center text-[12px] text-muted-foreground">{t.createdAt < FEEDS_SINCE ? "这是有活动记录之前的任务：看上面的「最新」，或点头像看对话" : "还没有活动"}</p>;
+    if (r.type === "reroute")
+      return (
+        <p className="flex items-center justify-center gap-1.5 px-6 text-center text-[11px] text-muted-foreground">
+          <Loader2 className="size-3 shrink-0 animate-spin" />
+          调度在重新安排
+          {t.reroute?.router && (
+            <button className="text-brand hover:underline" onClick={() => openChat(t.reroute!.router!)}>
+              看它怎么想
+            </button>
+          )}
+        </p>
+      );
+    // Who's working now, as the chat's "working…" line: each member's face, name and how long its turn has run
+    return (
+      <div className="space-y-1.5">
+        {r.ms.map((m) => (
+          <div key={m.id} className="flex items-center gap-2 text-[12px] text-muted-foreground">
+            <Avatar m={m} lead={m.id === t.id} size="sm" />
+            {PixelLoader ? <PixelLoader className="size-3.5 text-brand" /> : <Loader2 className="size-3.5 animate-spin text-brand" />}
+            <span className="shimmer font-medium text-foreground/80">{memberLabel(m)}</span>
+            <span>在跑 · {since(m.live?.turnStartedAt)}</span>
+          </div>
+        ))}
+      </div>
+    );
+  };
   return (
     <Sheet open modal={false} onOpenChange={(o) => !o && onClose()}>
       <SheetContent
@@ -1919,44 +2018,74 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
             ))}
           </div>
         </div>
-        {/* The feed, with a floating way to what waits on the user when it's out of sight: floating, so showing and
-            hiding it never moves the feed (a row above it did, and jumped as the user scrolled) */}
-        <div className="relative flex min-h-0 flex-1 flex-col">
-        {away.length > 0 && (
-          <button
-            onClick={() => jump(away[away.length - 1].key)}
-            className="absolute top-3 left-1/2 z-10 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-warn/50 bg-background px-3 py-1 text-[12px] shadow-sm hover:bg-warn/10"
-          >
-            <AlertTriangle className="size-3.5 text-warn" />
-            {away.length} 件等你处理
-            <ArrowRight className={clsx("size-3.5 text-muted-foreground", where[away[away.length - 1].key] === "above" ? "-rotate-90" : "rotate-90")} />
-          </button>
+        {FeedChat ? (
+          // The feed as a chat (Gerdr's FeedChat): members' lines drawn here, the user's as their own messages, its input
+          // box writing to the members (one without @, several by @)
+          <div ref={box} className="relative min-h-0 flex-1">
+            <FeedChat
+              id={`drawer.${t.id}`}
+              entries={entries}
+              render={(r: FeedRow) => <div className="px-1 py-1.5">{feedRow(r)}</div>}
+              onSend={send}
+              mentions={live.map((m) => memberLabel(m))}
+              hint={hint}
+              placeholder={live.length > 1 ? "输入 @ 选成员，再写要说的（回车发送）" : "发消息给它（回车发送，Shift+回车换行）"}
+              jump={jumpTo}
+            >
+            {away.length > 0 && (
+              <button
+                onClick={() => jump(away[away.length - 1].key)}
+                className="absolute top-14 left-1/2 z-20 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-warn/50 bg-background px-3 py-1 text-[12px] shadow-sm hover:bg-warn/10"
+              >
+                <AlertTriangle className="size-3.5 text-warn" />
+                {away.length} 件等你处理
+                <ArrowRight className={clsx("size-3.5 text-muted-foreground", where[away[away.length - 1].key] === "above" ? "-rotate-90" : "rotate-90")} />
+              </button>
+            )}
+            </FeedChat>
+          </div>
+        ) : (
+          <>
+          {/* The feed, with a floating way to what waits on the user when it's out of sight: floating, so showing and
+              hiding it never moves the feed (a row above it did, and jumped as the user scrolled) */}
+          <div className="relative flex min-h-0 flex-1 flex-col">
+          {away.length > 0 && (
+            <button
+              onClick={() => jump(away[away.length - 1].key)}
+              className="absolute top-3 left-1/2 z-10 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-warn/50 bg-background px-3 py-1 text-[12px] shadow-sm hover:bg-warn/10"
+            >
+              <AlertTriangle className="size-3.5 text-warn" />
+              {away.length} 件等你处理
+              <ArrowRight className={clsx("size-3.5 text-muted-foreground", where[away[away.length - 1].key] === "above" ? "-rotate-90" : "rotate-90")} />
+            </button>
+          )}
+          <div ref={scroller} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
+            {items.length ? (
+              items.map((x) => (
+                <div key={x.key} data-feed={x.key}>
+                  {row(x)}
+                </div>
+              ))
+            ) : (
+              // A task from before feeds has none: say where its story is instead of looking broken
+              <p className="py-8 text-center text-[12px] text-muted-foreground">{t.createdAt < FEEDS_SINCE ? "这是有活动记录之前的任务：看上面的「最新」，或点头像看对话" : "还没有活动"}</p>
+            )}
+            {t.reroute && (
+              <p className="flex items-center justify-center gap-1.5 px-6 text-center text-[11px] text-muted-foreground">
+                <Loader2 className="size-3 shrink-0 animate-spin" />
+                调度在重新安排
+                {t.reroute.router && (
+                  <button className="text-brand hover:underline" onClick={() => openChat(t.reroute!.router!)}>
+                    看它怎么想
+                  </button>
+                )}
+              </p>
+            )}
+          </div>
+          </div>
+          {t.status !== "dropped" && <FeedComposer t={t} ms={ms} act={act} />}
+          </>
         )}
-        <div ref={scroller} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
-          {items.length ? (
-            items.map((x) => (
-              <div key={x.key} data-feed={x.key}>
-                {row(x)}
-              </div>
-            ))
-          ) : (
-            // A task from before feeds has none: say where its story is instead of looking broken
-            <p className="py-8 text-center text-[12px] text-muted-foreground">{t.createdAt < FEEDS_SINCE ? "这是有活动记录之前的任务：看上面的「最新」，或点头像看对话" : "还没有活动"}</p>
-          )}
-          {t.reroute && (
-            <p className="flex items-center justify-center gap-1.5 px-6 text-center text-[11px] text-muted-foreground">
-              <Loader2 className="size-3 shrink-0 animate-spin" />
-              调度在重新安排
-              {t.reroute.router && (
-                <button className="text-brand hover:underline" onClick={() => openChat(t.reroute!.router!)}>
-                  看它怎么想
-                </button>
-              )}
-            </p>
-          )}
-        </div>
-        </div>
-        {t.status !== "dropped" && <FeedComposer t={t} ms={ms} act={act} />}
         <div className="flex flex-wrap items-center justify-end gap-2 border-t px-4 py-2.5">
           {err && <p role="alert" className="mr-auto text-[12px] text-bad">{err}</p>}
           {rejecting && (
