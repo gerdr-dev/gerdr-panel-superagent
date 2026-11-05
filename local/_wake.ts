@@ -8,7 +8,7 @@
 // A session it handed work to reports to the worker through Gerdr itself, not here: its wait ends when the session
 // does (_waits.ts syncSessions).
 
-import { find, update, type Task } from "./_store";
+import { activity, find, teamOf, update, type Task } from "./_store";
 import { endWaits, open, type Wait } from "./_waits";
 
 export type Wake = {
@@ -27,6 +27,8 @@ export type Wake = {
   followup?: string;
   /** Also before telling, on the same write. */
   also?: (t: Task) => void;
+  /** A line for the activity feed of its requirement, when it has teammates (the user's answer, say). */
+  feed?: string;
 };
 
 /** Wakes task `id`'s worker (a task not sent out yet only gets the record). Returns the task as written. */
@@ -42,6 +44,7 @@ export async function wake(ctx: Ctx, id: string, m: Wake): Promise<Task> {
       x.doneAt = undefined;
     }
     m.also?.(x);
+    if (m.feed && teamOf(s, x)) activity(s, x, { kind: "user", by: x.id, text: m.feed });
     x.updatedAt = now;
     return x;
   });

@@ -21,6 +21,13 @@ export type HandBack = { kind: "none" | "value" | "secret" | "choice" | "questio
  */
 export type Question = { id: string; title: string; kind: "choice" | "value"; options?: string[]; multi?: boolean; label?: string; steps?: string; answer?: string; dropped?: string };
 
+/**
+ * One line in a requirement's activity feed (活动): what the user follows instead of its workers' chats. Milestones
+ * and hand-offs only — a member finishing its part, telling a teammate, pulling one in, the user answering.
+ * by: the member it's about (a task id); kind: what sort of line, for its icon.
+ */
+export type Activity = { at: number; by?: string; kind: "progress" | "tell" | "join" | "done" | "review" | "user" | "stuck"; text: string; to?: string };
+
 export type Task = {
   id: string;
   title: string;
@@ -70,6 +77,19 @@ export type Task = {
   waiting?: { what: string; since: number; source?: string; key?: string; where?: string; recheckAt?: number };
   waitEnd?: unknown;
   origin?: { id: string; source: string; kind: string; key?: string; title?: string; url?: string; reply?: { kind: string; data?: unknown } };
+  /**
+   * A member of requirement `team` (the task whose card the user sees; its own worker is the lead, 负责人): it works
+   * in its own repository next to the others and talks to them straight (board.ts tell), not through the router.
+   * Unset on a requirement itself and on a task that works alone.
+   */
+  team?: string;
+  /** A requirement's feed (on the task that has members): see Activity. */
+  activity?: Activity[];
+  /**
+   * Teammate messages since the last real progress (a member done / for review, the user stepping in): past a limit
+   * the members are told to put their disagreement to the user instead of going round (board.ts tell).
+   */
+  bounces?: number;
   /** Split off this task: by the router (one of several parts run in parallel), or by its worker (tasks.add from: a part handed on, or the rest of the work when it hands over). */
   from?: string;
   worktree?: boolean;
@@ -206,6 +226,43 @@ function tellOrigins(ctx: Ctx, before: Seen, s: Store) {
       ctx.log(`回复 ${t.origin.source}/${t.origin.kind} 失败：${e?.message ?? e}`);
     }
   }
+}
+
+/**
+ * The requirement a task belongs to, if it's part of one with several members: the member's team; the task itself
+ * when others work under it; for a human step, its asker's. Undefined for a task that works alone.
+ */
+export function teamOf(s: Store, t: Task): Task | undefined {
+  if (t.owner === "human") {
+    const by = t.askedBy ? s.tasks.find((x) => x.id === t.askedBy) : s.tasks.find((x) => x.owner === "agent" && x.blockedBy?.includes(t.id));
+    return by && by.id !== t.id ? teamOf(s, by) : undefined;
+  }
+  if (t.team) return s.tasks.find((x) => x.id === t.team);
+  return s.tasks.some((x) => x.team === t.id) ? t : undefined;
+}
+
+/** The members of requirement `root`, itself (the lead) first. */
+export function members(s: Store, root: Task): Task[] {
+  return [root, ...s.tasks.filter((x) => x.team === root.id)];
+}
+
+const KEEP_ACTIVITY = 200;
+
+/**
+ * A line in the feed of `t`'s requirement (t itself when it works alone: its feed shows once it has teammates).
+ * Progress that came from outside the members' talk — a part done, the user's answer — starts the bounce count over.
+ */
+export function activity(s: Store, t: Task, a: Omit<Activity, "at">) {
+  const root = teamOf(s, t) ?? (t.owner === "agent" ? t : undefined);
+  if (!root) return;
+  root.activity = [...(root.activity ?? []), { at: Date.now(), ...a }].slice(-KEEP_ACTIVITY);
+  if (a.kind === "done" || a.kind === "review" || a.kind === "user") root.bounces = 0;
+  root.updatedAt = Date.now();
+}
+
+/** How a member is named to people and teammates: its repository's folder (后端仓库), else its id. */
+export function memberName(t: Task) {
+  return t.repo ? `${t.id}（${t.repo.split("/").pop()}）` : t.id;
 }
 
 export function find(s: Store, id: string): Task {

@@ -1,6 +1,6 @@
 import { tellInbox } from "./_inbox";
 import { workflow } from "./_config";
-import { blockersDone, find, load, newTask, note, update, type Question, type Store, type Task } from "./_store";
+import { activity, blockersDone, find, load, members, newTask, note, teamOf, update, type Question, type Store, type Task } from "./_store";
 import { applyBlock } from "./_apply";
 import { askUser, endQuestions, endWaits, isOutside, open, question, syncAgents, syncSessions, wakeText, type Wait } from "./_waits";
 import { wake } from "./_wake";
@@ -118,6 +118,7 @@ export async function list(input: unknown, ctx: Ctx) {
           `- 要用户决定 / 给东西：用 ask_human 登记（决定带 options），然后结束这一轮；\n` +
           `- 做完了、交付了、要用户验收：用 task_update 报对应的 state；\n` +
           `- 在等别人（同事回话、job / 发布跑完）：用 wait_for 说等什么、在哪个对话等回复或几分钟后回来看，然后结束这一轮；\n` +
+          `- 在等队友（同一个需求的另一个成员）：先 tell 它要什么，再 wait_for {"type":"teammate"}，然后结束这一轮；\n` +
           `- 还有能做的：接着做，别停。\n` +
           `只补汇报，别重复聊天里说过的话。`,
       )
@@ -147,9 +148,31 @@ export async function list(input: unknown, ctx: Ctx) {
         said: said ? [...said].slice(0, 200).join("") + ([...said].length > 200 ? "…" : "") : undefined,
       };
     });
-  // What waits on the user, in Gerdr's inbox too (_inbox.ts)
+  // What waits on the user, in Gerdr's inbox too (_inbox.ts): each member and step on its own, as before
   tellInbox(ctx, tasks as any);
-  return { tasks, at: Date.now() };
+  return { tasks: teams(s, tasks), at: Date.now() };
+}
+
+/**
+ * A requirement with members is one card (DESIGN.md「需求和队友」): its members and the user's steps they asked for
+ * carry `in` (the requirement's id) and the page folds them into its card; the requirement's `teamColumn` is the most
+ * pressing of theirs — any of them waiting on the user puts the card under 等你.
+ */
+function teams<T extends Task & { column: string }>(s: Store, tasks: T[]) {
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const rank = { you: 3, review: 2, active: 1, done: 0 } as Record<string, number>;
+  const out = tasks.map((t) => {
+    const root = teamOf(s, t);
+    return root && root.id !== t.id ? { ...t, in: root.id } : t;
+  });
+  return out.map((t: any) => {
+    if (t.in || !s.tasks.some((x) => x.team === t.id)) return t;
+    const mine = out.filter((x: any) => x.in === t.id);
+    // A member's result for review counts as the card's too: the user judges it either way
+    let col = t.column;
+    if (col !== "done") for (const x of mine) if ((rank[x.column] ?? 0) > (rank[col] ?? 0)) col = x.column;
+    return { ...t, teamColumn: col, members: members(s, byId.get(t.id)!).map((m) => m.id) };
+  });
 }
 
 /**
@@ -359,12 +382,20 @@ async function tell(ctx: Ctx, t: Task, text: string) {
 
 /** The user accepts the result: done, and the worker is parked (its context kept, a later send wakes it). */
 export async function accept(input: { id: string }, ctx: Ctx) {
+  let closing: string[] = [];
   const t = update(ctx, (s) => {
     const t = find(s, input.id);
     Object.assign(t, { status: "done", doneAt: Date.now(), updatedAt: Date.now() });
+    // The requirement accepted: every member's part with it. A member marked done alone: only that part.
+    closing = members(s, t).filter((m) => m.id !== t.id && m.team === t.id && m.status !== "done" && m.status !== "dropped").map((m) => {
+      note(m, "需求标为完成了");
+      Object.assign(m, { status: "done", doneAt: Date.now(), updatedAt: Date.now() });
+      return m.session;
+    }).filter((x): x is string => !!x);
+    activity(s, t, { kind: "user", by: t.id, text: t.team ? "你把这部分标为完成" : "你把需求标为完成" });
     return t;
   });
-  if (t.session && (ctx.sessions as any).close) await (ctx.sessions as any).close(t.session).catch(() => {});
+  for (const id of [t.session, ...closing]) if (id && (ctx.sessions as any).close) await (ctx.sessions as any).close(id).catch(() => {});
   return t;
 }
 
@@ -394,6 +425,7 @@ export async function answer(input: { id: string; answer: string }, ctx: Ctx) {
     text: `关于你的问题，用户的决定：${ans}`,
     ends: (w) => w.kind === "user" && !w.item,
     also: (t) => note(t, `问：${q}\n答：${ans}`),
+    feed: `你答了：${ans}`,
   });
 }
 
@@ -412,6 +444,7 @@ export async function complete(input: { id: string; value?: string }, ctx: Ctx) 
     if (h.status === "dropped") throw new Error(`${h.id} 已经不需要了`);
     if ((h.handBack?.kind === "value" || h.handBack?.kind === "choice") && !input.value?.trim()) throw new Error(h.handBack.kind === "choice" ? "选一个，或者写下你的决定" : `要交回：${h.handBack.label || "一个值"}`);
     Object.assign(h, { status: "done", handedBack: input.value?.trim() || undefined, doneAt: Date.now(), updatedAt: Date.now() });
+    if (teamOf(s, h)) activity(s, h, { kind: "user", by: h.askedBy, text: `${h.handBack?.kind === "choice" || h.handBack?.kind === "questions" ? "你答了" : "你做完了"}「${h.title}」${h.handBack?.kind === "secret" || !h.handedBack ? "" : `：${h.handedBack}`}` });
     woken = s.tasks.filter((t) => t.owner === "agent" && t.session && t.status === "running" && t.blockedBy?.includes(h.id) && blockersDone(s, t));
     return h;
   });
@@ -455,15 +488,24 @@ export async function say(input: { id: string; text: string }, ctx: Ctx) {
 
 /** Drops a task (not doing it). { id, reason? } */
 export async function drop(input: { id: string; reason?: string }, ctx: Ctx) {
+  const closing: string[] = [];
   const t = update(ctx, (s) => {
+    closing.length = 0;
     const t = find(s, input.id);
-    if (input.reason) note(t, `放弃：${input.reason}`);
-    // Kept so it can be undone (restore): a click on 放弃 is easy to make by mistake
-    if (t.status !== "dropped") t.droppedFrom = t.status;
-    Object.assign(t, { status: "dropped", doneAt: Date.now(), updatedAt: Date.now() });
+    // A requirement dropped: its members with it (each undone with it too: restore)
+    const all = t.team ? [t] : members(s, t);
+    for (const x of all) {
+      if (x.status === "dropped" || (x !== t && x.status === "done")) continue;
+      if (input.reason) note(x, `放弃：${input.reason}`);
+      // Kept so it can be undone (restore): a click on 放弃 is easy to make by mistake
+      x.droppedFrom = x.status;
+      Object.assign(x, { status: "dropped", doneAt: Date.now(), updatedAt: Date.now() });
+      if (x.session) closing.push(x.session);
+    }
+    if (t.team) activity(s, t, { kind: "user", by: t.id, text: `你放弃了这部分${input.reason ? `：${input.reason}` : ""}` });
     return t;
   });
-  if (t.session && (ctx.sessions as any).close) await (ctx.sessions as any).close(t.session).catch(() => {});
+  for (const id of closing) if ((ctx.sessions as any).close) await (ctx.sessions as any).close(id).catch(() => {});
   return t;
 }
 
@@ -475,8 +517,11 @@ export function restore(input: { id: string }, ctx: Ctx) {
   return update(ctx, (s) => {
     const t = find(s, input.id);
     if (t.status !== "dropped") throw new Error(`${t.id} 没有被放弃`);
-    note(t, "恢复了（撤销放弃）");
-    Object.assign(t, { status: t.droppedFrom ?? (t.owner === "human" ? "todo" : t.session ? "running" : "todo"), droppedFrom: undefined, doneAt: undefined, updatedAt: Date.now() });
+    for (const x of t.team ? [t] : members(s, t)) {
+      if (x.status !== "dropped" || (x !== t && !x.droppedFrom)) continue;
+      note(x, "恢复了（撤销放弃）");
+      Object.assign(x, { status: x.droppedFrom ?? (x.owner === "human" ? "todo" : x.session ? "running" : "todo"), droppedFrom: undefined, doneAt: undefined, updatedAt: Date.now() });
+    }
     return t;
   });
 }
@@ -494,11 +539,14 @@ async function route(id: string, prompt: string, ctx: Ctx) {
 type Part = { repo: string; agent?: string; model?: string; effort?: string; worktree?: boolean; title?: string; prompt?: string };
 
 /**
+ * team: the parts are one requirement worked on together (前后端一个功能): the first is the lead and the card, the
+ * others its members (team), talking to each other straight. Without it, parallel parts are tasks of their own (from).
+ *
  * Sends a task out in one go, as the router decided: { id, title?, parts: [{ repo, agent?, model?, effort?, worktree?,
  * title?, prompt? }] }. One part is the task itself. Several run in parallel: the first stays this task (its title /
  * prompt narrowed to that part), each other one becomes a new task split off it (`from`), with the same attachments.
  */
-export async function dispatch(input: { id: string; title?: string; parts: Part[] }, ctx: Ctx) {
+export async function dispatch(input: { id: string; title?: string; parts: Part[]; team?: boolean }, ctx: Ctx) {
   const parts = input?.parts ?? [];
   if (!parts.length) throw new Error(`parts 至少一份：{"id":"${input?.id}","parts":[{"repo":"/绝对路径"}]}`);
   for (const p of parts) {
@@ -518,7 +566,7 @@ export async function dispatch(input: { id: string; title?: string; parts: Part[
     try {
       out.push(
         (await add(
-          { title: p.title, prompt: p.prompt, repo: p.repo, agent: p.agent, model: p.model, effort: p.effort, worktree: p.worktree, attachments: t.attachments, from: t.id, router: t.router, routerClosed: true, start: true },
+          { title: p.title, prompt: p.prompt, repo: p.repo, agent: p.agent, model: p.model, effort: p.effort, worktree: p.worktree, attachments: t.attachments, from: t.id, router: t.router, routerClosed: true, start: true, ...(input.team ? { team: t.id } : {}) },
           ctx,
         )) as Task,
       );
@@ -526,6 +574,8 @@ export async function dispatch(input: { id: string; title?: string; parts: Part[
       errors.push(`${p.title ?? p.repo}：${e?.message ?? e}`);
     }
   }
+  if (input.team && out.length > 1)
+    update(ctx, (s) => activity(s, find(s, t.id), { kind: "join", text: `一起做：${out.map((x) => `${x.id}（${x.repo?.split("/").pop()}）${x.title}`).join("；")}` }));
   if (errors.length) throw new Error(`已派出 ${out.map((x) => x.id).join("、")}；没派出去的：\n${errors.join("\n")}`);
   return out;
 }
@@ -688,6 +738,7 @@ export async function answerQuestion(input: { id: string; q: string; value: stri
     } else if (asked(h).every((x) => x.answer)) {
       finished = true;
       Object.assign(h, { status: "done", handedBack: summary(h), doneAt: Date.now() });
+      if (teamOf(s, h)) activity(s, h, { kind: "user", by: h.askedBy, text: `你答了 ${asked(h).length} 个问题：${summary(h)}` });
     }
     if (h.status === "done") h.handedBack = summary(h);
     h.updatedAt = Date.now();

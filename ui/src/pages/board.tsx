@@ -1,4 +1,4 @@
-import { AlertTriangle, Bot, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ListTodo, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Send, Settings, Undo2, X } from "lucide-react";
+import { AlertTriangle, ArrowRight, Bot, Users, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ListTodo, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Send, Settings, Undo2, X } from "lucide-react";
 import clsx from "clsx";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "../components/Button";
@@ -73,8 +73,15 @@ function PhoneTabs({ cols, count, current, onPick }: { cols: typeof COLS; count:
 
 /** The board's column: tasks.ts says you / review / active / done; "active" is split into not started yet and running. */
 function colOf(t: Task): Col {
-  if (t.column === "active" && (t.status === "todo" || (t.owner === "human" && !t.ready))) return "todo";
-  return t.column;
+  // A requirement with members: where the most pressing of them is (any waiting on the user → 等你)
+  const c = t.teamColumn ?? t.column;
+  if (c === "active" && (t.status === "todo" || (t.owner === "human" && !t.ready))) return "todo";
+  return c;
+}
+
+/** A requirement worked on by several members: one card, its feed in a drawer of its own (TeamDrawer). */
+function isTeam(t?: Task) {
+  return !!t && (t.members?.length ?? 0) > 1;
 }
 
 export default function BoardPage() {
@@ -87,7 +94,8 @@ export default function BoardPage() {
   const [doneLimit, setDoneLimit] = useState(20);
   const byId = Object.fromEntries((tasks ?? []).map((t) => [t.id, t]));
   const list = (c: Col) => {
-    const l = (tasks ?? []).filter((t) => colOf(t) === c);
+    // Members of a requirement and the steps they asked for are in its card, not cards of their own
+    const l = (tasks ?? []).filter((t) => !t.in && colOf(t) === c);
     if (c === "done") return l.sort((a, b) => Number(a.status === "dropped") - Number(b.status === "dropped") || (b.doneAt ?? 0) - (a.doneAt ?? 0));
     // Newest first, like the other columns, by the time each card shows
     if (c === "you") return l.sort((a, b) => waitedSince(b) - waitedSince(a));
@@ -109,7 +117,8 @@ export default function BoardPage() {
   // Still being handed out: it opens as the routing conversation, live, so the user sees how it's deciding and can
   // put it right
   const routingNow = !!sel && sel.owner === "agent" && sel.status === "todo" && !!sel.routing && !!sel.router;
-  const inChat = !!sel && sel.owner === "agent" && ((!!sel.session && sel.status !== "done" && sel.status !== "dropped") || routingNow);
+  // A requirement with members opens as its activity feed; each member's chat is one click from there
+  const inChat = !!sel && !isTeam(sel) && sel.owner === "agent" && ((!!sel.session && sel.status !== "done" && sel.status !== "dropped") || routingNow);
   // A session its worker handed work to is asking the user something: that's where the answer goes, so it opens
   // first (the 链路 above leads back to the worker)
   const asking = sel?.status === "running" ? sel.helpers?.find((k) => k.status === "waiting" && k.left) : undefined;
@@ -193,7 +202,7 @@ export default function BoardPage() {
             one sideways too) made every touch on the column look like one on something that scrolls sideways, so the
             swipe between columns left it alone (lib/swipe.ts skip) */}
         <div className="min-h-0 flex-1 space-y-2 px-2 pb-2 md:overflow-y-auto">
-          {shown.length ? shown.map((t) => <MiniCard key={t.id} t={t} byId={byId} active={t.id === open} onOpen={() => (setPeek(null), setOpen(t.id))} />) : <p className="py-6 text-center text-[12px] text-muted-foreground">无任务</p>}
+          {shown.length ? shown.map((t) => isTeam(t) ? <TeamCard key={t.id} t={t} tasks={tasks ?? []} active={t.id === open} onOpen={() => (setPeek(null), setOpen(t.id))} /> : <MiniCard key={t.id} t={t} byId={byId} active={t.id === open} onOpen={() => (setPeek(null), setOpen(t.id))} />) : <p className="py-6 text-center text-[12px] text-muted-foreground">无任务</p>}
           {all.length > shown.length && (
             <button className="w-full py-2 text-[12px] text-muted-foreground hover:text-foreground" onClick={() => setDoneLimit(doneLimit + 50)}>
               再显示 {Math.min(50, all.length - shown.length)} 个
@@ -254,7 +263,8 @@ export default function BoardPage() {
         )}
         </>
       )}
-      <Linger>{sel && !inChat && <Drawer t={sel} byId={byId} act={act} onClose={() => setOpen("")} onGo={setOpen} />}</Linger>
+      <Linger>{sel && isTeam(sel) && <TeamDrawer t={sel} tasks={tasks ?? []} byId={byId} act={act} onClose={() => setOpen("")} onGo={setOpen} />}</Linger>
+      <Linger>{sel && !inChat && !isTeam(sel) && <Drawer t={sel} byId={byId} act={act} onClose={() => setOpen("")} onGo={setOpen} />}</Linger>
       <Linger>{panel && sel && viewing && view && !peek && (
         <ChatDrawer
           session={view.session}
@@ -1364,5 +1374,210 @@ function MentionArea({
         </div>
       )}
     </div>
+  );
+}
+
+// ---- a requirement with members (DESIGN.md「需求和队友」) ----
+
+/** A member as people call it: its repository's folder. */
+function memberLabel(m?: Task) {
+  return m ? m.repo?.split("/").pop() || m.id : "";
+}
+
+/** Who and what in a requirement waits on the user: the steps / decisions its members asked, members stuck on them. */
+function teamNeeds(t: Task, tasks: Task[]) {
+  const mine = tasks.filter((x) => x.id === t.id || x.in === t.id);
+  const steps = mine.filter((x) => x.owner === "human" && x.status !== "done" && x.status !== "dropped" && x.ready);
+  const stuck = mine.filter((x) => x.owner === "agent" && x.column === "you" && x.status !== "done" && x.status !== "dropped");
+  return { steps, stuck };
+}
+
+/** What a member stuck on the user needs, in a line. */
+function stuckText(x: Task) {
+  const k = x.helpers?.find((h) => h.left);
+  if (x.live?.status === "waiting") return `等你批准 / 回答${x.live.waiting ? `：${x.live.waiting}` : ""}`;
+  if (x.live?.status === "error") return `出错了：${x.live.error ?? ""}`;
+  if (k) return `它派出的「${k.title}」${k.waitingKind === "ask" ? "在问" : "要你批准"}：${k.waiting ?? ""}`;
+  if (x.question) return `问你：${x.question}`;
+  if (x.stopped) return `停下了${x.said ? `：${x.said}` : "，没说接下来要什么"}`;
+  return "在等你";
+}
+
+function memberDot(x: Task) {
+  if (x.status === "done") return "bg-ok";
+  if (x.status === "dropped") return "bg-muted-foreground/30";
+  if (x.column === "you") return "bg-warn";
+  if (x.live?.status === "running") return "bg-ok animate-pulse";
+  return "bg-muted-foreground/40";
+}
+
+/** The card: what the user scans — the latest activity, who's on it, and what waits on them. */
+function TeamCard({ t, tasks, active, onOpen }: { t: Task; tasks: Task[]; active: boolean; onOpen: () => void }) {
+  const byId = Object.fromEntries(tasks.map((x) => [x.id, x]));
+  const ms = (t.members ?? []).map((id) => byId[id]).filter(Boolean);
+  const last = t.activity?.[t.activity.length - 1];
+  const { steps, stuck } = teamNeeds(t, tasks);
+  const first = steps[0] ? `${steps[0].handBack?.kind === "choice" || steps[0].questions ? "待你决定" : "要你做"}：${steps[0].title}` : stuck[0] ? `${memberLabel(stuck[0])} ${stuckText(stuck[0])}` : "";
+  const n = steps.length + stuck.length;
+  return (
+    <button data-task-card="" onClick={onOpen} className={clsx("block w-full space-y-1.5 rounded-lg border bg-card p-3 text-left shadow-xs transition-[border-color,box-shadow,transform] duration-150 hover:border-ring/50 hover:shadow-sm active:scale-[0.99]", active && "border-ring")}>
+      <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+        <Users className="size-3 shrink-0" />
+        <span className="shrink-0 font-mono">{t.id}</span>
+        <span>· 需求 · {ms.length} 个成员</span>
+      </div>
+      <p className={clsx("line-clamp-2 text-[13px] font-medium", t.status === "dropped" && "text-muted-foreground line-through")}>{t.title}</p>
+      {n > 0 && t.status !== "done" && t.status !== "dropped" && (
+        <p className="line-clamp-2 text-[12px] text-warn">
+          {n > 1 && <span className="font-medium">{n} 件等你 · </span>}
+          {first}
+        </p>
+      )}
+      {last && (
+        <p className="line-clamp-2 text-[12px] text-muted-foreground">
+          {last.by && byId[last.by] && <span className="text-foreground/80">{memberLabel(byId[last.by])}</span>}
+          {last.to && byId[last.to] && <span> → {memberLabel(byId[last.to])}</span>}
+          {last.by && byId[last.by] ? "：" : ""}
+          {last.text}
+          <span className="text-muted-foreground/70"> · {ago(last.at)}</span>
+        </p>
+      )}
+      <div className="flex flex-wrap items-center gap-1">
+        {ms.map((m) => (
+          <span key={m.id} title={`${m.id} ${m.title}`} className="inline-flex items-center gap-1 rounded-sm bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+            <span className={clsx("size-1.5 rounded-full", memberDot(m))} />
+            {memberLabel(m)}
+            {m.id === t.id && <span className="text-[10px]">（负责）</span>}
+          </span>
+        ))}
+      </div>
+    </button>
+  );
+}
+
+const KIND: Record<string, string> = { progress: "进展", tell: "通知", join: "加入", done: "完成", review: "待你看", user: "你", stuck: "卡住" };
+
+/**
+ * Opening a requirement: what waits on the user first (answered right here), then its members (a click opens one's
+ * chat — the only place chats are), then the activity feed, newest first. The user follows this, not the chats.
+ */
+function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Task[]; byId: Record<string, Task>; act: Act; onClose: () => void; onGo: (id: string) => void }) {
+  const { busy, err, go } = useAction(act);
+  const ms = (t.members ?? []).map((id) => byId[id]).filter(Boolean);
+  const { steps, stuck } = teamNeeds(t, tasks);
+  const over = t.status === "done" || t.status === "dropped";
+  const feed = [...(t.activity ?? [])].reverse();
+  const when = (ms: number) => new Date(ms).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  return (
+    <Sheet open modal={false} onOpenChange={(o) => !o && onClose()}>
+      <SheetContent
+        showCloseButton={false}
+        aria-describedby={undefined}
+        className="w-full gap-0 sm:max-w-[560px]"
+        onInteractOutside={(e) => {
+          const el = e.target as Element | null;
+          if (!el?.closest?.("[data-gerdr-mount]") || el.closest("[data-task-card]")) e.preventDefault();
+        }}
+      >
+        <SheetTitle className="sr-only">{t.title}</SheetTitle>
+        <div className="flex items-center gap-2 border-b px-4 py-2.5 text-[12px] text-muted-foreground">
+          <Users className="size-3.5" />
+          <span className="font-mono">{t.id}</span>
+          <span>· 需求 · {COLS.find((c) => c.id === colOf(t))?.title}</span>
+          <span className="ml-auto" />
+          <Button variant="ghost" size="icon" aria-label="关闭" onClick={onClose}>
+            <X className="size-4" />
+          </Button>
+        </div>
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
+          <h3 className="text-[16px] font-medium">{t.title}</h3>
+          {!over && (steps.length > 0 || stuck.length > 0) && (
+            <section className="space-y-2">
+              <h4 className="text-[12px] font-medium text-warn">等你 · {steps.length + stuck.length}</h4>
+              {stuck.map((x) => (
+                <div key={x.id} className="flex items-start gap-2 rounded-md border border-warn/40 bg-warn/5 px-3 py-2 text-[13px]">
+                  <span className="min-w-0 flex-1">
+                    <span className="font-medium">{memberLabel(x)}</span> {stuckText(x)}
+                  </span>
+                  {x.session && (
+                    <Button variant="outline" onClick={() => openChat(x.session!, x.id)}>
+                      <MessageSquare className="size-3.5" />
+                      去对话
+                    </Button>
+                  )}
+                </div>
+              ))}
+              {steps.map((h) => (
+                <div key={h.id} className="rounded-md border border-warn/40 p-3">
+                  <HumanCard t={h} byId={byId} act={act} onGo={onGo} />
+                </div>
+              ))}
+            </section>
+          )}
+          <section className="space-y-1.5">
+            <h4 className="text-[12px] font-medium text-muted-foreground">成员 · 点开看它的对话</h4>
+            {ms.map((m) => (
+              <button
+                key={m.id}
+                disabled={!m.session}
+                onClick={() => m.session && openChat(m.session, m.id)}
+                className="flex w-full items-center gap-2 rounded-md border px-3 py-2 text-left text-[13px] hover:bg-accent disabled:opacity-60"
+              >
+                <span className={clsx("size-2 shrink-0 rounded-full", memberDot(m))} />
+                <span className="shrink-0 font-medium">{memberLabel(m)}</span>
+                {m.id === t.id && <span className="shrink-0 rounded-sm bg-brand/10 px-1 text-[11px] text-brand">负责人</span>}
+                <span className="min-w-0 flex-1 truncate text-muted-foreground">{m.title}</span>
+                <span className="shrink-0 text-[11px] text-muted-foreground">{m.status === "done" ? "做完了" : m.status === "dropped" ? "放弃了" : liveText(m)}</span>
+              </button>
+            ))}
+          </section>
+          <section className="space-y-1.5">
+            <h4 className="text-[12px] font-medium text-muted-foreground">活动</h4>
+            {feed.length ? (
+              <ol className="space-y-2 border-l pl-3">
+                {feed.map((a, i) => (
+                  <li key={`${a.at}-${i}`} className="relative text-[13px]">
+                    <span className={clsx("absolute top-1.5 -left-[16.5px] size-2 rounded-full border-2 border-background", a.kind === "done" ? "bg-ok" : a.kind === "stuck" || a.kind === "review" ? "bg-warn" : a.kind === "user" ? "bg-brand" : "bg-muted-foreground/50")} />
+                    <div className="flex items-baseline gap-1.5 text-[11px] text-muted-foreground">
+                      <span>{KIND[a.kind] ?? a.kind}</span>
+                      {a.by && byId[a.by] && a.kind !== "user" && <span className="text-foreground/80">{memberLabel(byId[a.by])}</span>}
+                      {a.to && byId[a.to] && (
+                        <>
+                          <ArrowRight className="size-3 self-center" />
+                          <span className="text-foreground/80">{memberLabel(byId[a.to])}</span>
+                        </>
+                      )}
+                      <span className="ml-auto tabular-nums">{when(a.at)}</span>
+                    </div>
+                    <p className="whitespace-pre-wrap">{a.text}</p>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="text-[12px] text-muted-foreground">还没有活动</p>
+            )}
+          </section>
+          {ms.some((m) => m.links?.length) && ms.map((m) => <Links key={m.id} t={m} />)}
+          {err && <p role="alert" className="text-[12px] text-bad">{err}</p>}
+          {!over && (
+            <div className="flex flex-wrap justify-end gap-2">
+              <DropButton busy={!!busy} onDrop={() => go("drop", "drop", { id: t.id })} />
+              <Button variant="outline" disabled={!!busy} onClick={() => go("accept", "accept", { id: t.id })}>
+                <Check className="size-3.5" />
+                整个需求标为完成
+              </Button>
+            </div>
+          )}
+          {t.status === "dropped" && (
+            <div className="flex justify-end">
+              <Button variant="outline" disabled={!!busy} onClick={() => go("restore", "restore", { id: t.id })}>
+                <Undo2 className="size-3.5" />
+                恢复
+              </Button>
+            </div>
+          )}
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 }

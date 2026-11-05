@@ -56,7 +56,7 @@ export type Item = {
   /** The proactive rule it was (or would have been) taken under. */
   rule?: string;
   /** Observe mode: what accepting it would have been, so 去向's 照做 can do exactly that. */
-  would?: { title?: string; parts: unknown[] };
+  would?: { title?: string; parts: unknown[]; team?: boolean };
   reason?: string;
   tasks?: string[];
   /** Workers that gave a delivered message back (not their task's business), with why. */
@@ -215,6 +215,7 @@ async function brief(ctx: Ctx): Promise<string> {
       `- attach：${ex({ item: "c5", decision: "attach", task: "t9" })}；stop：${ex({ item: "c6", decision: "stop", task: "t9", reason: "…" })}\n` +
       `- parts 每项一份活：repo 必填；agent、model、effort 不写就用下面的默认，简单的活可以给便宜的模型；worktree 默认 false。\n` +
       `- 只有一份：就是这件事本身，不用写 prompt。拆成几份并行（用户 @ 了几个 agent，或者活明显能分开做）：每份写 title（十几个字）和 prompt（这一份做什么、和别的份怎么配合）；同一个仓库有两份以上时都写 "worktree": true。\n` +
+      `- 几份是同一个需求、要互相配合（前端接后端的新接口）：加 "team": true，成了一张卡片、几个成员，第一份是负责人，成员之间直接对话，不经过你。互不相干的几件事不加，各是一张卡。看不出要动别的仓库就只派一份，worker 发现了会自己拉队友。\n` +
       `- 任务的标题是从内容第一行截的，不够好就加 "title"。\n` +
       `- 命令报错就按错误改了再发那几条。`,
     `## 可选的 agent\n${agentLines.join("\n")}`,

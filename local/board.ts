@@ -4,10 +4,18 @@
 // block couldn't do: take back a human step the user no longer needs to do, and answer with ids.
 
 import { applyBlock } from "./_apply";
-import { find, load, note, update, type Store, type Task } from "./_store";
+import { activity, find, load, memberName, members, note, teamOf, update, type Store, type Task } from "./_store";
 import { handBack } from "./_main";
 import { waitCard } from "./waits";
 import { endWaits, isOutside, open, question } from "./_waits";
+import { wake } from "./_wake";
+import { add } from "./tasks";
+
+/**
+ * Teammate messages in a row with no part done, nothing for review and no word from the user: past this the members
+ * are going round (前端说是后端的问题，后端说是前端的), and tell makes them put it to the user instead.
+ */
+const BOUNCE_LIMIT = 8;
 
 const STEP = {
   type: "object",
@@ -69,8 +77,46 @@ export const tools = {
     input: { type: "object", properties: { event: { type: "string" }, reason: { type: "string", description: "Why it isn't this task's, in a sentence" } }, required: ["event", "reason"] },
   },
   my_task: {
-    description: "Your board task as the board sees it: status, summary, artifacts, and the human steps you asked for (open or done, with what was handed back).",
+    description: "Your board task as the board sees it: status, summary, artifacts, the human steps you asked for (open or done, with what was handed back), and — when you work with teammates on one requirement — who they are, where they stand and the requirement's recent activity.",
     input: { type: "object", properties: {} },
+  },
+  add_teammate: {
+    description:
+      "Bring another agent onto your requirement, working in another repository (the frontend for your backend, say), when your work needs changes there. It becomes a member of the same requirement: one card for the user, and you two talk straight with tell — no one relays. One member per repository: if the repository already has one, tell it instead. Picking the repository: the user's repository list (`gerdr panel run tasks.repos`).",
+    input: {
+      type: "object",
+      properties: {
+        repo: { type: "string", description: "Absolute path of the repository it works in" },
+        title: { type: "string", description: "Its part in a dozen words (前端：登录页接新接口)" },
+        prompt: {
+          type: "string",
+          description: "What it needs that it can't see from your chat: what to do, what's decided, where the contract is (an API doc / MR link, not its text pasted), what you need back from it.",
+        },
+        agent: { type: "string" },
+        model: { type: "string" },
+        effort: { type: "string" },
+        worktree: { type: "boolean", description: "A git worktree of its own (only when another member already works in that repository)" },
+      },
+      required: ["repo", "prompt"],
+    },
+  },
+  tell: {
+    description:
+      "Tell a teammate (another member of your requirement) something it must know now: your part is ready (with the doc / MR link), what failed when you tried theirs (with the error), a change of plan. It gets it right away, even mid-step (a build it should stop). A line goes in the requirement's activity for the user. Waiting for its answer: wait_for with {type: teammate}.",
+    input: {
+      type: "object",
+      properties: {
+        to: { type: "string", description: "The teammate's task id (my_task lists them)" },
+        text: { type: "string", description: "The message, complete: what it needs to act on, links rather than pasted contents" },
+        summary: { type: "string", description: "One line for the user's activity feed (接口好了，已告诉前端去联调). Default: the first line of text" },
+      },
+      required: ["to", "text"],
+    },
+  },
+  post_progress: {
+    description:
+      "A milestone in your requirement's activity feed, which is what the user follows instead of your chat: one line, a step that matters to them (接口和文档好了；联调通过；发现要改表结构). Not every command or file: a few lines per requirement. Finishing (task_update done / review), telling a teammate and asking the user add their own lines; don't repeat them here.",
+    input: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
   },
 };
 
@@ -84,10 +130,20 @@ export function instructions(input: unknown, ctx: Ctx) {
   const who = ctx.caller.session;
   const t = who && load(ctx).store.tasks.find((x) => x.owner === "agent" && (x.session === who || x.sessions?.includes(who)));
   if (!t) return "";
+  const { store } = load(ctx);
+  const root = teamOf(store, t);
+  const mates = root ? members(store, root).filter((x) => x.id !== t.id && x.status !== "dropped") : [];
+  const team = root
+    ? ` You are one member of requirement ${root.id} ("${root.title}")${root.id === t.id ? ", and its lead: you say when the whole of it is done" : `, led by ${memberName(root)}`}. ` +
+      `Teammates, each in its own repository: ${mates.map((x) => `${memberName(x)} "${x.title}"`).join("; ") || "none yet"}. ` +
+      `Talk to them straight with tell (it reaches them at once), wait for them with wait_for {type: teammate}; ` +
+      `the user follows the requirement's activity feed, not your chats (post_progress for a milestone).`
+    : "";
   return (
     `You are the worker of task ${t.id} ("${t.title}") on the user's Superagent board. They follow it on the board, not in ` +
-    `this chat. How to work on it (reporting with these tools, asking them, starting other agents) is their my-workflow ` +
-    `skill, references/board.md: read it before you report or stop. my_task shows the task as the board sees it.`
+    `this chat. How to work on it (reporting with these tools, asking them, starting other agents, teammates) is their my-workflow ` +
+    `skill, references/board.md: read it before you report or stop. my_task shows the task as the board sees it.` +
+    team
   );
 }
 
@@ -99,9 +155,11 @@ export function mine(s: Store, ctx: Ctx): Task {
   return t;
 }
 
-export function task_update(input: { state: string; summary?: string; links?: { label?: string; url: string }[]; mr?: string }, ctx: Ctx) {
+export async function task_update(input: { state: string; summary?: string; links?: { label?: string; url: string }[]; mr?: string }, ctx: Ctx) {
   const sess = ctx.caller.session ? ctx.sessions.get(ctx.caller.session) : null;
-  return update(ctx, (s) => {
+  let closing: string[] = [];
+  const out = update(ctx, (s) => {
+    closing = [];
     const t = mine(s, ctx);
     if (t.status === "done" || t.status === "dropped") throw new Error(`${t.id} 已经${t.status === "done" ? "完成" : "放弃"}了`);
     let state = input.state === "working" ? undefined : input.state;
@@ -118,9 +176,34 @@ export function task_update(input: { state: string; summary?: string; links?: { 
       t.nudges = 0;
       endWaits(t, isOutside, "worker 报了新进展");
     }
+    const root = teamOf(s, t);
+    if (root && (state === "done" || state === "review")) {
+      const lead = root.id === t.id;
+      activity(s, t, { by: t.id, kind: state, text: `${lead && state === "done" ? "整个需求做完了" : state === "done" ? "这部分做完了" : "有结论了，等你看"}${input.summary ? `：${input.summary}` : ""}` });
+      // The lead says the whole requirement is done: every member's part with it (DESIGN.md「需求和队友」)
+      if (lead && state === "done") closing = finishMembers(s, root, "负责人报了整个需求完成");
+    }
     const fresh = open(t).filter((w) => isOutside(w) && !before.has(w.id));
     return { id: t.id, status: t.status, column: question(t) ? "等你" : t.status, ...(fresh.length ? { gerdrCard: waitCard(ctx, t, fresh) } : {}) };
   });
+  await closeSessions(ctx, closing);
+  return out;
+}
+
+/** Every member of `root` still going is done with it (their sessions to close: returned). */
+export function finishMembers(s: Store, root: Task, why: string): string[] {
+  const out: string[] = [];
+  for (const m of members(s, root)) {
+    if (m.id === root.id || m.status === "done" || m.status === "dropped") continue;
+    note(m, why);
+    Object.assign(m, { status: "done", doneAt: Date.now(), updatedAt: Date.now() });
+    if (m.session) out.push(m.session);
+  }
+  return out;
+}
+
+export async function closeSessions(ctx: Ctx, ids: string[]) {
+  for (const id of ids) if ((ctx.sessions as any).close) await (ctx.sessions as any).close(id).catch(() => {});
 }
 
 export function ask_human(input: any, ctx: Ctx) {
@@ -215,7 +298,113 @@ export function my_task(input: unknown, ctx: Ctx) {
     waits: open(t).map((w) => ({ kind: w.kind, what: w.what, since: w.since })),
     artifacts: t.links ?? [],
     humanSteps: humans.map((h) => ({ id: h.id, title: h.title, status: h.status, handedBack: h.handBack?.kind === "secret" ? (h.status === "done" ? `secret ${h.handBack.name} saved` : undefined) : h.handedBack })),
+    ...teamView(store, t),
   };
+}
+
+function teamView(s: Store, t: Task) {
+  const root = teamOf(s, t);
+  if (!root) return {};
+  return {
+    requirement: { id: root.id, title: root.title, lead: root.id, youAreLead: root.id === t.id },
+    teammates: members(s, root)
+      .filter((x) => x.id !== t.id)
+      .map((x) => ({ id: x.id, title: x.title, repo: x.repo, status: x.status, summary: x.summary, waits: open(x).map((w) => w.what) })),
+    activity: (root.activity ?? []).slice(-15).map((a) => ({ at: new Date(a.at).toISOString(), by: a.by, to: a.to, text: a.text })),
+  };
+}
+
+export async function add_teammate(input: { repo: string; title?: string; prompt: string; agent?: string; model?: string; effort?: string; worktree?: boolean }, ctx: Ctx) {
+  const prompt = input?.prompt?.trim();
+  if (!prompt) throw new Error("prompt 写清它要做什么、已经定了什么、要交回什么");
+  const st = ctx.dirs.stat(input.repo?.trim() ?? "");
+  if (!st?.dir) throw new Error(`仓库目录不存在：${input.repo}`);
+  const { store } = load(ctx);
+  const t = mine(store, ctx);
+  const root = teamOf(store, t) ?? t;
+  if (root.status === "done" || root.status === "dropped") throw new Error(`需求 ${root.id} 已经结束了`);
+  const there = members(store, root).find((x) => x.status !== "done" && x.status !== "dropped" && x.repo && ctx.dirs.stat(x.repo)?.path === st.path);
+  if (there && !input.worktree) throw new Error(`${memberName(there)} 已经在这个仓库里做「${there.title}」了：用 tell 告诉它要做什么`);
+  const m = (await add(
+    {
+      title: input.title,
+      prompt: `${prompt}\n\n（${memberName(t)} 拉你进需求 ${root.id}「${root.title}」：有事直接 tell 它。）`,
+      repo: st.path,
+      agent: input.agent,
+      model: input.model,
+      effort: input.effort,
+      worktree: input.worktree,
+      team: root.id,
+      from: t.id,
+      router: root.router,
+      routerClosed: true,
+      start: true,
+    } as any,
+    ctx,
+  )) as Task;
+  update(ctx, (s) => activity(s, find(s, m.id), { by: t.id, to: m.id, kind: "join", text: `拉了 ${memberName(m)} 进来：${m.title}` }));
+  return { id: m.id, title: m.title, note: `${m.id} 已经开始做了。它会直接 tell 你；你要等它的结果就 wait_for {"type":"teammate","who":"${m.id}"}，然后结束这一轮。` };
+}
+
+export async function tell(input: { to: string; text: string; summary?: string }, ctx: Ctx) {
+  const text = input?.text?.trim();
+  if (!text) throw new Error("text 是空的");
+  const r = update(ctx, (s) => {
+    const from = mine(s, ctx);
+    const root = teamOf(s, from);
+    if (!root) throw new Error("你没有队友：要别的仓库一起做，先用 add_teammate 拉一个进来");
+    const ms = members(s, root);
+    const to = ms.find((x) => x.id === String(input.to).trim());
+    if (!to || to.id === from.id) throw new Error(`${input.to} 不是你的队友（队友：${ms.filter((x) => x.id !== from.id).map(memberName).join("、")}）`);
+    if (to.status === "dropped") throw new Error(`${to.id} 已经放弃了`);
+    if (root.status === "done" || root.status === "dropped") throw new Error(`需求 ${root.id} 已经结束了`);
+    if (!to.session) throw new Error(`${to.id} 还没派出去`);
+    // Stopped, with a line in the feed: returned rather than thrown, or the write (and the line) would be undone
+    if ((root.bounces ?? 0) >= BOUNCE_LIMIT) {
+      const last = root.activity?.[root.activity.length - 1];
+      if (last?.kind !== "stuck") activity(s, from, { by: from.id, kind: "stuck", text: `和队友来回了 ${root.bounces} 次还没进展，要交给你定` });
+      return { stuck: root.bounces };
+    }
+    root.bounces = (root.bounces ?? 0) + 1;
+    const line = input.summary?.trim() || firstLine(text);
+    activity(s, from, { by: from.id, to: to.id, kind: "tell", text: line });
+    Object.assign(from, { viaTools: true, reportedAt: Date.now() });
+    return { from, to };
+  });
+  if ("stuck" in r)
+    throw new Error(
+      `你们已经来回了 ${r.stuck} 次，没有一部分做完，也没人问过用户：别再来回了。用 ask_human 把分歧交给用户定：` +
+        `两边各自的说法和证据（报错、请求和响应），选项，你的建议。用户答了以后才能再 tell。`,
+    );
+  const { from, to } = r;
+  // Right away, like the user's own words (DESIGN.md): it may be in the middle of something the message stops
+  await wake(ctx, to.id, {
+    how: `${memberName(from)} 发来消息`,
+    text: `[队友 ${memberName(from)}，需求 ${to.team ?? to.id}] ${text}\n\n（回它用 tell，to: "${from.id}"）`,
+    ends: isOutside,
+    resume: true,
+  });
+  return { sent: to.id, note: `已送到 ${memberName(to)}。要等它回话：wait_for {"type":"teammate","who":"${to.id}"}，然后结束这一轮。` };
+}
+
+export function post_progress(input: { text: string }, ctx: Ctx) {
+  const text = input?.text?.trim();
+  if (!text) throw new Error("text 是空的");
+  return update(ctx, (s) => {
+    const t = mine(s, ctx);
+    const root = teamOf(s, t) ?? t;
+    // A feed, not a log: a member's line a minute after its last one replaces it
+    const last = root.activity?.[root.activity.length - 1];
+    if (last && last.by === t.id && last.kind === "progress" && Date.now() - last.at < 2 * 60_000) root.activity!.pop();
+    activity(s, t, { by: t.id, kind: "progress", text });
+    Object.assign(t, { viaTools: true, reportedAt: Date.now() });
+    return { ok: true };
+  });
+}
+
+function firstLine(text: string) {
+  const line = text.split("\n")[0].trim();
+  return [...line].length > 80 ? [...line].slice(0, 80).join("") + "…" : line;
 }
 
 export async function hand_back(input: { event: string; reason: string }, ctx: Ctx) {

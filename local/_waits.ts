@@ -20,7 +20,7 @@
 
 import type { Store, Task } from "./_store";
 
-export type WaitKind = "reply" | "check" | "time" | "session" | "agent" | "user" | "task";
+export type WaitKind = "reply" | "check" | "time" | "session" | "agent" | "user" | "task" | "teammate";
 
 export type Wait = {
   id: string;
@@ -46,6 +46,7 @@ export type Wait = {
    * that worker started (its toolCallId, else the task id): SessionChat's sub shows a subagent's conversation. */
   session?: string;
   sub?: string;
+  /** teammate: the member of its requirement it waits to hear from (a task id): its tell ends this. */
   /** user / task: the board item it's blocked by (the user's step, or another task); a user wait without one is a
    * question answered in the chat or on the card. */
   item?: string;
@@ -105,9 +106,9 @@ export function endQuestions(t: Task, how: string) {
   return endWaits(t, (w) => w.kind === "user" && !w.item, how);
 }
 
-/** The worker's own waits on outside (wait_for): news in a conversation, a check it wrote, a time. */
+/** The worker's own waits on outside (wait_for): news in a conversation, a check it wrote, a time, a teammate. */
 export function isOutside(w: Wait) {
-  return w.kind === "reply" || w.kind === "check" || w.kind === "time";
+  return w.kind === "reply" || w.kind === "check" || w.kind === "time" || w.kind === "teammate";
 }
 
 /** The task follows a conversation from now on (threads): what comes in it goes to its worker (_main.ts subscribers). */
@@ -120,7 +121,8 @@ export function follow(t: Task, on: { source: string; key: string }) {
 export type WakeOn =
   | { type: "message"; conv: { source: string; key: string; where?: string; url?: string } }
   | { type: "check"; command: string; cwd: string; every: number }
-  | { type: "time"; at: number };
+  | { type: "time"; at: number }
+  | { type: "teammate"; id: string; name: string };
 
 /**
  * The worker waits on outside (wait_for): whichever of `on` comes first wakes it — a wait each, all sharing `what`. The
@@ -135,6 +137,7 @@ export function waitOn(t: Task, what: string, on: WakeOn[]): Wait[] {
       follow(t, c.conv);
       return addWait(t, { kind: "reply", what, since: now, on: { source: c.conv.source, key: c.conv.key }, where: c.conv.where, url: c.conv.url });
     }
+    if (c.type === "teammate") return addWait(t, { kind: "teammate", what, since: now, item: c.id, where: c.name });
     if (c.type === "check") return addWait(t, { kind: "check", what, since: now, check: { command: c.command, cwd: c.cwd, every: c.every, next: now } });
     return addWait(t, { kind: "time", what, since: now, at: c.at });
   });
@@ -173,7 +176,7 @@ export function sync(s: Store) {
         addWait(t, h.owner === "human" ? { kind: "user", item: id, what: h.title, user: true, since: h.createdAt } : { kind: "task", item: id, what: `${h.id} ${h.title} 先做完`, since: h.createdAt });
     }
     for (const w of open(t)) {
-      if (!w.item) continue;
+      if (!w.item || (w.kind !== "user" && w.kind !== "task")) continue;
       const h = s.tasks.find((x) => x.id === w.item);
       if (h && h.status !== "done" && h.status !== "dropped" && t.blockedBy?.includes(h.id)) continue;
       w.end = { how: itemEnd(h), at: Date.now() };
@@ -243,5 +246,7 @@ export function wakeText(w: Wait): string {
       return w.item ? `你在看板上做完 / 答了 ${w.item} 就叫醒它` : "你在对话里回复，或在看板上回答，就叫醒它";
     case "task":
       return `${w.item} 做完就叫醒它`;
+    case "teammate":
+      return `队友 ${w.where ?? w.item} 发来消息就叫醒它`;
   }
 }

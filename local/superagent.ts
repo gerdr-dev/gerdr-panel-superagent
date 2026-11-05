@@ -7,7 +7,7 @@ import { evaluate, findItem, followUp, mainId, state, updateState, type Item } f
 import { workflow } from "./_config";
 
 type Part = { repo: string; agent?: string; model?: string; effort?: string; worktree?: boolean; title?: string; prompt?: string };
-type Decision = { item: string; decision?: "accept" | "attach" | "stop" | "ignore"; title?: string; parts?: Part[]; task?: string; reason?: string; reply?: string; rule?: string };
+type Decision = { item: string; decision?: "accept" | "attach" | "stop" | "ignore"; title?: string; parts?: Part[]; team?: boolean; task?: string; reason?: string; reply?: string; rule?: string };
 
 /**
  * The main session's decisions on a batch, in one call: { decisions: [{ item, decision?, title?, parts?, task?,
@@ -34,7 +34,7 @@ export async function decide(input: { decisions: Decision[] }, ctx: Ctx) {
 async function one(d: Decision, ctx: Ctx) {
   if (/^t\d+$/.test(d?.item ?? "")) {
     if (!d.parts?.length) throw new Error("看板上的任务要给 parts");
-    const out = (await dispatch({ id: d.item, title: d.title, parts: d.parts }, ctx)) as Task[];
+    const out = (await dispatch({ id: d.item, title: d.title, parts: d.parts, team: d.team }, ctx)) as Task[];
     return { item: d.item, tasks: out.map((t) => t.id) };
   }
   const it = findItem(state(ctx), d?.item ?? "");
@@ -50,11 +50,11 @@ async function one(d: Decision, ctx: Ctx) {
         // Observe mode (dsh's default for proactive work): recorded with what it would have done, not done. 去向
         // shows it; the user can have it done (superagent.run) or switch the mode once the judgements look right.
         if (workflow(ctx).proactive !== "on") {
-          settle({ state: "observed", rule: d.rule.trim(), would: { title: d.title, parts: d.parts }, reason: undefined });
+          settle({ state: "observed", rule: d.rule.trim(), would: { title: d.title, parts: d.parts, team: d.team }, reason: undefined });
           return { item: it.id, observed: true };
         }
       }
-      return accept(ctx, it, d.title, d.parts, d.rule?.trim());
+      return accept(ctx, it, d.title, d.parts, d.rule?.trim(), d.team);
     }
     case "attach": {
       const t = live(ctx, d.task);
@@ -92,7 +92,7 @@ async function one(d: Decision, ctx: Ctx) {
  * it came from. Taken under a proactive rule (nobody asked): the worker is told to stay within that rule, and nobody
  * is told it was taken — no one is waiting for an answer.
  */
-async function accept(ctx: Ctx, it: Item, title: string | undefined, parts: Part[], rule?: string) {
+async function accept(ctx: Ctx, it: Item, title: string | undefined, parts: Part[], rule?: string, team?: boolean) {
   const e = it.event;
   const settle = (patch: Partial<Item>) => updateState(ctx, (s) => Object.assign(findItem(s, it.id), { decidedAt: Date.now(), ...patch }));
   const text = (e.text ?? "").trim() || e.title || "";
@@ -111,7 +111,7 @@ async function accept(ctx: Ctx, it: Item, title: string | undefined, parts: Part
   )) as Task;
   let ids = [t.id];
   try {
-    ids = ((await dispatch({ id: t.id, parts }, ctx)) as Task[]).map((x) => x.id);
+    ids = ((await dispatch({ id: t.id, parts, team }, ctx)) as Task[]).map((x) => x.id);
   } catch (err: any) {
     // Accepted all the same: the task is on the board; only sending it out is to redo, as a board task
     settle({ state: "accepted", tasks: ids, rule, reason: undefined });
@@ -126,7 +126,7 @@ async function accept(ctx: Ctx, it: Item, title: string | undefined, parts: Part
 export async function execute(input: { id: string }, ctx: Ctx) {
   const it = findItem(state(ctx), input?.id ?? "");
   if (it.state !== "observed" || !it.would) throw new Error(`${it.id} 不是「只记录」下记的（${it.state}）`);
-  return accept(ctx, it, it.would.title, it.would.parts as Part[], it.rule);
+  return accept(ctx, it, it.would.title, it.would.parts as Part[], it.rule, (it.would as any).team);
 }
 
 function live(ctx: Ctx, id?: string): Task {

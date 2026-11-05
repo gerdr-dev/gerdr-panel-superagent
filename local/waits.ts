@@ -16,7 +16,7 @@
 // Meanwhile the card stays in 进行中 showing what it waits on and the latest check; the worker running again (woken, or
 // the user writing to it) ends the wait — it calls wait_for again if it still waits.
 
-import { load, note, update, type Task } from "./_store";
+import { load, memberName, members, note, teamOf, update, type Task } from "./_store";
 import { isOutside, mrConversation, open, waitOn, wakeText, type Wait, type WakeOn } from "./_waits";
 import { wake } from "./_wake";
 import { followUp, record, subscribers, compact } from "./_main";
@@ -35,7 +35,8 @@ export const tools = {
       "wake: what wakes you, a list — whichever comes first wakes you, and ends this wait. Each item is one of: " +
       "{type: message, conversation}: news where a person will answer — the Slack channel / DM id you wrote to (D09…, C0…), a Slack message link, or an MR URL (its reviews, pipelines, merge come too); " +
       "{type: check, command, every?, cwd?}: a command that tells whether what you wait for has happened (a publish approved, a job finished, a page live) — the board runs it every `every` minutes, exit 0 = it has (you're woken with its output), any other exit = not yet; print one line saying where things stand, it shows on your card; " +
-      "{type: time, minutes}: woken anyway after that long, as a backstop. " +
+      "{type: time, minutes}: woken anyway after that long, as a backstop; " +
+      "{type: teammate, who}: a member of your requirement (its task id, see my_task) tells you something — their tell wakes you. " +
       "Waiting on a person to do something you can see (approve, merge, deploy)? Give both a message and a check. " +
       "Your card stays in progress meanwhile, showing `what`. Then end your turn; when woken and still waiting, call it again (it replaces the last one). When to use: the my-workflow skill, references/board.md.",
     input: {
@@ -49,7 +50,8 @@ export const tools = {
           items: {
             type: "object",
             properties: {
-              type: { type: "string", enum: ["message", "check", "time"] },
+              type: { type: "string", enum: ["message", "check", "time", "teammate"] },
+              who: { type: "string", description: "teammate: the member's task id (t7)" },
               conversation: { type: "string", description: "message: a Slack channel / DM id, a Slack message link, or an MR URL" },
               command: { type: "string", description: "check: run with sh -c, 60 s at most; exit 0 = it has happened. Use the tools you already use for this work" },
               every: { type: "number", description: "check: minutes between runs (1 – 60, default 2)" },
@@ -91,7 +93,7 @@ function resolve(ctx: Ctx, conv: string): { source: string; key: string; where: 
   );
 }
 
-type WakeIn = { type?: string; conversation?: string; command?: string; every?: number; cwd?: string; minutes?: number };
+type WakeIn = { type?: string; conversation?: string; command?: string; every?: number; cwd?: string; minutes?: number; who?: string };
 
 /**
  * { what, wake: [{ type: message | check | time, … }] }. Workers given the tool before the list (2026-11-04) send
@@ -127,7 +129,11 @@ export function wait_for(
       if (!(m >= 1 && m <= 1440)) throw new Error(`${at}：time 的 minutes 是 1 到 1440`);
       return { type: "time" as const, minutes: m };
     }
-    throw new Error(`${at}：type 是 message / check / time 之一，不是「${x.type ?? ""}」`);
+    if (x.type === "teammate") {
+      if (!x.who?.trim()) throw new Error(`${at}：teammate 要给 who（队友的任务号，my_task 里有）`);
+      return { type: "teammate" as const, who: x.who.trim() };
+    }
+    throw new Error(`${at}：type 是 message / check / time / teammate 之一，不是「${x.type ?? ""}」`);
   });
   const { t, ws } = update(ctx, (s) => {
     const t = mine(s, ctx);
@@ -136,6 +142,12 @@ export function wait_for(
     const on: WakeOn[] = parsed.map((p) => {
       if (p.type === "message") return { type: "message", conv: p.conv };
       if (p.type === "time") return { type: "time", at: now + p.minutes * 60_000 };
+      if (p.type === "teammate") {
+        const root = teamOf(s, t);
+        const m = root && members(s, root).find((x) => x.id === p.who);
+        if (!m || m.id === t.id) throw new Error(`${p.who} 不是你这个需求的队友${root ? `（队友：${members(s, root).filter((x) => x.id !== t.id).map(memberName).join("、")}）` : "：你没有队友"}`);
+        return { type: "teammate", id: m.id, name: memberName(m) };
+      }
       const cwd = p.cwd || t.repo || "";
       if (!cwd.startsWith("/")) throw new Error("check 的 cwd 要是绝对路径（任务没有仓库时必须给）");
       return { type: "check", command: p.command, every: p.every, cwd };

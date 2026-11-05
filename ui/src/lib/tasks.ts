@@ -9,6 +9,8 @@ const toast = (core as unknown as { toast?: ((m: string, o?: Record<string, unkn
 /** An artifact (产物): something a step produced, with when it came (older ones have no time). */
 export type Link = { label: string; url: string; at?: number };
 export type Live = { status: string; waiting?: string; waitingSince?: number; turnStartedAt?: number; updatedAt: number; error?: string; title?: string } | null;
+/** A line in a requirement's activity feed (local/_store.ts). */
+export type Activity = { at: number; by?: string; to?: string; kind: "progress" | "tell" | "join" | "done" | "review" | "user" | "stuck"; text: string };
 export type Task = {
   id: string;
   title: string;
@@ -56,6 +58,13 @@ export type Task = {
   doneAt?: number;
   live: Live;
   column: "you" | "review" | "active" | "done";
+  /** A member of a requirement, or a step its member asked the user for: folded into requirement `in`'s card. */
+  in?: string;
+  team?: string;
+  /** A requirement with members: their ids (itself, the lead, first), its feed, and the column of the most pressing. */
+  members?: string[];
+  activity?: Activity[];
+  teamColumn?: "you" | "review" | "active" | "done";
   ready: boolean;
 };
 
