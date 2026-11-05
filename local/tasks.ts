@@ -1,6 +1,6 @@
 import { tellInbox } from "./_inbox";
 import { workflow } from "./_config";
-import { activity, blockersDone, find, load, members, newTask, note, teamOf, update, type Question, type Store, type Task } from "./_store";
+import { activity, blockersDone, find, load, members, newTask, note, reqOf, update, type Question, type Store, type Task } from "./_store";
 import { applyBlock } from "./_apply";
 import { askUser, endQuestions, endWaits, isOutside, open, question, syncAgents, syncSessions, wakeText, type Wait } from "./_waits";
 import { wake } from "./_wake";
@@ -154,19 +154,19 @@ export async function list(input: unknown, ctx: Ctx) {
 }
 
 /**
- * A requirement with members is one card (DESIGN.md「需求和队友」): its members and the user's steps they asked for
- * carry `in` (the requirement's id) and the page folds them into its card; the requirement's `teamColumn` is the most
- * pressing of theirs — any of them waiting on the user puts the card under 等你.
+ * Every agent task is a requirement card (DESIGN.md「需求和队友」), alone or with members: its members and the user's
+ * steps they asked for carry `in` (the requirement's id) and the page folds them into its card; the requirement's
+ * `teamColumn` is the most pressing of theirs — any of them waiting on the user puts the card under 等你.
  */
 function teams<T extends Task & { column: string }>(s: Store, tasks: T[]) {
   const byId = new Map(tasks.map((t) => [t.id, t]));
   const rank = { you: 3, review: 2, active: 1, done: 0 } as Record<string, number>;
   const out = tasks.map((t) => {
-    const root = teamOf(s, t);
+    const root = reqOf(s, t);
     return root && root.id !== t.id ? { ...t, in: root.id } : t;
   });
   return out.map((t: any) => {
-    if (t.in || !s.tasks.some((x) => x.team === t.id)) return t;
+    if (t.in || t.owner !== "agent") return t;
     const mine = out.filter((x: any) => x.in === t.id);
     // A member's result for review counts as the card's too: the user judges it either way
     let col = t.column;
@@ -392,7 +392,7 @@ export async function accept(input: { id: string }, ctx: Ctx) {
       Object.assign(m, { status: "done", doneAt: Date.now(), updatedAt: Date.now() });
       return m.session;
     }).filter((x): x is string => !!x);
-    activity(s, t, { kind: "user", by: t.id, text: t.team ? "你把这部分标为完成" : "你把需求标为完成" });
+    activity(s, t, { kind: "user", by: t.id, text: t.team ? "你把这部分标为完成" : "你标为完成了" });
     return t;
   });
   for (const id of [t.session, ...closing]) if (id && (ctx.sessions as any).close) await (ctx.sessions as any).close(id).catch(() => {});
@@ -406,6 +406,7 @@ export async function reject(input: { id: string; feedback: string }, ctx: Ctx) 
   const t = update(ctx, (s) => {
     const t = find(s, input.id);
     note(t, `打回：${input.feedback.trim()}`);
+    activity(s, t, { kind: "user", by: t.id, text: `你打回了：${input.feedback.trim()}` });
     Object.assign(t, { status: "running", updatedAt: Date.now() });
     return t;
   });
@@ -444,7 +445,7 @@ export async function complete(input: { id: string; value?: string }, ctx: Ctx) 
     if (h.status === "dropped") throw new Error(`${h.id} 已经不需要了`);
     if ((h.handBack?.kind === "value" || h.handBack?.kind === "choice") && !input.value?.trim()) throw new Error(h.handBack.kind === "choice" ? "选一个，或者写下你的决定" : `要交回：${h.handBack.label || "一个值"}`);
     Object.assign(h, { status: "done", handedBack: input.value?.trim() || undefined, doneAt: Date.now(), updatedAt: Date.now() });
-    if (teamOf(s, h)) activity(s, h, { kind: "user", by: h.askedBy, text: `${h.handBack?.kind === "choice" || h.handBack?.kind === "questions" ? "你答了" : "你做完了"}「${h.title}」${h.handBack?.kind === "secret" || !h.handedBack ? "" : `：${h.handedBack}`}` });
+    activity(s, h, { kind: "user", by: h.askedBy, text: `${h.handBack?.kind === "choice" || h.handBack?.kind === "questions" ? "你答了" : "你做完了"}「${h.title}」${h.handBack?.kind === "secret" || !h.handedBack ? "" : `：${h.handedBack}`}` });
     woken = s.tasks.filter((t) => t.owner === "agent" && t.session && t.status === "running" && t.blockedBy?.includes(h.id) && blockersDone(s, t));
     return h;
   });
@@ -502,7 +503,7 @@ export async function drop(input: { id: string; reason?: string }, ctx: Ctx) {
       Object.assign(x, { status: "dropped", doneAt: Date.now(), updatedAt: Date.now() });
       if (x.session) closing.push(x.session);
     }
-    if (t.team) activity(s, t, { kind: "user", by: t.id, text: `你放弃了这部分${input.reason ? `：${input.reason}` : ""}` });
+    activity(s, t, { kind: "user", by: t.id, text: `你放弃了${t.team ? "这部分" : ""}${input.reason ? `：${input.reason}` : ""}` });
     return t;
   });
   for (const id of closing) if ((ctx.sessions as any).close) await (ctx.sessions as any).close(id).catch(() => {});
@@ -740,7 +741,7 @@ export async function answerQuestion(input: { id: string; q: string; value: stri
     } else if (asked(h).every((x) => x.answer)) {
       finished = true;
       Object.assign(h, { status: "done", handedBack: summary(h), doneAt: Date.now() });
-      if (teamOf(s, h)) activity(s, h, { kind: "user", by: h.askedBy, text: `你答了 ${asked(h).length} 个问题：${summary(h)}` });
+      activity(s, h, { kind: "user", by: h.askedBy, text: `你答了 ${asked(h).length} 个问题：${summary(h)}` });
     }
     if (h.status === "done") h.handedBack = summary(h);
     h.updatedAt = Date.now();

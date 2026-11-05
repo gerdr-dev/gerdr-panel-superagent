@@ -4,7 +4,7 @@
 // block couldn't do: take back a human step the user no longer needs to do, and answer with ids.
 
 import { applyBlock } from "./_apply";
-import { activity, find, load, memberName, members, note, teamOf, update, type Store, type Task } from "./_store";
+import { activity, find, load, memberName, members, note, reqOf, teamOf, update, type Store, type Task } from "./_store";
 import { handBack } from "./_main";
 import { waitCard } from "./waits";
 import { endWaits, isOutside, open, question } from "./_waits";
@@ -176,10 +176,11 @@ export async function task_update(input: { state: string; summary?: string; link
       t.nudges = 0;
       endWaits(t, isOutside, "worker 报了新进展");
     }
-    const root = teamOf(s, t);
+    const root = reqOf(s, t);
     if (root && (state === "done" || state === "review")) {
       const lead = root.id === t.id;
-      activity(s, t, { by: t.id, kind: state, text: `${lead && state === "done" ? "整个需求做完了" : state === "done" ? "这部分做完了" : "有结论了，等你看"}${input.summary ? `：${input.summary}` : ""}` });
+      const alone = !teamOf(s, t);
+      activity(s, t, { by: t.id, kind: state, text: `${state === "review" ? "有结论了，等你看" : alone ? "做完了" : lead ? "整个需求做完了" : "这部分做完了"}${input.summary ? `：${input.summary}` : ""}` });
       // The lead says the whole requirement is done: every member's part with it (DESIGN.md「需求和队友」)
       if (lead && state === "done") closing = finishMembers(s, root, "负责人报了整个需求完成");
     }

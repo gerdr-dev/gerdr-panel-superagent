@@ -79,9 +79,13 @@ function colOf(t: Task): Col {
   return c;
 }
 
-/** A requirement worked on by several members: one card, its feed in a drawer of its own (TeamDrawer). */
+/**
+ * An agent task sent out: a requirement card, its feed in a drawer of its own (TeamDrawer), alone or with members.
+ * Not one still to dispatch (no member, no feed yet: it opens as the router's chat or with 派出去), nor a member of
+ * another (folded into that card; opened from it, it's its own chat).
+ */
 function isTeam(t?: Task) {
-  return !!t && (t.members?.length ?? 0) > 1;
+  return !!t && t.owner === "agent" && !t.in && t.status !== "todo";
 }
 
 export default function BoardPage() {
@@ -1428,12 +1432,22 @@ function TeamCard({ t, tasks, active, onOpen }: { t: Task; tasks: Task[]; active
   const { steps, stuck } = teamNeeds(t, tasks);
   const first = steps[0] ? `${steps[0].handBack?.kind === "choice" || steps[0].questions ? "待你决定" : "要你做"}：${steps[0].title}` : stuck[0] ? `${memberLabel(stuck[0])} ${stuckText(stuck[0])}` : "";
   const n = steps.length + stuck.length;
+  const alone = ms.length <= 1;
+  // Nothing in its feed yet (a task from before feeds, or one just sent out): what its worker last reported, or is doing
+  const fallback = !last ? t.summary || (t.status !== "done" && t.status !== "dropped" ? liveText(t) : "") : "";
   return (
     <button data-task-card="" onClick={onOpen} className={clsx("block w-full space-y-1.5 rounded-lg border bg-card p-3 text-left shadow-xs transition-[border-color,box-shadow,transform] duration-150 hover:border-ring/50 hover:shadow-sm active:scale-[0.99]", active && "border-ring")}>
       <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
-        <Users className="size-3 shrink-0" />
+        {alone ? <Bot className="size-3 shrink-0" /> : <Users className="size-3 shrink-0" />}
         <span className="shrink-0 font-mono">{t.id}</span>
-        <span>· 需求 · {ms.length} 个成员</span>
+        {alone ? (
+          <span className="inline-flex min-w-0 items-center gap-1 truncate">
+            · <span className={clsx("size-1.5 shrink-0 rounded-full", memberDot(t))} />
+            {memberLabel(t)}
+          </span>
+        ) : (
+          <span>· {ms.length} 个成员</span>
+        )}
       </div>
       <p className={clsx("line-clamp-2 text-[13px] font-medium", t.status === "dropped" && "text-muted-foreground line-through")}>{t.title}</p>
       {n > 0 && t.status !== "done" && t.status !== "dropped" && (
@@ -1451,6 +1465,8 @@ function TeamCard({ t, tasks, active, onOpen }: { t: Task; tasks: Task[]; active
           <span className="text-muted-foreground/70"> · {ago(last.at)}</span>
         </p>
       )}
+      {fallback && <p className="line-clamp-2 text-[12px] text-muted-foreground">{fallback}</p>}
+      {!alone && (
       <div className="flex flex-wrap items-center gap-1">
         {ms.map((m) => (
           <span key={m.id} title={`${m.id} ${m.title}`} className="inline-flex items-center gap-1 rounded-sm bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
@@ -1460,9 +1476,13 @@ function TeamCard({ t, tasks, active, onOpen }: { t: Task; tasks: Task[]; active
           </span>
         ))}
       </div>
+      )}
     </button>
   );
 }
+
+/** When every task started getting a feed (842e672, 2026-11-05): older ones have none to show. */
+const FEEDS_SINCE = new Date("2026-11-05T12:00:00+08:00").getTime();
 
 const KIND: Record<string, string> = { wait: "在等", progress: "进展", tell: "通知", join: "加入", done: "完成", review: "待你看", user: "你", stuck: "卡住" };
 
@@ -1493,6 +1513,8 @@ type FeedItem = { at: number; key: string } & ({ type: "act"; a: NonNullable<Tas
  */
 function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Task[]; byId: Record<string, Task>; act: Act; onClose: () => void; onGo: (id: string) => void }) {
   const { busy, err, go } = useAction(act);
+  const [rejecting, setRejecting] = useState(false);
+  const [feedback, setFeedback] = useState("");
   const ms = (t.members ?? []).map((id) => byId[id]).filter(Boolean);
   const { steps, stuck } = teamNeeds(t, tasks);
   const over = t.status === "done" || t.status === "dropped";
@@ -1604,9 +1626,9 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
       >
         <SheetTitle className="sr-only">{t.title}</SheetTitle>
         <div className="flex items-center gap-2 border-b px-4 py-2.5 text-[12px] text-muted-foreground">
-          <Users className="size-3.5" />
+          {ms.length > 1 ? <Users className="size-3.5" /> : <Bot className="size-3.5" />}
           <span className="font-mono">{t.id}</span>
-          <span>· 需求 · {COLS.find((c) => c.id === colOf(t))?.title}</span>
+          <span>· {COLS.find((c) => c.id === colOf(t))?.title}</span>
           <span className="ml-auto" />
           <Button variant="ghost" size="icon" aria-label="关闭" onClick={onClose}>
             <X className="size-4" />
@@ -1624,6 +1646,23 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
                 </button>
               )}
             </div>
+          )}
+          {t.summary && (
+            // What its lead last reported: for a task from before feeds, the only account of where it stands
+            <p className="line-clamp-3 text-[12px] whitespace-pre-wrap">
+              <span className="text-muted-foreground">最新：</span>
+              {t.summary}
+            </p>
+          )}
+          {ms.some((m) => m.links?.length) && (
+            <details className="text-[12px]">
+              <summary className="cursor-pointer text-muted-foreground">产物 · {ms.reduce((n, m) => n + (m.links?.length ?? 0), 0)}</summary>
+              <div className="mt-1.5 space-y-2">
+                {ms.map((m) => (
+                  <Links key={m.id} t={m} />
+                ))}
+              </div>
+            </details>
           )}
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
             {ms.map((m) => (
@@ -1655,17 +1694,41 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
               </div>
             ))
           ) : (
-            <p className="py-8 text-center text-[12px] text-muted-foreground">还没有活动</p>
+            // A task from before feeds has none: say where its story is instead of looking broken
+            <p className="py-8 text-center text-[12px] text-muted-foreground">{t.createdAt < FEEDS_SINCE ? "这是有活动记录之前的任务：看上面的「最新」，或点头像看对话" : "还没有活动"}</p>
           )}
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2 border-t px-4 py-2.5">
           {err && <p role="alert" className="mr-auto text-[12px] text-bad">{err}</p>}
-          {!over && (
+          {rejecting && (
+            // 打回: what's wrong goes to the lead, which reworks it (and tells its teammates)
+            <div className="flex w-full gap-2">
+              <input autoFocus value={feedback} onChange={(e) => setFeedback(e.target.value)} placeholder="哪里不对，要怎么改" className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]" />
+              <Button disabled={!feedback.trim() || !!busy} onClick={async () => (await go("reject", "reject", { id: t.id, feedback })) && (setFeedback(""), setRejecting(false))}>
+                {busy === "reject" ? <Loader2 className="size-3.5 animate-spin" /> : <Undo2 className="size-3.5" />}打回
+              </Button>
+              <Button variant="ghost" size="icon" aria-label="取消" onClick={() => setRejecting(false)}>
+                <X className="size-4" />
+              </Button>
+            </div>
+          )}
+          {t.status === "review" && !rejecting && (
+            <>
+              <Button variant="outline" disabled={!!busy} onClick={() => setRejecting(true)}>
+                <Undo2 className="size-3.5" />
+                打回
+              </Button>
+              <Button disabled={!!busy} onClick={() => go("accept", "accept", { id: t.id })}>
+                {busy === "accept" ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}通过
+              </Button>
+            </>
+          )}
+          {!over && t.status !== "review" && (
             <>
               <DropButton busy={!!busy} onDrop={() => go("drop", "drop", { id: t.id })} />
               <Button variant="outline" disabled={!!busy} onClick={() => go("accept", "accept", { id: t.id })}>
                 <Check className="size-3.5" />
-                整个需求标为完成
+                {ms.length > 1 ? "整个需求标为完成" : "标为完成"}
               </Button>
             </>
           )}

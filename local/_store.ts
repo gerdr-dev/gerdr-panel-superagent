@@ -255,6 +255,18 @@ export function teamOf(s: Store, t: Task): Task | undefined {
   return s.tasks.some((x) => x.team === t.id) ? t : undefined;
 }
 
+/**
+ * The card a task shows on (every agent task is a requirement, alone or with members): a member's requirement, an
+ * agent task itself, a human step's asker's. Undefined for a human step nobody asked for (the user's own).
+ */
+export function reqOf(s: Store, t: Task): Task | undefined {
+  if (t.owner === "human") {
+    const by = t.askedBy ? s.tasks.find((x) => x.id === t.askedBy) : s.tasks.find((x) => x.owner === "agent" && x.blockedBy?.includes(t.id));
+    return by && by.id !== t.id ? reqOf(s, by) : undefined;
+  }
+  return (t.team && s.tasks.find((x) => x.id === t.team)) || t;
+}
+
 /** The members of requirement `root`, itself (the lead) first. */
 export function members(s: Store, root: Task): Task[] {
   return [root, ...s.tasks.filter((x) => x.team === root.id)];
@@ -267,7 +279,8 @@ const KEEP_ACTIVITY = 200;
  * Progress that came from outside the members' talk — a part done, the user's answer — starts the bounce count over.
  */
 export function activity(s: Store, t: Task, a: Omit<Activity, "at">) {
-  const root = teamOf(s, t) ?? (t.owner === "agent" ? t : undefined);
+  // Every task's card has a feed, alone or with teammates (DESIGN.md「需求和队友」)
+  const root = reqOf(s, t);
   if (!root) return;
   root.activity = [...(root.activity ?? []), { at: Date.now(), ...a }].slice(-KEEP_ACTIVITY);
   if (a.kind === "done" || a.kind === "review" || a.kind === "user") root.bounces = 0;
