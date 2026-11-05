@@ -1405,6 +1405,15 @@ function teamNeeds(t: Task, tasks: Task[]) {
   return { steps, stuck };
 }
 
+/**
+ * A member waiting on the user with a question of its own (its words), not one of the board's states: an approval, an
+ * error, a session it started, a stop — or the board's old ask about a stop.
+ */
+function realQuestion(x: Task) {
+  if (x.live?.status === "waiting" || x.live?.status === "error" || x.helpers?.some((h) => h.left)) return false;
+  return !!x.question && !x.question.startsWith("Worker 停下了");
+}
+
 /** What a member stuck on the user needs, in a line. */
 function stuckText(x: Task) {
   const k = x.helpers?.find((h) => h.left);
@@ -1566,17 +1575,21 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
         </div>
       );
     }
-    if (x.type === "stuck")
-      return (
-        <div className="flex gap-2">
-          <Avatar m={x.m} lead={x.m.id === t.id} />
-          <div className="min-w-0 flex-1 space-y-1">
-            {head(x.m, "在等你", x.at, "text-warn")}
-            <div className="flex items-start gap-2 rounded-lg rounded-tl-sm border border-warn/50 bg-warn/5 px-3 py-2 text-[13px]">
-              <span className="min-w-0 flex-1 space-y-0.5">
-                <span className="block whitespace-pre-wrap">{stuckText(x.m)}</span>
-                {/* Where it left off: its last words, two lines at most (the rest is one click away, in its chat) */}
-                {x.m.said && <span className="line-clamp-2 block text-[12px] text-muted-foreground">它最后说：{x.m.said}</span>}
+    if (x.type === "stuck") {
+      // A question the worker itself asked is its words: a message from it. Everything else here is the board saying
+      // how things stand (stopped, an error, an approval, a session it started) — a system line, not a bubble
+      const said = (
+        // Its last words are its own: quoted under the line, two lines at most (the rest is in its chat)
+        x.m.said && <p className="ml-5 line-clamp-2 border-l-2 pl-2 text-[12px] text-muted-foreground">{x.m.said}</p>
+      );
+      if (!realQuestion(x.m))
+        return (
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 rounded-md border border-warn/40 bg-warn/5 px-3 py-1.5 text-[12px]">
+              <AlertTriangle className="size-3.5 shrink-0 text-warn" />
+              <span className="min-w-0 flex-1">
+                <span className="font-medium">{memberLabel(x.m)}</span> · {stuckText(x.m)}
+                <span className="text-muted-foreground tabular-nums"> · {when(x.at)}</span>
               </span>
               {x.m.session && (
                 <Button variant="outline" onClick={() => openChat(x.m.session!, x.m.id)}>
@@ -1585,9 +1598,27 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
                 </Button>
               )}
             </div>
+            {said}
+          </div>
+        );
+      return (
+        <div className="flex gap-2">
+          <Avatar m={x.m} lead={x.m.id === t.id} />
+          <div className="min-w-0 flex-1 space-y-1">
+            {head(x.m, "问你", x.at, "text-warn")}
+            <div className="flex items-start gap-2 rounded-lg rounded-tl-sm border border-warn/50 bg-warn/5 px-3 py-2 text-[13px]">
+              <span className="min-w-0 flex-1 whitespace-pre-wrap">{x.m.question}</span>
+              {x.m.session && (
+                <Button variant="outline" onClick={() => openChat(x.m.session!, x.m.id)}>
+                  <MessageSquare className="size-3.5" />
+                  去回答
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       );
+    }
     const a = x.a;
     // The user's own doing: on the right, like their messages in a chat
     if (a.kind === "user")
@@ -1599,7 +1630,15 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
           </div>
         </div>
       );
-    // Who joined: a line across, like a group chat's "X invited Y"
+    // The board's own lines (who joined, members going round): across, like a group chat's "X invited Y"
+    if (a.kind === "stuck")
+      return (
+        <p className="flex items-center justify-center gap-1.5 px-6 text-center text-[11px] text-warn">
+          <AlertTriangle className="size-3 shrink-0" />
+          {who(a.by) ? `${memberLabel(who(a.by))} ` : ""}
+          {a.text} · {when(a.at)}
+        </p>
+      );
     if (a.kind === "join" || !a.by)
       return (
         <p className="px-6 text-center text-[11px] text-muted-foreground">
@@ -1613,8 +1652,8 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
       <div className="flex gap-2">
         <Avatar m={m} lead={m?.id === t.id} />
         <div className="min-w-0 flex-1 space-y-1">
-          {head(m, `${KIND[a.kind] ?? a.kind}${to ? ` → ${memberLabel(to)}` : ""}`, a.at, a.kind === "done" ? "text-ok" : a.kind === "stuck" || a.kind === "review" ? "text-warn" : undefined)}
-          <p className={clsx("inline-block max-w-full rounded-lg rounded-tl-sm px-3 py-2 text-[13px] whitespace-pre-wrap", a.kind === "done" ? "bg-ok/10" : a.kind === "stuck" ? "bg-warn/10" : "bg-muted")}>{a.text}</p>
+          {head(m, `${KIND[a.kind] ?? a.kind}${to ? ` → ${memberLabel(to)}` : ""}`, a.at, a.kind === "done" ? "text-ok" : a.kind === "review" ? "text-warn" : undefined)}
+          <p className={clsx("inline-block max-w-full rounded-lg rounded-tl-sm px-3 py-2 text-[13px] whitespace-pre-wrap", a.kind === "done" ? "bg-ok/10" : "bg-muted")}>{a.text}</p>
         </div>
       </div>
     );
