@@ -16,7 +16,7 @@
 
 ## 概念
 
-- **任务**（`user/data/tasks.json`，读写都走 `local/_store.ts`）：
+- **任务**（`user/data/reqs/` 下每部分一个文件，读写都走 `local/_store.ts`，见 `local/_parts.ts`）：
   - **agent 任务**：派给一个 **worker**，也就是看板用 `ctx.sessions.start` 在某个仓库里开的会话。
   - **人工任务**：只有用户本人能做的事。分两种：
     - **步骤**：授权、建账号、交回密钥。

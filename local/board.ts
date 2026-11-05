@@ -4,7 +4,7 @@
 // block couldn't do: take back a human step the user no longer needs to do, and answer with ids.
 
 import { applyBlock } from "./_apply";
-import { activity, find, load, memberName, members, note, reqOf, splitRef, teamOf, update, type Store, type Task } from "./_store";
+import { activity, bouncesOf, find, load, memberName, members, note, reqOf, splitRef, teamOf, update, type Store, type Task } from "./_store";
 import { handBack } from "./_main";
 import { waitCard } from "./waits";
 import { eventCard } from "./_cards";
@@ -456,12 +456,13 @@ export async function tell(input: { to: string; text: string; summary?: string }
     if (root.status === "done" || root.status === "dropped") throw new Error(`需求 ${root.id} 已经结束了`);
     if (!to.session) throw new Error(`${to.id} 还没派出去`);
     // Stopped, with a line in the feed: returned rather than thrown, or the write (and the line) would be undone
-    if ((root.bounces ?? 0) >= BOUNCE_LIMIT) {
+    const bounces = bouncesOf(s, root);
+    if (bounces >= BOUNCE_LIMIT) {
       const last = root.activity?.[root.activity.length - 1];
-      if (last?.kind !== "stuck") activity(s, from, { by: from.id, kind: "stuck", text: `和队友来回了 ${root.bounces} 次还没进展，要交给你定` });
-      return { stuck: root.bounces };
+      if (last?.kind !== "stuck") activity(s, from, { by: from.id, kind: "stuck", text: `和队友来回了 ${bounces} 次还没进展，要交给你定` });
+      return { stuck: bounces };
     }
-    root.bounces = (root.bounces ?? 0) + 1;
+    from.tells = [...(from.tells ?? []), Date.now()].slice(-BOUNCE_LIMIT * 2);
     // In the feed only when the member says so (its summary, by the user's activity.md): the talk itself is theirs
     const line = input.summary?.trim();
     if (line) activity(s, from, { by: from.id, to: to.id, kind: "tell", text: line });

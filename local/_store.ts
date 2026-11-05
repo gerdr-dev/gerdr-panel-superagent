@@ -1,10 +1,10 @@
-// The task board's data (user/data/tasks.json: this person's, never shared — _user.ts), shared by tasks.ts (the board, the panel's agent) and the watchers
-// (mrwatch.ts). A helper file (leading _): nothing here is callable from a page.
+// The task board's data, shared by tasks.ts (the board, the panel's agent) and the watchers (mrwatch.ts). Kept as one
+// file per part in user/data/reqs/ (_parts.ts; this person's, never shared — _user.ts). A helper file (leading _):
+// nothing here is callable from a page.
 
 import { addWait, askUser, open, question, sync, type Wait } from "./_waits";
-import { DATA, migrate } from "./_user";
-
-export const FILE = `${DATA}/tasks.json`;
+import { migrate } from "./_user";
+import { readAll, split, writeChanged } from "./_parts";
 
 /** An artifact (产物): something a step produced, kept with when it came. */
 export type Link = { label: string; url: string; at?: number };
@@ -100,11 +100,13 @@ export type Task = {
   request?: string;
   /** A requirement's feed (on the task that has members): see Activity. */
   activity?: Activity[];
-  /**
-   * Teammate messages since the last real progress (a member done / for review, the user stepping in): past a limit
-   * the members are told to put their disagreement to the user instead of going round (board.ts tell).
-   */
+  /** @deprecated: was the requirement's tell count on its root, written by every member. Now bouncesOf. */
   bounces?: number;
+  /**
+   * When this member told a teammate something (board.ts tell), latest few. Kept on the member that told, not the
+   * requirement, so each part has one writer; bouncesOf adds them up.
+   */
+  tells?: number[];
   /** Split off this task: by the router (one of several parts run in parallel), or by its worker (tasks.add from: a part handed on, or the rest of the work when it hands over). */
   from?: string;
   worktree?: boolean;
@@ -155,12 +157,11 @@ export type Task = {
 /** v: the store's shape — 2 since wait_for stopped adding the conversations it waits on to threads. */
 export type Store = { next: number; tasks: Task[]; v?: number };
 
-export function load(ctx: Ctx): { store: Store; etag?: string; text?: string } {
+export function load(ctx: Ctx) {
   migrate(ctx);
-  const st = ctx.fs.stat(FILE);
-  if (!st) return { store: { next: 1, tasks: [], v: 2 } };
-  const text = ctx.fs.read(FILE);
-  return { store: upgrade(JSON.parse(text)), etag: st.etag, text };
+  const loaded = readAll(ctx, reqOf);
+  loaded.store = upgrade(loaded.store);
+  return loaded;
 }
 
 /** Tasks written before waits: their question and wait_for become waits (kept so on the next write). */
@@ -205,21 +206,27 @@ function upgrade(s: Store): Store {
 /** Read, change, write back; retried when another run wrote in between (the etag no longer matches). */
 export function update<T>(ctx: Ctx, fn: (s: Store) => T): T {
   for (let i = 0; ; i++) {
-    const { store, etag, text } = load(ctx);
+    const loaded = load(ctx);
+    const store = loaded.store;
     const before = snapshot(store);
     const out = fn(store);
     sync(store);
-    const next = JSON.stringify(store, null, 2);
-    // Nothing changed (tasks.list reconciling an unchanged board, mostly): no write. A write tells the board's page
-    // to reload (Gerdr's usePanelChange), and the page's reload runs tasks.list: writing anyway would loop.
-    if (next === text) return out;
+    // Only the parts this changed are written. Nothing changed (tasks.list reconciling an unchanged board, mostly):
+    // no write. A write tells the board's page to reload (Gerdr's usePanelChange), and the page's reload runs
+    // tasks.list: writing anyway would loop.
+    let wrote: boolean | "same" = false;
     try {
-      ctx.fs.write(FILE, next, etag ? { etag } : undefined);
-      tellOrigins(ctx, before, store);
-      return out;
+      wrote = writeChanged(ctx, loaded, split(store));
     } catch (e) {
       if (i >= 4) throw e;
+      continue;
     }
+    if (wrote === "same") return out;
+    if (wrote) {
+      tellOrigins(ctx, before, store);
+      return out;
+    }
+    if (i >= 4) throw new Error("看板数据一直在被别处改，没写进去：稍后再试");
   }
 }
 
@@ -297,8 +304,18 @@ export function activity(s: Store, t: Task, a: Omit<Activity, "at">) {
   const root = reqOf(s, t);
   if (!root) return;
   root.activity = [...(root.activity ?? []), { at: Date.now(), ...a }].sort((x, y) => x.at - y.at).slice(-KEEP_ACTIVITY);
-  if (a.kind === "done" || a.kind === "review" || a.kind === "user") root.bounces = 0;
-  root.updatedAt = Date.now();
+  // Not root.updatedAt: the line is the writing member's, and the root may be another computer's part. The board
+  // works out a card's last change from its members and feed (tasks.ts teams)
+}
+
+/**
+ * Teammate messages since the last real progress (a member done / for review, the person stepping in): past a limit
+ * the members are told to put their disagreement to the person instead of going round (board.ts tell). Worked out,
+ * not stored: each member keeps its own tells, so no part writes another's.
+ */
+export function bouncesOf(s: Store, root: Task) {
+  const reset = Math.max(0, ...(root.activity ?? []).filter((a) => a.kind === "done" || a.kind === "review" || a.kind === "user").map((a) => a.at));
+  return members(s, root).reduce((n, m) => n + (m.tells ?? []).filter((at) => at > reset).length, 0);
 }
 
 /** How a member is named to people and teammates: its repository's folder (后端仓库), else its id. */

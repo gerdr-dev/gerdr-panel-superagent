@@ -10,7 +10,7 @@ import { isMain, rerouteTask, routeTask, sweep } from "./_main";
 
 export type { Task };
 
-// Task board data: data/tasks.json (read and written through _store.ts). Agent tasks are handed to coding-agent sessions (workers); human tasks are
+// Task board data: user/data/reqs/, a file per part (read and written through _store.ts, _parts.ts). Agent tasks are handed to coding-agent sessions (workers); human tasks are
 // things only the user can do (UI clicks, accounts, approvals). Everything here is deterministic: the page, the
 // panel agent (`gerdr panel run tasks.<fn> '<json>'`) and worker replies all go through these functions.
 //
@@ -213,6 +213,8 @@ function teams<T extends Task & { column: string }>(s: Store, tasks: T[]) {
     // A member's result for review counts as the card's too: the user judges it either way
     let col = t.column;
     if (col !== "done") for (const x of mine) if ((rank[x.column] ?? 0) > (rank[col] ?? 0)) col = x.column;
+    // Its last change: its own, a member's, or its feed's latest line (kept in the members' parts, not on it)
+    t.updatedAt = Math.max(t.updatedAt, ...mine.map((x: any) => x.updatedAt ?? 0), ...(t.activity ?? []).map((a: any) => a.at));
     return { ...t, teamColumn: col, members: members(s, byId.get(t.id)!).map((m) => m.id) };
   });
 }

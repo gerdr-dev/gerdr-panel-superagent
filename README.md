@@ -29,7 +29,7 @@
 改看板（`ui/src/pages/board.tsx`、`local/tasks.ts` `board.ts` `mrwatch.ts`）之前先读 `DESIGN.md`：为什么这么设计、哪些做法试过被否了。
 
 这个面板只有一页：任务看板。派给 agent 的任务和要用户亲手做的人工任务，按「待办 / 进行中 / 等你 / 待验收 / 已完成」排，
-数据在 `user/data/tasks.json`，读写都走 `local/tasks.ts`。看板右上角的齿轮是看板设置：「设置」（`ui/src/settings/Settings.tsx`，`user/settings.json`）、「流程」（`ui/src/settings/Flow.tsx`，
+数据在 `user/data/reqs/`（每部分一个文件，`local/_parts.ts`），读写都走 `local/_store.ts`。看板右上角的齿轮是看板设置：「设置」（`ui/src/settings/Settings.tsx`，`user/settings.json`）、「流程」（`ui/src/settings/Flow.tsx`，
 编辑 `skills/my-workflow/`）和「定时任务」（`ui/src/settings/Schedules.tsx`，`schedules/`）。
 
 ## 你（右边的面板助手）怎么派活
