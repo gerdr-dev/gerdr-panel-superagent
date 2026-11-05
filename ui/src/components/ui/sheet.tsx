@@ -1,6 +1,6 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
-import { useLeaving } from "@/lib/linger"
+import { useInstant, useLeaving } from "@/lib/linger"
 import { XIcon } from "lucide-react"
 import { Dialog as SheetPrimitive } from "radix-ui"
 import { keepLayer } from "@/components/ui/dialog"
@@ -55,9 +55,13 @@ function SheetContent({
   side?: "top" | "right" | "bottom" | "left"
   showCloseButton?: boolean
 }) {
+  // Put in place of another drawer (lib/linger.tsx): no slide in. Read once, when it opens: turning the animation
+  // back on later would play it then. Closing on its own later still slides out
+  const [swapped] = React.useState(useInstant())
+  const instant = swapped && !useLeaving()
   return (
     <SheetPortal>
-      <SheetOverlay />
+      <SheetOverlay style={instant ? { animation: "none" } : undefined} />
       <SheetPrimitive.Content
         data-slot="sheet-content"
         className={cn(
@@ -77,7 +81,7 @@ function SheetContent({
           if ((e.target as Element | null)?.closest?.("[data-app-context-menu],[data-sonner-toaster]")) e.preventDefault()
           onInteractOutside?.(e)
         }}
-        style={{ ...keepLayer, ...style }}
+        style={{ ...keepLayer, ...(instant ? { animation: "none" } : null), ...style }}
         {...props}
       >
         {children}

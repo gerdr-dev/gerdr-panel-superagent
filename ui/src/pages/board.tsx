@@ -174,6 +174,14 @@ export default function BoardPage() {
       }),
     [],
   );
+  // Which drawer is up. One replacing another (a member's avatar in a requirement, 回到 tN, another card) swaps them
+  // in place: the user goes back and forth between them often, and a slide out plus a slide in each time was too much
+  const drawer = peek ? "peek" : !sel ? "" : isTeam(sel) ? "team" : inChat ? (panel && viewing && view ? "chat" : "") : "task";
+  const lastDrawer = useRef(drawer);
+  const swap = !!lastDrawer.current && !!drawer && lastDrawer.current !== drawer;
+  useEffect(() => {
+    lastDrawer.current = drawer;
+  }, [drawer]);
   const onAction = (action: string) => {
     const t = sel;
     if (!t) return;
@@ -272,9 +280,9 @@ export default function BoardPage() {
         )}
         </>
       )}
-      <Linger>{sel && isTeam(sel) && <TeamDrawer t={sel} tasks={tasks ?? []} byId={byId} act={act} onClose={() => setOpen("")} onGo={setOpen} />}</Linger>
-      <Linger>{sel && !inChat && !isTeam(sel) && <Drawer t={sel} byId={byId} act={act} onClose={() => setOpen("")} onGo={setOpen} />}</Linger>
-      <Linger>{panel && sel && viewing && view && !peek && (
+      <Linger instant={swap}>{sel && isTeam(sel) && <TeamDrawer t={sel} tasks={tasks ?? []} byId={byId} act={act} onClose={() => setOpen("")} onGo={setOpen} />}</Linger>
+      <Linger instant={swap}>{sel && !inChat && !isTeam(sel) && <Drawer t={sel} byId={byId} act={act} onClose={() => setOpen("")} onGo={setOpen} />}</Linger>
+      <Linger instant={swap}>{panel && sel && viewing && view && !peek && (
         <ChatDrawer
           session={view.session}
           sub={view.sub}
@@ -285,7 +293,7 @@ export default function BoardPage() {
           onClose={() => setOpen("")}
         />
       )}</Linger>
-      <Linger>{peek && (
+      <Linger instant={swap}>{peek && (
         <ChatDrawer
           session={peek.session}
           sub={peek.sub}
