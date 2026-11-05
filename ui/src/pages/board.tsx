@@ -1538,6 +1538,34 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
   ].sort((a, b) => a.at - b.at);
   const pending = items.filter((x) => x.type !== "act");
   const scroller = useRef<HTMLDivElement>(null);
+  // The jump rows are for what's out of sight: a thing already on screen in the feed would be shown twice (t48: one
+  // line in its feed, the same line again above it)
+  // Where each thing waiting on the user is: on screen, or above / below it (the pill's arrow points there)
+  const [where, setWhere] = useState<Record<string, "in" | "above" | "below">>({});
+  const pendingKeys = pending.map((x) => x.key).join(",");
+  useEffect(() => {
+    const root = scroller.current;
+    if (!root || !pendingKeys) return;
+    const io = new IntersectionObserver(
+      (es) =>
+        setWhere((cur) => {
+          const next = { ...cur };
+          for (const e of es) {
+            const k = (e.target as HTMLElement).dataset.feed!;
+            next[k] = e.isIntersecting ? "in" : e.boundingClientRect.top < (e.rootBounds?.top ?? 0) ? "above" : "below";
+          }
+          return next;
+        }),
+      { root, threshold: 0.3 },
+    );
+    for (const k of pendingKeys.split(",")) {
+      const el = root.querySelector(`[data-feed="${k}"]`);
+      if (el) io.observe(el);
+    }
+    return () => io.disconnect();
+  }, [pendingKeys]);
+  // Until the observer has said, nothing counts as away: no pill flashing up on open
+  const away = pending.filter((x) => where[x.key] && where[x.key] !== "in");
   const jump = (key: string, smooth = true) => scroller.current?.querySelector(`[data-feed="${key}"]`)?.scrollIntoView({ block: "center", behavior: smooth ? "smooth" : "auto" });
   // Once per opening, not on every refresh: the latest thing waiting on the user, else the newest line
   useEffect(() => {
@@ -1719,17 +1747,18 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
             ))}
           </div>
         </div>
-        {pending.length > 0 && (
-          <div className="space-y-1 border-b bg-warn/5 px-4 py-2">
-            {pending.map((x) => (
-              <button key={x.key} onClick={() => jump(x.key)} className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-[12px] hover:bg-warn/10">
-                <AlertTriangle className="size-3.5 shrink-0 text-warn" />
-                <span className="shrink-0 font-medium">{memberLabel(x.type === "ask" ? (who(x.h.askedBy) ?? undefined) : x.type === "stuck" ? x.m : undefined)}</span>
-                <span className="min-w-0 flex-1 truncate">{x.type === "ask" ? `${x.h.handBack?.kind === "choice" || x.h.questions ? "要你决定" : "要你做"}：${x.h.title}` : x.type === "stuck" ? stuckText(x.m) : ""}</span>
-                <ArrowRight className="size-3.5 shrink-0 text-muted-foreground" />
-              </button>
-            ))}
-          </div>
+        {/* The feed, with a floating way to what waits on the user when it's out of sight: floating, so showing and
+            hiding it never moves the feed (a row above it did, and jumped as the user scrolled) */}
+        <div className="relative flex min-h-0 flex-1 flex-col">
+        {away.length > 0 && (
+          <button
+            onClick={() => jump(away[away.length - 1].key)}
+            className="absolute top-3 left-1/2 z-10 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-warn/50 bg-background px-3 py-1 text-[12px] shadow-sm hover:bg-warn/10"
+          >
+            <AlertTriangle className="size-3.5 text-warn" />
+            {away.length} 件等你处理
+            <ArrowRight className={clsx("size-3.5 text-muted-foreground", where[away[away.length - 1].key] === "above" ? "-rotate-90" : "rotate-90")} />
+          </button>
         )}
         <div ref={scroller} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
           {items.length ? (
@@ -1742,6 +1771,7 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
             // A task from before feeds has none: say where its story is instead of looking broken
             <p className="py-8 text-center text-[12px] text-muted-foreground">{t.createdAt < FEEDS_SINCE ? "这是有活动记录之前的任务：看上面的「最新」，或点头像看对话" : "还没有活动"}</p>
           )}
+        </div>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2 border-t px-4 py-2.5">
           {err && <p role="alert" className="mr-auto text-[12px] text-bad">{err}</p>}
