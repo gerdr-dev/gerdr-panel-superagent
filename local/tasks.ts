@@ -558,8 +558,10 @@ export async function dispatch(input: { id: string; title?: string; parts: Part[
   const { store } = load(ctx);
   const t = find(store, input.id);
   const [first, ...rest] = parts;
-  const title = (split ? first.title : undefined) || input.title;
+  // Title stays the requirement's (team) or narrows to the first part (split); the request's own words are kept either way
+  const title = (split && !input.team ? first.title : undefined) || input.title;
   if (title) edit({ id: t.id, title }, ctx);
+  if (split && input.team && t.prompt && !t.request) edit({ id: t.id, request: t.prompt }, ctx);
   const out: Task[] = [await start({ id: t.id, repo: first.repo, agent: first.agent, model: first.model, effort: first.effort, worktree: first.worktree, prompt: split ? first.prompt : undefined }, ctx)];
   const errors: string[] = [];
   for (const p of rest) {

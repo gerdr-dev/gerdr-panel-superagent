@@ -83,6 +83,11 @@ export type Task = {
    * Unset on a requirement itself and on a task that works alone.
    */
   team?: string;
+  /**
+   * A requirement's own words, as the user (or the message it came from) put them: its card's description. Kept when
+   * the lead's prompt is narrowed to its own part (dispatch with team). Unset: the prompt is still the whole request.
+   */
+  request?: string;
   /** A requirement's feed (on the task that has members): see Activity. */
   activity?: Activity[];
   /**

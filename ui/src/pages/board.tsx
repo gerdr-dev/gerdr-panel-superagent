@@ -1,6 +1,6 @@
 import { AlertTriangle, ArrowRight, Bot, Users, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ListTodo, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Send, Settings, Undo2, X } from "lucide-react";
 import clsx from "clsx";
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { Button } from "../components/Button";
 import { Dialog, DialogContent, DialogTitle } from "../components/ui/dialog";
 import { Sheet, SheetContent, SheetTitle } from "../components/ui/sheet";
@@ -964,8 +964,9 @@ function Questions({ t, byId, act, onGo }: { t: Task; byId: Record<string, Task>
 
 /** The agent task that asked for this human step / decision: a way back to its conversation, for the context. */
 function BackToChat({ t, byId, onGo }: { t: Task; byId: Record<string, Task>; onGo: (id: string) => void }) {
+  const inFeed = useContext(InFeed);
   const asker = (t.askedBy && byId[t.askedBy]) || Object.values(byId).find((x) => x.owner === "agent" && x.blockedBy?.includes(t.id));
-  if (!asker?.session) return null;
+  if (!asker?.session || inFeed) return null;
   return (
     <button onClick={() => onGo(asker.id)} className="inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-1 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground">
       <MessageSquare className="size-3.5 shrink-0" />
@@ -1114,13 +1115,21 @@ function Expiry({ at, className }: { at: number; className?: string }) {
 }
 
 /** Two clicks instead of window.confirm (the browser's own box, unthemed and in English); arms for 3 seconds. */
+/**
+ * A step / decision drawn inside a requirement's feed: no 放弃 of its own (it only dropped that one item, and read as
+ * dropping the requirement — the feed's footer has the one 放弃) and no "回到 tN 的对话" (the asker's avatar is that).
+ */
+const InFeed = createContext(false);
+
 function DropButton({ busy, onDrop }: { busy: boolean; onDrop: () => void }) {
   const [armed, setArmed] = useState(false);
+  const inFeed = useContext(InFeed);
   useEffect(() => {
     if (!armed) return;
     const id = setTimeout(() => setArmed(false), 3000);
     return () => clearTimeout(id);
   }, [armed]);
+  if (inFeed) return null;
   return (
     <Button variant="ghost" className={clsx("text-[12px]", armed ? "text-bad" : "text-muted-foreground")} disabled={busy} onClick={() => (armed ? onDrop() : setArmed(true))}>
       {armed ? "确定放弃？" : "放弃"}
@@ -1457,17 +1466,131 @@ function TeamCard({ t, tasks, active, onOpen }: { t: Task; tasks: Task[]; active
 
 const KIND: Record<string, string> = { wait: "在等", progress: "进展", tell: "通知", join: "加入", done: "完成", review: "待你看", user: "你", stuck: "卡住" };
 
+/** A member's face in the feed: its repository's initials (order-api → OA); the lead's ringed. A click opens its chat. */
+function Avatar({ m, lead, size = "md" }: { m?: Task; lead?: boolean; size?: "sm" | "md" }) {
+  const name = memberLabel(m) || "?";
+  const parts = name.split(/[-_.\s]+/).filter(Boolean);
+  const initials = (parts.length > 1 ? parts[0][0] + parts[1][0] : name.slice(0, 2)).toUpperCase();
+  const box = size === "sm" ? "size-6 text-[10px]" : "size-8 text-[11px]";
+  const face = <span className={clsx("grid shrink-0 place-items-center rounded-full font-medium", box, lead ? "bg-brand/15 text-brand ring-1 ring-brand/40" : "bg-muted text-foreground/70")}>{initials}</span>;
+  if (!m?.session) return face;
+  return (
+    <button title={`${m.id} ${name}：打开它的对话`} onClick={() => openChat(m.session!, m.id)} className="shrink-0 rounded-full hover:opacity-80">
+      {face}
+    </button>
+  );
+}
+
+/** One thing in the feed, in time order: a line of activity, a step / decision waiting on the user, a member stuck on them. */
+type FeedItem = { at: number; key: string } & ({ type: "act"; a: NonNullable<Task["activity"]>[number] } | { type: "ask"; h: Task } | { type: "stuck"; m: Task });
+
 /**
- * Opening a requirement: what waits on the user first (answered right here), then its members (a click opens one's
- * chat — the only place chats are), then the activity feed, newest first. The user follows this, not the chats.
+ * Opening a requirement: drawn like a group chat. On top what it is (its request as first put, folded when long) and
+ * who works on it; a row per thing waiting on the user, each jumping to it; then the feed, oldest first — members on
+ * the left (their avatar opens their chat), the user's answers on the right, what waits on the user right where it was
+ * asked. It opens on the latest thing waiting on the user, else at the bottom. 放弃 / 标为完成 are for the whole
+ * requirement; chats are only behind the avatars.
  */
 function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Task[]; byId: Record<string, Task>; act: Act; onClose: () => void; onGo: (id: string) => void }) {
   const { busy, err, go } = useAction(act);
   const ms = (t.members ?? []).map((id) => byId[id]).filter(Boolean);
   const { steps, stuck } = teamNeeds(t, tasks);
   const over = t.status === "done" || t.status === "dropped";
-  const feed = [...(t.activity ?? [])].reverse();
+  const request = (t.request ?? t.prompt ?? "").trim();
+  const [unfold, setUnfold] = useState(false);
+  const items: FeedItem[] = [
+    ...(t.activity ?? []).map((a, i) => ({ at: a.at, key: `a${i}`, type: "act" as const, a })),
+    ...(over ? [] : steps.map((h) => ({ at: h.createdAt, key: `h${h.id}`, type: "ask" as const, h }))),
+    ...(over ? [] : stuck.map((m) => ({ at: waitedSince(m), key: `s${m.id}`, type: "stuck" as const, m }))),
+  ].sort((a, b) => a.at - b.at);
+  const pending = items.filter((x) => x.type !== "act");
+  const scroller = useRef<HTMLDivElement>(null);
+  const jump = (key: string, smooth = true) => scroller.current?.querySelector(`[data-feed="${key}"]`)?.scrollIntoView({ block: "center", behavior: smooth ? "smooth" : "auto" });
+  // Once per opening, not on every refresh: the latest thing waiting on the user, else the newest line
+  useEffect(() => {
+    const id = requestAnimationFrame(() => {
+      const last = pending[pending.length - 1];
+      if (last) jump(last.key, false);
+      else if (scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight;
+    });
+    return () => cancelAnimationFrame(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [t.id]);
   const when = (ms: number) => new Date(ms).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  const who = (id?: string) => (id ? byId[id] : undefined);
+  const head = (m: Task | undefined, label: string, at: number, tone?: string) => (
+    <div className="flex items-baseline gap-1.5 text-[11px] text-muted-foreground">
+      <span className="font-medium text-foreground/80">{memberLabel(m) || "?"}</span>
+      <span className={tone}>{label}</span>
+      <span className="tabular-nums">{when(at)}</span>
+    </div>
+  );
+  const row = (x: FeedItem) => {
+    if (x.type === "ask") {
+      const m = who(x.h.askedBy) ?? ms.find((y) => y.blockedBy?.includes(x.h.id));
+      return (
+        <div className="flex gap-2">
+          <Avatar m={m} lead={m?.id === t.id} />
+          <div className="min-w-0 flex-1 space-y-1">
+            {head(m, x.h.handBack?.kind === "choice" || x.h.questions ? "要你决定" : "要你做", x.at, "text-warn")}
+            <div className="rounded-lg rounded-tl-sm border border-warn/50 bg-card p-3">
+              <InFeed.Provider value>
+                <HumanCard t={x.h} byId={byId} act={act} onGo={onGo} />
+              </InFeed.Provider>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    if (x.type === "stuck")
+      return (
+        <div className="flex gap-2">
+          <Avatar m={x.m} lead={x.m.id === t.id} />
+          <div className="min-w-0 flex-1 space-y-1">
+            {head(x.m, "在等你", x.at, "text-warn")}
+            <div className="flex items-start gap-2 rounded-lg rounded-tl-sm border border-warn/50 bg-warn/5 px-3 py-2 text-[13px]">
+              <span className="min-w-0 flex-1 whitespace-pre-wrap">{stuckText(x.m)}</span>
+              {x.m.session && (
+                <Button variant="outline" onClick={() => openChat(x.m.session!, x.m.id)}>
+                  <MessageSquare className="size-3.5" />
+                  去对话
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    const a = x.a;
+    // The user's own doing: on the right, like their messages in a chat
+    if (a.kind === "user")
+      return (
+        <div className="flex justify-end">
+          <div className="max-w-[85%] space-y-1 text-right">
+            <div className="text-[11px] text-muted-foreground tabular-nums">你 · {when(a.at)}</div>
+            <p className="rounded-lg rounded-tr-sm bg-brand/10 px-3 py-2 text-left text-[13px] whitespace-pre-wrap">{a.text}</p>
+          </div>
+        </div>
+      );
+    // Who joined: a line across, like a group chat's "X invited Y"
+    if (a.kind === "join" || !a.by)
+      return (
+        <p className="px-6 text-center text-[11px] text-muted-foreground">
+          {who(a.by) ? `${memberLabel(who(a.by))} ` : ""}
+          {a.text} · {when(a.at)}
+        </p>
+      );
+    const m = who(a.by);
+    const to = who(a.to);
+    return (
+      <div className="flex gap-2">
+        <Avatar m={m} lead={m?.id === t.id} />
+        <div className="min-w-0 flex-1 space-y-1">
+          {head(m, `${KIND[a.kind] ?? a.kind}${to ? ` → ${memberLabel(to)}` : ""}`, a.at, a.kind === "done" ? "text-ok" : a.kind === "stuck" || a.kind === "review" ? "text-warn" : undefined)}
+          <p className={clsx("inline-block max-w-full rounded-lg rounded-tl-sm px-3 py-2 text-[13px] whitespace-pre-wrap", a.kind === "done" ? "bg-ok/10" : a.kind === "stuck" ? "bg-warn/10" : "bg-muted")}>{a.text}</p>
+        </div>
+      </div>
+    );
+  };
   return (
     <Sheet open modal={false} onOpenChange={(o) => !o && onClose()}>
       <SheetContent
@@ -1489,93 +1612,70 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
             <X className="size-4" />
           </Button>
         </div>
-        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
-          <h3 className="text-[16px] font-medium">{t.title}</h3>
-          {!over && (steps.length > 0 || stuck.length > 0) && (
-            <section className="space-y-2">
-              <h4 className="text-[12px] font-medium text-warn">等你 · {steps.length + stuck.length}</h4>
-              {stuck.map((x) => (
-                <div key={x.id} className="flex items-start gap-2 rounded-md border border-warn/40 bg-warn/5 px-3 py-2 text-[13px]">
-                  <span className="min-w-0 flex-1">
-                    <span className="font-medium">{memberLabel(x)}</span> {stuckText(x)}
-                  </span>
-                  {x.session && (
-                    <Button variant="outline" onClick={() => openChat(x.session!, x.id)}>
-                      <MessageSquare className="size-3.5" />
-                      去对话
-                    </Button>
-                  )}
-                </div>
-              ))}
-              {steps.map((h) => (
-                <div key={h.id} className="rounded-md border border-warn/40 p-3">
-                  <HumanCard t={h} byId={byId} act={act} onGo={onGo} />
-                </div>
-              ))}
-            </section>
+        {/* What it is and who's on it: stays put while the feed scrolls */}
+        <div className="space-y-2 border-b px-4 py-3">
+          <h3 className="text-[15px] font-medium">{t.title}</h3>
+          {request && request !== t.title && (
+            <div className="text-[12px] text-muted-foreground">
+              <p className={clsx("whitespace-pre-wrap", !unfold && "line-clamp-2")}>{request}</p>
+              {(request.length > 80 || request.includes("\n")) && (
+                <button className="mt-0.5 text-brand hover:underline" onClick={() => setUnfold(!unfold)}>
+                  {unfold ? "收起" : "展开原始需求"}
+                </button>
+              )}
+            </div>
           )}
-          <section className="space-y-1.5">
-            <h4 className="text-[12px] font-medium text-muted-foreground">成员 · 点开看它的对话</h4>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
             {ms.map((m) => (
-              <button
-                key={m.id}
-                disabled={!m.session}
-                onClick={() => m.session && openChat(m.session, m.id)}
-                className="flex w-full items-center gap-2 rounded-md border px-3 py-2 text-left text-[13px] hover:bg-accent disabled:opacity-60"
-              >
-                <span className={clsx("size-2 shrink-0 rounded-full", memberDot(m))} />
-                <span className="shrink-0 font-medium">{memberLabel(m)}</span>
-                {m.id === t.id && <span className="shrink-0 rounded-sm bg-brand/10 px-1 text-[11px] text-brand">负责人</span>}
-                <span className="min-w-0 flex-1 truncate text-muted-foreground">{m.title}</span>
-                <span className="shrink-0 text-[11px] text-muted-foreground">{m.status === "done" ? "做完了" : m.status === "dropped" ? "放弃了" : liveText(m)}</span>
+              <span key={m.id} className="inline-flex items-center gap-1.5 text-[12px]" title={m.title}>
+                <Avatar m={m} lead={m.id === t.id} size="sm" />
+                <span className={clsx("size-1.5 rounded-full", memberDot(m))} />
+                <span className="text-muted-foreground">{memberLabel(m)}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+        {pending.length > 0 && (
+          <div className="space-y-1 border-b bg-warn/5 px-4 py-2">
+            {pending.map((x) => (
+              <button key={x.key} onClick={() => jump(x.key)} className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-[12px] hover:bg-warn/10">
+                <AlertTriangle className="size-3.5 shrink-0 text-warn" />
+                <span className="shrink-0 font-medium">{memberLabel(x.type === "ask" ? (who(x.h.askedBy) ?? undefined) : x.type === "stuck" ? x.m : undefined)}</span>
+                <span className="min-w-0 flex-1 truncate">{x.type === "ask" ? `${x.h.handBack?.kind === "choice" || x.h.questions ? "要你决定" : "要你做"}：${x.h.title}` : x.type === "stuck" ? stuckText(x.m) : ""}</span>
+                <ArrowRight className="size-3.5 shrink-0 text-muted-foreground" />
               </button>
             ))}
-          </section>
-          <section className="space-y-1.5">
-            <h4 className="text-[12px] font-medium text-muted-foreground">活动</h4>
-            {feed.length ? (
-              <ol className="space-y-2 border-l pl-3">
-                {feed.map((a, i) => (
-                  <li key={`${a.at}-${i}`} className="relative text-[13px]">
-                    <span className={clsx("absolute top-1.5 -left-[16.5px] size-2 rounded-full border-2 border-background", a.kind === "done" ? "bg-ok" : a.kind === "stuck" || a.kind === "review" ? "bg-warn" : a.kind === "user" ? "bg-brand" : "bg-muted-foreground/50")} />
-                    <div className="flex items-baseline gap-1.5 text-[11px] text-muted-foreground">
-                      <span>{KIND[a.kind] ?? a.kind}</span>
-                      {a.by && byId[a.by] && a.kind !== "user" && <span className="text-foreground/80">{memberLabel(byId[a.by])}</span>}
-                      {a.to && byId[a.to] && (
-                        <>
-                          <ArrowRight className="size-3 self-center" />
-                          <span className="text-foreground/80">{memberLabel(byId[a.to])}</span>
-                        </>
-                      )}
-                      <span className="ml-auto tabular-nums">{when(a.at)}</span>
-                    </div>
-                    <p className="whitespace-pre-wrap">{a.text}</p>
-                  </li>
-                ))}
-              </ol>
-            ) : (
-              <p className="text-[12px] text-muted-foreground">还没有活动</p>
-            )}
-          </section>
-          {ms.some((m) => m.links?.length) && ms.map((m) => <Links key={m.id} t={m} />)}
-          {err && <p role="alert" className="text-[12px] text-bad">{err}</p>}
+          </div>
+        )}
+        <div ref={scroller} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
+          {items.length ? (
+            items.map((x) => (
+              <div key={x.key} data-feed={x.key}>
+                {row(x)}
+              </div>
+            ))
+          ) : (
+            <p className="py-8 text-center text-[12px] text-muted-foreground">还没有活动</p>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t px-4 py-2.5">
+          {err && <p role="alert" className="mr-auto text-[12px] text-bad">{err}</p>}
           {!over && (
-            <div className="flex flex-wrap justify-end gap-2">
+            <>
               <DropButton busy={!!busy} onDrop={() => go("drop", "drop", { id: t.id })} />
               <Button variant="outline" disabled={!!busy} onClick={() => go("accept", "accept", { id: t.id })}>
                 <Check className="size-3.5" />
                 整个需求标为完成
               </Button>
-            </div>
+            </>
           )}
           {t.status === "dropped" && (
-            <div className="flex justify-end">
-              <Button variant="outline" disabled={!!busy} onClick={() => go("restore", "restore", { id: t.id })}>
-                <Undo2 className="size-3.5" />
-                恢复
-              </Button>
-            </div>
+            <Button variant="outline" disabled={!!busy} onClick={() => go("restore", "restore", { id: t.id })}>
+              <Undo2 className="size-3.5" />
+              恢复
+            </Button>
           )}
+          {t.status === "done" && <span className="text-[12px] text-ok">已完成</span>}
         </div>
       </SheetContent>
     </Sheet>

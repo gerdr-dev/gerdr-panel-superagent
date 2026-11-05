@@ -63,6 +63,8 @@ export type Task = {
   team?: string;
   /** A requirement with members: their ids (itself, the lead, first), its feed, and the column of the most pressing. */
   members?: string[];
+  /** A requirement's words as first put (its lead's prompt may have been narrowed to its part since). */
+  request?: string;
   activity?: Activity[];
   teamColumn?: "you" | "review" | "active" | "done";
   ready: boolean;
