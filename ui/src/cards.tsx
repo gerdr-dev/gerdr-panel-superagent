@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlarmClock, Check, Hourglass, Pencil, Undo2 } from "lucide-react";
+import { AlarmClock, Check, Hourglass, MessageSquare, Pencil, SquareTerminal, Undo2, Users } from "lucide-react";
 import { DefaultCard, registerCard, type CardProps } from "@gerdr/core";
 import { run } from "./lib/gerdr";
 
@@ -76,7 +76,11 @@ function TaskStep({ card }: CardProps) {
 
 registerCard("task-step", TaskStep);
 
-type Wait = { state: "waiting" | "ended" | "gone"; body?: string; how?: string; at?: number; woke?: { how: string; at: number }; check?: { at: number; code: number; out: string } };
+/** One thing that wakes it (local/_waits.ts wakeItem). */
+type Wake = { kind: string; text: string; code?: string };
+const WAKE_ICON: Record<string, typeof Hourglass> = { reply: MessageSquare, check: SquareTerminal, time: AlarmClock, teammate: Users };
+
+type Wait = { state: "waiting" | "ended" | "gone"; body?: string; wakes?: Wake[]; how?: string; at?: number; woke?: { how: string; at: number }; check?: { at: number; code: number; out: string } };
 
 /**
  * A worker ending its turn to wait on someone / something outside (wait_for, local/waits.ts). Without it the chat just
@@ -85,7 +89,7 @@ type Wait = { state: "waiting" | "ended" | "gone"; body?: string; how?: string; 
  */
 function TaskWait({ card }: CardProps) {
   // waits: the task's waits it stands for (local/_waits.ts); cards made before those had ids carry since (+ kind "mr")
-  const c = card as { project?: string; task?: string; waits?: string[]; since?: number; title?: string; body?: string; kind?: string; url?: string };
+  const c = card as { project?: string; task?: string; waits?: string[]; since?: number; title?: string; body?: string; wakes?: Wake[]; kind?: string; url?: string };
   const [st, setSt] = useState<Wait>();
   const [, tick] = useState(0);
   useEffect(() => {
@@ -100,6 +104,9 @@ function TaskWait({ card }: CardProps) {
     };
   }, [c.project, c.task, c.waits?.join(","), c.since, c.kind]);
   const on = !st || st.state === "waiting";
+  // Cards and boards from before wakeItem only have the prose, its parts joined by "；": one row each
+  const body = st?.body ?? c.body;
+  const wakes: Wake[] = st?.wakes ?? (st?.body ? undefined : c.wakes) ?? (body ? body.split("；").map((text) => ({ kind: text.includes("回来看") ? "time" : "", text })) : []);
   const mins = c.since ? Math.max(0, Math.round((Date.now() - c.since) / 60000)) : 0;
   const waited = mins < 1 ? "刚开始" : mins < 60 ? `等了 ${mins} 分钟` : `等了 ${Math.floor(mins / 60)} 小时 ${mins % 60} 分`;
   if (!on)
@@ -129,11 +136,28 @@ function TaskWait({ card }: CardProps) {
           c.title
         )}
       </p>
-      {(st?.body ?? c.body) && (
-        <p className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
-          {st?.body?.includes("回来看") || c.body?.includes("回来看") ? <AlarmClock className="size-3.5 shrink-0" /> : <Hourglass className="size-3.5 shrink-0" />}
-          {st?.body ?? c.body}
-        </p>
+      {wakes.length > 0 && (
+        <div className="space-y-0.5 text-[12px] text-muted-foreground">
+          <p>{wakes.length > 1 ? "哪个先到都会叫醒它：" : "叫醒它："}</p>
+          <ul className="space-y-0.5">
+            {wakes.map((w, i) => {
+              const Icon = WAKE_ICON[w.kind] ?? Hourglass;
+              return (
+                <li key={i} className="flex items-start gap-1.5">
+                  <Icon className="mt-0.5 size-3.5 shrink-0" />
+                  <span className="min-w-0 flex-1">
+                    {w.text}
+                    {w.code && (
+                      <code title={w.code} className="mt-0.5 block truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">
+                        {w.code}
+                      </code>
+                    )}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       )}
       {st?.check && (
         <p className="line-clamp-2 font-mono text-[11px] text-muted-foreground">

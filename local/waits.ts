@@ -19,7 +19,7 @@
 // the user writing to it) ends the wait — it calls wait_for again if it still waits.
 
 import { activity, load, memberName, members, note, reqOf, teamOf, update, type Task } from "./_store";
-import { isOutside, mrConversation, open, waitOn, wakeText, type Wait, type WakeOn } from "./_waits";
+import { isOutside, mrConversation, open, waitOn, wakeItem, wakeText, type Wait, type WakeOn } from "./_waits";
 import { wake } from "./_wake";
 import { followUp, follows, record, subscribers, compact } from "./_main";
 import { mine } from "./board";
@@ -188,6 +188,7 @@ export function waitCard(ctx: Ctx, t: Task, ws: Wait[]) {
     kicker: `在等 · ${t.id}`,
     title: ws[0]?.what ?? "",
     body: ws.map((w) => wakeText(w)).join("；"),
+    wakes: ws.map(wakeItem),
     url: ws.find((w) => w.url)?.url,
     since: ws[0]?.since,
     tone: "info",
@@ -209,7 +210,7 @@ export function status(input: { id: string; waits?: string[]; since?: number; ki
   if (on.length) {
     const woke = on.find((w) => w.woke)?.woke;
     const last = on.find((w) => w.check?.last)?.check?.last;
-    return { state: "waiting", body: on.map((w) => wakeText(w)).join("；"), woke, check: last };
+    return { state: "waiting", body: on.map((w) => wakeText(w)).join("；"), wakes: on.map(wakeItem), woke, check: last };
   }
   const end = ws.map((w) => w.end).filter(Boolean).sort((a, b) => a!.at - b!.at)[0];
   if (end) return { state: "ended", how: end.how, at: end.at };

@@ -237,6 +237,24 @@ export function syncAgents(t: Task, worker: string | undefined, bg: Bg[]) {
 // ---- for people ----
 
 /** What will wake it, in words (the 在等 list, the chat card). */
+/**
+ * The same as wakeText, in parts for a list (the chat's wait card, ui/src/cards.tsx): kind picks the icon, text is one
+ * short line, code the check's command in full (the card shortens it). "…就叫醒它" is left off: the list's heading says it.
+ */
+export type WakeItem = { kind: Wait["kind"]; text: string; code?: string };
+export function wakeItem(w: Wait): WakeItem {
+  switch (w.kind) {
+    case "reply":
+      return { kind: w.kind, text: `${w.where ?? (w.on ? `${w.on.source} ${w.on.key}` : "那个对话")} 有新消息` };
+    case "check":
+      return { kind: w.kind, text: `每 ${w.check?.every ?? 1} 分钟跑一次检查，等到了`, code: (w.check?.command ?? "").replace(/\s+/g, " ").trim() };
+    case "time":
+      return { kind: w.kind, text: w.at ? `${Math.round((w.at - w.since) / 60000)} 分钟后（${hhmm(w.at)}）回来看` : "到点回来看" };
+    default:
+      return { kind: w.kind, text: wakeText(w).replace(/，?就?叫醒它$/, "") };
+  }
+}
+
 export function wakeText(w: Wait): string {
   switch (w.kind) {
     case "reply":
