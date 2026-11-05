@@ -1,7 +1,7 @@
 // The task board's data (user/data/tasks.json: this person's, never shared — _user.ts), shared by tasks.ts (the board, the panel's agent) and the watchers
 // (mrwatch.ts). A helper file (leading _): nothing here is callable from a page.
 
-import { addWait, askUser, follow, open, question, sync, type Wait } from "./_waits";
+import { addWait, askUser, open, question, sync, type Wait } from "./_waits";
 import { DATA, migrate } from "./_user";
 
 export const FILE = `${DATA}/tasks.json`;
@@ -138,12 +138,13 @@ export type Task = {
   doneAt?: number;
 };
 
-export type Store = { next: number; tasks: Task[] };
+/** v: the store's shape — 2 since wait_for stopped adding the conversations it waits on to threads. */
+export type Store = { next: number; tasks: Task[]; v?: number };
 
 export function load(ctx: Ctx): { store: Store; etag?: string; text?: string } {
   migrate(ctx);
   const st = ctx.fs.stat(FILE);
-  if (!st) return { store: { next: 1, tasks: [] } };
+  if (!st) return { store: { next: 1, tasks: [], v: 2 } };
   const text = ctx.fs.read(FILE);
   return { store: upgrade(JSON.parse(text)), etag: st.etag, text };
 }
@@ -170,12 +171,20 @@ function upgrade(s: Store): Store {
       const d = t.delivery;
       if (d?.url) {
         const on = { source: "gitlab", key: `${d.project}!${d.iid}` };
-        follow(t, on);
         if (!open(t).some((w) => w.on?.key === on.key)) addWait(t, { kind: "reply", what: `MR !${d.iid}：review、流水线、合并`, on, where: `MR !${d.iid}`, url: d.url, since: d.since });
       }
     }
     t.delivery = undefined;
+    // Before v2, wait_for added the conversation it waited on to threads for good: taken out again (a conversation
+    // some reply wait was on, other than the origin's). Still waited on, it's followed through the wait (waitingOn).
+    if (!s.v && t.threads?.length) {
+      const waited = (x: { source: string; key: string }) =>
+        (t.waits ?? []).some((w) => w.kind === "reply" && w.on?.source === x.source && w.on?.key === x.key);
+      const isOrigin = (x: { source: string; key: string }) => x.source === t.origin?.source && x.key === t.origin?.key;
+      t.threads = t.threads.filter((x) => isOrigin(x) || !waited(x));
+    }
   }
+  s.v = 2;
   return s;
 }
 

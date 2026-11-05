@@ -16,7 +16,7 @@ import { textOf } from "./playbooks";
 import { DATA, migrate } from "./_user";
 import { find, load as loadTasks, note, update as updateTasks, type Task } from "./_store";
 import { wake } from "./_wake";
-import { isOutside } from "./_waits";
+import { isOutside, waitingOn } from "./_waits";
 
 const STATE = `${DATA}/superagent.json`;
 /** A fresh main session after this many items: its context stays small, so it stays fast. */
@@ -129,6 +129,13 @@ export function threadsOf(t: Task): { source: string; key: string }[] {
   return t.origin?.key ? [{ source: t.origin.source, key: t.origin.key }] : [];
 }
 
+/** Every conversation whose news goes to the task: its threads, and those it waits on (wait_for) for now. */
+export function follows(t: Task): { source: string; key: string }[] {
+  const out = [...threadsOf(t)];
+  for (const x of waitingOn(t)) if (!out.some((y) => y.source === x.source && y.key === x.key)) out.push(x);
+  return out;
+}
+
 /**
  * The tasks a message in this conversation goes to without Eval: every live task following it; when none is live,
  * the latest one that ended (a person speaking in its conversation picks it up again, as dsh resumes an ended
@@ -136,7 +143,7 @@ export function threadsOf(t: Task): { source: string; key: string }[] {
  */
 export function subscribers(tasks: Task[], e: { source: string; key?: string; actor?: string }): Task[] {
   if (!e.key) return [];
-  const on = tasks.filter((t) => t.status !== "dropped" && threadsOf(t).some((x) => x.source === e.source && x.key === e.key));
+  const on = tasks.filter((t) => t.status !== "dropped" && follows(t).some((x) => x.source === e.source && x.key === e.key));
   const live = on.filter((t) => t.status !== "done");
   if (live.length) return live;
   // Only a person picks an ended task up again: a bot or a pipeline (no actor) on a merged MR is no reason to
@@ -329,7 +336,7 @@ function taskBlock(t: Task, agents: { id: string; name: string }[]) {
 
 function eventBlock(it: Item, tasks: Task[]) {
   const e = it.event;
-  const related = tasks.filter((t) => threadsOf(t).some((x) => x.source === e.source && x.key === e.key));
+  const related = tasks.filter((t) => follows(t).some((x) => x.source === e.source && x.key === e.key));
   const recent = tasks
     .filter((t) => t.owner === "agent" && t.status !== "dropped")
     .sort((a, b) => b.updatedAt - a.updatedAt)

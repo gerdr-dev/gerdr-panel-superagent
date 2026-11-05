@@ -1,6 +1,6 @@
 import { get, text } from "./_glab";
 import { load, type Task } from "./_store";
-import { open } from "./_waits";
+import { open, waitingOn } from "./_waits";
 import { DATA } from "./_user";
 
 // A source of events for the MRs tasks follow — nothing more. An MR is a way of working (the worker's skill, mr.md:
@@ -9,7 +9,7 @@ import { DATA } from "./_user";
 // asked the user after too many rounds, and marked the task done when the MR merged — t30 still had a prod release to
 // run when it did. Now it only says what happened, and the worker, woken by it, decides.
 //
-// Run on a schedule (schedules/mrwatch.json). Which MRs: every one a live task follows (its threads: a worker that
+// Run on a schedule (schedules/mrwatch.json). Which MRs: every one a live task follows (its threads, or what it waits on: a worker that
 // opened an MR waits on it with wait_for, so the task follows gitlab / group/repo!34). What it emits, each once, as
 // events of that conversation (source gitlab, key group/repo!34): mr.review (new comments by others), pipeline.failed,
 // pipeline.passed, mr.conflict, mr.need_rebase, mr.mergeable (GitLab says it can be merged now), mr.merged, mr.closed.
@@ -56,7 +56,7 @@ function followed(tasks: Task[]): string[] {
   const out = new Set<string>();
   for (const t of tasks) {
     if (t.status === "done" || t.status === "dropped") continue;
-    for (const th of t.threads ?? []) if (th.source === "gitlab" && KEY.test(th.key)) out.add(th.key);
+    for (const th of [...(t.threads ?? []), ...waitingOn(t)]) if (th.source === "gitlab" && KEY.test(th.key)) out.add(th.key);
   }
   return [...out];
 }

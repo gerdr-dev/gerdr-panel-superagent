@@ -8,6 +8,8 @@
 //   pipeline / merge — goes to the worker as a follow-up (_main.ts followUp). Gerdr only runs this panel for events a
 //   trigger names, and the user may never have turned the source on in 触发器 — so a trigger of its own
 //   (user/triggers/follow-*.json → onFollowed) brings that one conversation in, and goes when no live task follows it.
+//   Followed while waiting only (_waits.ts waitingOn), not added to the task's threads: a colleague's next DM, days
+//   later and about something else, is not this task's news.
 // - check: a command the worker wrote that says whether it has happened (a publish approved, a job done), run here every
 //   few minutes (tick → runChecks): exit 0 wakes it with the output. Watching a state is no fixed event: each wait has
 //   its own, so the worker writes it (2026-11-04: waiting on a colleague to approve a publish, only his DM reply would
@@ -19,7 +21,7 @@
 import { activity, load, memberName, members, note, teamOf, update, type Task } from "./_store";
 import { isOutside, mrConversation, open, waitOn, wakeText, type Wait, type WakeOn } from "./_waits";
 import { wake } from "./_wake";
-import { followUp, record, subscribers, compact } from "./_main";
+import { followUp, follows, record, subscribers, compact } from "./_main";
 import { mine } from "./board";
 import { USER } from "./_user";
 
@@ -375,7 +377,7 @@ function sweepTriggers(ctx: Ctx, tasks: Task[]) {
       const t = JSON.parse(ctx.fs.read(f.path));
       if (t.fn !== FN) continue;
       const source = String(t.on).split("/")[0];
-      if (live.some((x) => x.threads?.some((th) => th.source === source && th.key === t.key))) continue;
+      if (live.some((x) => follows(x).some((th) => th.source === source && th.key === t.key))) continue;
     } catch {
       continue;
     }

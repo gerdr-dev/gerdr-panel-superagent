@@ -111,10 +111,19 @@ export function isOutside(w: Wait) {
   return w.kind === "reply" || w.kind === "check" || w.kind === "time" || w.kind === "teammate";
 }
 
-/** The task follows a conversation from now on (threads): what comes in it goes to its worker (_main.ts subscribers). */
-export function follow(t: Task, on: { source: string; key: string }) {
-  const cur = t.threads ?? (t.origin?.key ? [{ source: t.origin.source, key: t.origin.key }] : []);
-  if (!cur.some((x) => x.source === on.source && x.key === on.key)) t.threads = [...cur, { source: on.source, key: on.key }];
+/**
+ * How long a conversation a worker waited on (wait_for message) stays followed after the wait ended. The worker being
+ * woken ends the wait at once, and a person often sends a second line while it works: that one still reaches it. Past
+ * this, the conversation is no longer the task's — 2026-11-05: t32 had waited on a colleague's DM the day before,
+ * kept following it for good, and the colleague's next, unrelated DM went to t32, was handed back and became a task of its own.
+ */
+const FOLLOW_GRACE = 2 * 3_600_000;
+
+/** The conversations the task follows because it waits on them (wait_for message), open or lately ended. */
+export function waitingOn(t: Task, now = Date.now()): { source: string; key: string }[] {
+  return (t.waits ?? [])
+    .filter((w) => w.kind === "reply" && w.on && (!w.end || now - w.end.at < FOLLOW_GRACE))
+    .map((w) => ({ source: w.on!.source, key: w.on!.key }));
 }
 
 /** One thing that wakes a worker waiting on outside: news in a conversation, a check it wrote coming true, a time. */
@@ -126,15 +135,14 @@ export type WakeOn =
 
 /**
  * The worker waits on outside (wait_for): whichever of `on` comes first wakes it — a wait each, all sharing `what`. The
- * task follows each conversation from now on. Replaces what it waited on outside before: this says what it waits on
- * now. Returns the new waits.
+ * task follows each conversation while it waits on it (waitingOn), not for good. Replaces what it waited on outside
+ * before: this says what it waits on now. Returns the new waits.
  */
 export function waitOn(t: Task, what: string, on: WakeOn[]): Wait[] {
   const now = Date.now();
   endWaits(t, isOutside, "换成了新的等待");
   return on.map((c) => {
     if (c.type === "message") {
-      follow(t, c.conv);
       return addWait(t, { kind: "reply", what, since: now, on: { source: c.conv.source, key: c.conv.key }, where: c.conv.where, url: c.conv.url });
     }
     if (c.type === "teammate") return addWait(t, { kind: "teammate", what, since: now, item: c.id, where: c.name });
