@@ -1669,6 +1669,9 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
   const over = t.status === "done" || t.status === "dropped";
   const request = (t.request ?? t.prompt ?? "").trim();
   const [unfold, setUnfold] = useState(false);
+  const files = t.attachments ?? [];
+  const link = (p: string) => (/[\s()]/.test(p) ? `<${p}>` : p);
+  const requestMd = [request, ...files.map((a) => (a.mime?.startsWith("image/") || /\.(png|jpe?g|gif|webp)$/i.test(a.path) ? `![${a.name}](${link(a.path)})` : `[${a.name}](${link(a.path)})`))].filter(Boolean).join("\n\n");
   const items: FeedItem[] = [
     ...(t.activity ?? []).map((a, i) => ({ at: a.at, key: `a${i}`, type: "act" as const, a })),
     ...(over ? [] : steps.map((h) => ({ at: h.createdAt, key: `h${h.id}`, type: "ask" as const, h }))),
@@ -1859,6 +1862,10 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
           {ms.length > 1 ? <Users className="size-3.5" /> : <Bot className="size-3.5" />}
           <span className="font-mono">{t.id}</span>
           <span>· {COLS.find((c) => c.id === colOf(t))?.title}</span>
+          {/* When it was asked for (and finished): the feed starts later, or not at all for older tasks */}
+          <span className="truncate tabular-nums" title={new Date(t.createdAt).toLocaleString("zh-CN")}>
+            · {when(t.createdAt)} 建{t.status === "done" && t.doneAt ? ` · ${when(t.doneAt)} 完成` : ""}
+          </span>
           <span className="ml-auto" />
           <Button variant="ghost" size="icon" aria-label="关闭" onClick={onClose}>
             <X className="size-4" />
@@ -1867,10 +1874,18 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
         {/* What it is and who's on it: stays put while the feed scrolls */}
         <div className="space-y-2 border-b px-4 py-3">
           <h3 className="text-[15px] font-medium">{t.title}</h3>
-          {request && request !== t.title && (
+          {((request && request !== t.title) || files.length > 0) && (
             <div className="text-[12px] text-muted-foreground">
-              <p className={clsx("whitespace-pre-wrap", !unfold && "line-clamp-2")}>{request}</p>
-              {(request.length > 80 || request.includes("\n")) && (
+              {/* Unfolded: what the user wrote as they wrote it, with the images they pasted (Gerdr's Markdown draws ![](path)) */}
+              {unfold ? (
+                <Md className="max-h-[50vh] overflow-y-auto text-[13px] text-foreground/90">{requestMd}</Md>
+              ) : (
+                <p className="line-clamp-2 whitespace-pre-wrap">
+                  {request !== t.title ? request : ""}
+                  {files.length > 0 && <span className="text-muted-foreground/80">{request !== t.title && request ? " · " : ""}{files.length} 个附件</span>}
+                </p>
+              )}
+              {(request.length > 80 || request.includes("\n") || files.length > 0) && (
                 <button className="mt-0.5 text-brand hover:underline" onClick={() => setUnfold(!unfold)}>
                   {unfold ? "收起" : "展开原始需求"}
                 </button>

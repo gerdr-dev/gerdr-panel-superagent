@@ -16,6 +16,8 @@ export type Task = {
   title: string;
   owner: "agent" | "human";
   status: "todo" | "running" | "review" | "done" | "dropped";
+  /** Images and files the user gave with it (local paths on Gerdr's machine). */
+  attachments?: { path: string; name: string; mime?: string }[];
   routing?: number;
   /** The user asked the router to rearrange this card; set until it decides. */
   reroute?: { feedback: string; at: number; router?: string };
