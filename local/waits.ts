@@ -22,7 +22,7 @@ import { activity, load, memberName, members, note, reqOf, teamOf, update, type 
 import { isOutside, mrConversation, open, waitOn, wakeItem, wakeText, type Wait, type WakeOn } from "./_waits";
 import { wake } from "./_wake";
 import { followUp, follows, record, subscribers, compact } from "./_main";
-import { mine } from "./board";
+import { mine, staleAsks } from "./board";
 import { USER } from "./_user";
 
 const DIR = `${USER}/triggers`;
@@ -137,7 +137,7 @@ export function wait_for(
     }
     throw new Error(`${at}：type 是 message / check / time / teammate 之一，不是「${x.type ?? ""}」`);
   });
-  const { t, ws } = update(ctx, (s) => {
+  const { t, ws, stale } = update(ctx, (s) => {
     const t = mine(s, ctx);
     if (t.status !== "running") throw new Error(`${t.id} 现在不是进行中（${t.status}），不用等`);
     const now = Date.now();
@@ -162,7 +162,7 @@ export function wait_for(
     const last = (root?.activity ?? []).filter((a) => a.by === t.id).pop();
     if (root && !(last?.kind === "wait" && last.text === what)) activity(s, t, { by: t.id, kind: "wait", text: what });
     Object.assign(t, { viaTools: true, reportedAt: now, nudges: 0, updatedAt: now });
-    return { t, ws };
+    return { t, ws, stale: staleAsks(s, t) };
   });
   // The MR watcher's events come in through triggers/mr.json; anything else may need a trigger of its own
   for (const p of parsed) if (p.type === "message" && p.conv.source !== "gitlab") ensureTrigger(ctx, p.conv);
@@ -170,6 +170,7 @@ export function wait_for(
     id: t.id,
     gerdrCard: waitCard(ctx, t, ws),
     note: `${ws.map((w) => wakeText(w).replace("叫醒它", "叫醒你").replace("它写的", "你写的")).join("；")}。哪个先到都会叫醒你；现在结束这一轮，不用再等。`,
+    ...(stale ? { reminder: stale } : {}),
   };
 }
 

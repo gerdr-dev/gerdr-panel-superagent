@@ -1565,6 +1565,20 @@ function stillWaiting(t: Task, a: NonNullable<Task["activity"]>[number], m?: Tas
   return a.kind === "wait" && m?.status === "running" && (t.activity ?? []).filter((y) => y.by === a.by).pop() === a && !!m.waits?.some((w) => w.what === a.text);
 }
 
+/** When a step / question item was last asked: its newest open question's time (older items have none: created). */
+function askedAt(h: Task) {
+  const qs = (h.questions ?? []).filter((q) => !q.dropped && q.answer == null);
+  // Items from before questions had a time: the last one joined when the item last changed
+  if (qs.length && !qs.some((q) => q.at)) return Math.max(h.createdAt, h.updatedAt);
+  return Math.max(h.createdAt, ...qs.map((q) => q.at ?? 0));
+}
+
+/** When its oldest open question was asked: the one most likely overtaken by what was said since. */
+function firstAsked(h: Task) {
+  const qs = (h.questions ?? []).filter((q) => !q.dropped && q.answer == null);
+  return Math.min(...(qs.length ? qs.map((q) => q.at ?? h.createdAt) : [h.createdAt]));
+}
+
 /** When every task started getting a feed (842e672, 2026-11-05): older ones have none to show. */
 const FEEDS_SINCE = new Date("2026-11-05T12:00:00+08:00").getTime();
 
@@ -1700,7 +1714,8 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
   const requestMd = [request, ...files.map((a) => (a.mime?.startsWith("image/") || /\.(png|jpe?g|gif|webp)$/i.test(a.path) ? `![${a.name}](${link(a.path)})` : `[${a.name}](${link(a.path)})`))].filter(Boolean).join("\n\n");
   const items: FeedItem[] = [
     ...(t.activity ?? []).map((a, i) => ({ at: a.at, key: `a${i}`, type: "act" as const, a })),
-    ...(over ? [] : steps.map((h) => ({ at: h.createdAt, key: `h${h.id}`, type: "ask" as const, h }))),
+    // At its newest open question: one asked later joins the same item, and must not sit up where the first was (t63)
+    ...(over ? [] : steps.map((h) => ({ at: askedAt(h), key: `h${h.id}`, type: "ask" as const, h }))),
     ...(over ? [] : stuck.map((m) => ({ at: waitedSince(m), key: `s${m.id}`, type: "stuck" as const, m }))),
   ].sort((a, b) => a.at - b.at);
   const pending = items.filter((x) => x.type !== "act");
@@ -1738,7 +1753,8 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
           }
           return next;
         }),
-      { root, threshold: 0.3 },
+      // Any of it showing counts: a long decision card never gets to 30% on a phone, and the pill pointed at it while it filled the screen
+      { root, threshold: 0.01 },
     );
     // FeedChat's rows mount as they're drawn (and scroll in): watch for them
     const seen = new WeakSet<Element>();
@@ -1780,11 +1796,33 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
     if (x.type === "ask") {
       const m = who(x.h.askedBy) ?? ms.find((y) => y.blockedBy?.includes(x.h.id));
       const cards = askCards(x.h);
+      // Asked before the user and its worker talked on: it may be moot or different now. One click has the worker
+      // ask it again as things stand (it then shows at the bottom) or take it back
+      const said = Math.max(0, ...(t.activity ?? []).filter((a) => a.kind === "user" && a.by === m?.id).map((a) => a.at));
+      // Until it asks again (a newer question) or its turn is over (it kept the question as is)
+      const refreshing = (x.h.refreshing ?? 0) > x.at && (m?.live?.status === "running" || Date.now() - x.h.refreshing! < 60_000);
+      const stale = said > firstAsked(x.h);
       return (
         <div className="flex gap-2">
           <Avatar m={m} lead={m?.id === t.id} />
           <div className="min-w-0 flex-1 space-y-1">
-            {head(m, x.h.handBack?.kind === "choice" || x.h.questions ? "要你决定" : "要你做", x.at, "text-warn")}
+            <div className="flex items-baseline gap-2">
+              {head(m, x.h.handBack?.kind === "choice" || x.h.questions ? "要你决定" : "要你做", x.at, "text-warn")}
+              {refreshing ? (
+                <span className="shimmer text-[11px] text-muted-foreground">在按最新情况更新…</span>
+              ) : (
+                stale && (
+                  <button
+                    className="text-[11px] text-brand hover:underline disabled:opacity-50"
+                    disabled={!!busy}
+                    title="这个问题是在你们后来的对话之前问的：让它按现在的情况重新问，或者撤回"
+                    onClick={() => go(`refresh${x.h.id}`, "refreshAsk", { id: x.h.id })}
+                  >
+                    {busy === `refresh${x.h.id}` ? "发送中…" : "按最新情况更新"}
+                  </button>
+                )
+              )}
+            </div>
             {cards ? (
               // The same card as in its chat (Gerdr's built-in one): answered right here, one card per question
               cards.map((c) => <DefaultCard key={String(c.ref)} card={c as any} />)

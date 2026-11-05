@@ -108,6 +108,10 @@ worker 拿到一组 面板工具（`local/board.ts`，经 Gerdr 的 `gerdr panel
   - 人工任务挡着的那些任务都结束了，它就自动放弃（`dropOrphans`）；
   - 同一个 worker 用文字块重新登记的，会自动取代它之前的那些；
   - 用工具登记的不自动取代：worker 自己用 `cancel_human` 撤。
+  - 问完以后又聊了（抽屉里发的话、对话里说的话都算），还挂着的问题可能已经过时（t63：worker 在进展里写「那个问题随便选一个就行」，
+    却不撤回）。所以每个问题记着问的时间：worker 之后 post_progress / task_update / wait_for 时，工具结果提醒它处理这些问题；
+    `ask_human` 带 `replaces` 一步撤旧问新；抽屉里过时的问题旁边有「按最新情况更新」（tasks.refreshAsk 叫醒 worker 去处理）。
+    动态里一项按它最新那个没答的问题排，后问的问题不会躲在上面。
 
 ## 交付和等待：一份「在等」，MR 不是特殊流程
 

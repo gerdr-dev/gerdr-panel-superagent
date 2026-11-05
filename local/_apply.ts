@@ -55,6 +55,8 @@ export function applyBlock(s: Store, t: Task, b: any): Task | null {
           multi: h.handBack.kind === "choice" ? h.handBack.multi : undefined,
           label: h.handBack.kind === "value" ? h.handBack.label : undefined,
           steps: h.steps ? String(h.steps) : undefined,
+          // When it was asked: the item sits in the feed at its newest open question, not where the first one was
+          at: Date.now(),
         };
         const open = s.tasks.find((x) => x.owner === "human" && x.askedBy === t.id && x.status === "todo" && x.handBack?.kind === "questions");
         if (open) {

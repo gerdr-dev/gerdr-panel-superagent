@@ -41,6 +41,12 @@ const STEP = {
       description: "What the user gives back when done. kind none (just mark done) / value (a non-secret value) / secret (stored as a panel secret named name, never shown to anyone; only panel functions can read it through ctx.secrets.get, not you or the code you write). A key your own code / commands need (an API key, a test password): kind none, and the steps say which file to put it in (a git-ignored one like .env, with its absolute path) and under what name; never ask for it in the chat",
       properties: { kind: { type: "string", enum: ["none", "value", "secret"] }, label: { type: "string" }, name: { type: "string" } },
     },
+    replaces: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "What you asked before that this replaces (ids as my_task / the earlier result give them: t5, or t5#1 for one question of several): taken back with this one, so the user only sees the current question. Use it whenever the situation moved on since you asked (you talked it over with the user, found something out) and the question changed.",
+    },
     verify: { type: "string", description: "How you will check it once the user says it's done" },
     minutes: { type: "number", description: "Roughly how long it takes the user" },
     expires: { type: "number", description: "Minutes until what you ask stops working (a sign-in link, a device code)" },
@@ -69,7 +75,7 @@ export const tools = {
   },
   cancel_human: {
     description:
-      "Take back a step you asked the user for with ask_human: they answered it in the chat already, you found another way, or it's superseded. It leaves their board with your reason.",
+      "Take back a step or question you asked the user for with ask_human (t5, or t5#1 for one question of several): they answered it in the chat already, you found another way, or it's moot. It leaves their board with your reason. Do it as soon as it's moot — never leave it for the user to answer with \"any is fine\". Asking a changed question instead: ask_human with replaces.",
     input: { type: "object", properties: { id: { type: "string" }, reason: { type: "string" } }, required: ["id", "reason"] },
   },
   hand_back: {
@@ -194,7 +200,8 @@ export async function task_update(input: { state: string; summary?: string; link
       if (lead && state === "done") closing = finishMembers(s, root, "负责人报了整个需求完成");
     }
     const fresh = open(t).filter((w) => isOutside(w) && !before.has(w.id));
-    return { id: t.id, status: t.status, column: question(t) ? "等你" : t.status, ...(fresh.length ? { gerdrCard: waitCard(ctx, t, fresh) } : {}) };
+    const stale = staleAsks(s, t);
+    return { id: t.id, status: t.status, column: question(t) ? "等你" : t.status, ...(stale ? { reminder: stale } : {}), ...(fresh.length ? { gerdrCard: waitCard(ctx, t, fresh) } : {}) };
   });
   await closeSessions(ctx, closing);
   return out;
@@ -219,6 +226,10 @@ export async function closeSessions(ctx: Ctx, ids: string[]) {
 export function ask_human(input: any, ctx: Ctx) {
   return update(ctx, (s) => {
     const t = mine(s, ctx);
+    // What this one replaces goes first: a question changed since is asked anew, not left beside the old one
+    const replaced = (Array.isArray(input.replaces) ? input.replaces : input.replaces ? [input.replaces] : []).map(String);
+    for (const id of replaced) takeBack(s, t, id, "换成了新的问题");
+    input = { ...input, replaces: undefined };
     const decision = Array.isArray(input.options) && input.options.length > 0;
     const human = decision ? { ...input, steps: input.steps ?? "", handBack: { kind: "choice", options: input.options.map(String), multi: input.multi === true || undefined, label: "你的决定" } } : input;
     const reviewed = t.status === "review";
@@ -230,7 +241,14 @@ export function ask_human(input: any, ctx: Ctx) {
     if (reviewed && last?.kind === "review" && last.by === t.id) Object.assign(last, { kind: "progress", text: last.text.replace(/^有结论了，等你看：?/, "") || "有结论了" });
     Object.assign(t, { viaTools: true, reportedAt: Date.now(), nudges: 0, updatedAt: Date.now() });
     endWaits(t, isOutside, "worker 改成问你了");
-    if (h.handBack?.kind === "questions") return questionCard(h, ctx);
+    if (h.handBack?.kind === "questions") {
+      // Joined an item that still has earlier questions open: say which, so the moot ones are taken back now
+      const earlier = (h.questions ?? []).filter((q) => !q.dropped && q.answer == null).slice(0, -1);
+      const card = questionCard(h, ctx);
+      return earlier.length
+        ? { ...card, stillOpen: earlier.map((q) => `${h.id}#${q.id}「${q.title}」`), note: `这个问题和还没答的 ${earlier.map((q) => `${h.id}#${q.id}`).join("、")} 在一起等用户。哪个已经不用答了，现在就 cancel_human 它` }
+        : card;
+    }
     if (decision) h.urgent = false; // a decision can wait: no warning mark, it just sits under 等你
     // gerdrCard: Gerdr draws this result as a card in the chat, so the user sees the step where they are too
     const back = h.handBack?.kind === "secret" ? `\n\n做完要交回：密钥「${h.handBack.label || h.handBack.name}」（在看板上存，不经过对话）` : h.handBack?.kind === "value" ? `\n\n做完要交回：${h.handBack.label || "一个值"}` : "";
@@ -273,35 +291,65 @@ export function ask_human(input: any, ctx: Ctx) {
 }
 
 export function cancel_human(input: { id: string; reason: string }, ctx: Ctx) {
-  return update(ctx, (s) => {
-    const t = mine(s, ctx);
-    const [hid, qid] = String(input.id).split("#");
-    const h = find(s, hid);
-    // One question of several (t5#2): only it goes; the item stays for the rest (or goes when nothing is left)
-    if (qid && h.questions) {
-      if (h.askedBy !== t.id) throw new Error(`${hid} 不是你这个任务要的`);
-      const q = h.questions.find((x) => x.id === qid);
-      if (!q) throw new Error(`${hid} 没有第 ${qid} 个问题`);
-      q.dropped = input.reason || "撤回";
-      note(h, `worker 撤回了「${q.title}」：${input.reason}`);
-      activity(s, t, { kind: "join", by: t.id, text: `撤回了要你决定的「${q.title}」${input.reason ? `：${input.reason}` : ""}` });
-      const left = h.questions.filter((x) => !x.dropped);
-      if (!left.length) Object.assign(h, { status: "dropped", doneAt: Date.now() });
-      if (!left.length) t.blockedBy = (t.blockedBy ?? []).filter((id) => id !== h.id);
-      h.updatedAt = Date.now();
-      return { id: input.id, status: "dropped", left: left.filter((x) => !x.answer).map((x) => `${hid}#${x.id}`), gerdrCard: { title: `不用答了：${q.title}`, body: input.reason, tone: "info" } };
-    }
-    if (h.owner !== "human" || (h.askedBy !== t.id && !t.blockedBy?.includes(h.id))) throw new Error(`${h.id} 不是你这个任务要的人工步骤`);
-    if (h.status === "done") throw new Error(`${h.id} 用户已经做完了${h.handedBack ? `（交回：${h.handedBack}）` : ""}`);
-    if (h.status !== "dropped") {
-      note(h, `worker 撤回了：${input.reason}`);
-      Object.assign(h, { status: "dropped", doneAt: Date.now(), updatedAt: Date.now() });
-      // Said in the feed: the item leaving 等你 with no word was all the user saw (t55, 2026-11-05)
-      activity(s, t, { kind: "join", by: t.id, text: `撤回了要你做的 ${h.id}「${h.title}」${input.reason ? `：${input.reason}` : ""}` });
-    }
-    t.blockedBy = (t.blockedBy ?? []).filter((id) => id !== h.id);
-    return { id: h.id, status: "dropped", gerdrCard: { title: `不用做了：${h.id} ${h.title}`, body: input.reason, tone: "info" } };
-  });
+  return update(ctx, (s) => takeBack(s, mine(s, ctx), String(input.id), input.reason));
+}
+
+/** Takes back a step or one question (t5#2) that t asked the user: off their board, a line in the feed. */
+function takeBack(s: Store, t: Task, id: string, reason: string) {
+  const [hid, qid] = id.split("#");
+  const h = find(s, hid);
+  // One question of several (t5#2): only it goes; the item stays for the rest (or goes when nothing is left)
+  if (qid && h.questions) {
+    if (h.askedBy !== t.id) throw new Error(`${hid} 不是你这个任务要的`);
+    const q = h.questions.find((x) => x.id === qid);
+    if (!q) throw new Error(`${hid} 没有第 ${qid} 个问题`);
+    if (q.answer != null) throw new Error(`${id} 用户已经答了：${q.answer}`);
+    q.dropped = reason || "撤回";
+    note(h, `worker 撤回了「${q.title}」：${reason}`);
+    activity(s, t, { kind: "join", by: t.id, text: `撤回了要你决定的「${q.title}」${reason ? `：${reason}` : ""}` });
+    const left = h.questions.filter((x) => !x.dropped);
+    if (!left.length) Object.assign(h, { status: "dropped", doneAt: Date.now() });
+    if (!left.length) t.blockedBy = (t.blockedBy ?? []).filter((x) => x !== h.id);
+    h.updatedAt = Date.now();
+    return { id, status: "dropped", left: left.filter((x) => !x.answer).map((x) => `${hid}#${x.id}`), gerdrCard: { title: `不用答了：${q.title}`, body: reason, tone: "info" } };
+  }
+  if (h.owner !== "human" || (h.askedBy !== t.id && !t.blockedBy?.includes(h.id))) throw new Error(`${h.id} 不是你这个任务要的人工步骤`);
+  if (h.status === "done") throw new Error(`${h.id} 用户已经做完了${h.handedBack ? `（交回：${h.handedBack}）` : ""}`);
+  if (h.status !== "dropped") {
+    note(h, `worker 撤回了：${reason}`);
+    Object.assign(h, { status: "dropped", doneAt: Date.now(), updatedAt: Date.now() });
+    // Said in the feed: the item leaving 等你 with no word was all the user saw (t55, 2026-11-05)
+    activity(s, t, { kind: "join", by: t.id, text: `撤回了要你做的 ${h.id}「${h.title}」${reason ? `：${reason}` : ""}` });
+  }
+  t.blockedBy = (t.blockedBy ?? []).filter((x) => x !== h.id);
+  return { id: h.id, status: "dropped", gerdrCard: { title: `不用做了：${h.id} ${h.title}`, body: reason, tone: "info" } };
+}
+
+/** What t still asks the user, each with when it was asked: whole steps (t5) and open questions (t5#2). */
+export function openAsks(s: Store, t: Task) {
+  const out: { id: string; title: string; at: number }[] = [];
+  for (const h of s.tasks) {
+    if (h.owner !== "human" || h.status !== "todo" || (h.askedBy !== t.id && !t.blockedBy?.includes(h.id))) continue;
+    if (h.questions) for (const q of h.questions) if (!q.dropped && q.answer == null) out.push({ id: `${h.id}#${q.id}`, title: q.title, at: q.at ?? h.createdAt });
+    if (!h.questions) out.push({ id: h.id, title: h.title, at: h.createdAt });
+  }
+  return out;
+}
+
+/**
+ * The asks t made before the user last talked to it (in the drawer or its chat): the talk may have settled or changed
+ * them, and workers kept leaving them for the user to answer "随便选一个" (t63, 2026-11-05). Said back on its next
+ * report, so it takes them back or asks again. "" when there are none.
+ */
+export function staleAsks(s: Store, t: Task) {
+  const root = reqOf(s, t);
+  const said = Math.max(0, ...(root?.activity ?? []).filter((a) => a.kind === "user" && a.by === t.id).map((a) => a.at));
+  const old = openAsks(s, t).filter((a) => a.at < said);
+  if (!old.length) return "";
+  return (
+    `你还在问用户 ${old.map((a) => `${a.id}「${a.title}」`).join("、")}，是在你们后来的对话之前问的。` +
+    `还要问、问法也没变就不用管；不用答了就 cancel_human（说原因）；问题变了就 ask_human 带 replaces 重新问。别让用户去答一个已经过时的问题。`
+  );
 }
 
 export function my_task(input: unknown, ctx: Ctx) {
@@ -418,7 +466,8 @@ export function post_progress(input: { text: string }, ctx: Ctx) {
     if (last && last.by === t.id && last.kind === "progress" && Date.now() - last.at < 2 * 60_000) root.activity!.pop();
     activity(s, t, { by: t.id, kind: "progress", text });
     Object.assign(t, { viaTools: true, reportedAt: Date.now() });
-    return { ok: true };
+    const stale = staleAsks(s, t);
+    return stale ? { ok: true, reminder: stale } : { ok: true };
   });
 }
 export async function hand_back(input: { event: string; reason: string }, ctx: Ctx) {

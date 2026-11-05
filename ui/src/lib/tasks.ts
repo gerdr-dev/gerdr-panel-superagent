@@ -51,7 +51,9 @@ export type Task = {
   helpers?: { id: string; title: string; status: string; waiting?: string; waitingKind?: "permission" | "ask"; /** waits on the user (an approval, or a question its worker left) */ left?: boolean }[];
   said?: string;
   nudges?: number;
-  questions?: { id: string; title: string; kind: "choice" | "value"; options?: string[]; multi?: boolean; label?: string; steps?: string; answer?: string; dropped?: string }[];
+  questions?: { id: string; title: string; kind: "choice" | "value"; options?: string[]; multi?: boolean; label?: string; steps?: string; answer?: string; dropped?: string; at?: number }[];
+  /** When the user asked its worker to bring this ask up to date (tasks.refreshAsk). */
+  refreshing?: number;
   handedBack?: string;
   verify?: string;
   minutes?: number;

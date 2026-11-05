@@ -537,6 +537,34 @@ export async function say(input: { id: string; text: string }, ctx: Ctx) {
 }
 
 /**
+ * 按最新情况更新: a question the user is asked was put before they and its worker talked on, and may be moot or
+ * different now. { id: the step / question item (t5) }. Its worker is woken to ask it again as things stand (ask_human
+ * with replaces: it then shows at the bottom of the feed) or take it back; the user doesn't scroll up to answer an old
+ * version of it.
+ */
+export async function refreshAsk(input: { id: string }, ctx: Ctx) {
+  const { store } = load(ctx);
+  const h = find(store, input.id);
+  if (h.owner !== "human" || h.status !== "todo") throw new Error(`${h.id} 已经不在等你了`);
+  const w = store.tasks.find((x) => x.id === h.askedBy) ?? store.tasks.find((x) => x.blockedBy?.includes(h.id));
+  if (!w?.session) throw new Error(`找不到问这个的 worker`);
+  const qs = (h.questions ?? []).filter((q) => !q.dropped && q.answer == null);
+  const ids = qs.length ? qs.map((q) => `${h.id}#${q.id}「${q.title}」`).join("、") : `${h.id}「${h.title}」`;
+  update(ctx, (s) => Object.assign(find(s, h.id), { refreshing: Date.now() }));
+  await wake(ctx, w.id, {
+    how: "你请它更新问题",
+    text:
+      `[看板] 用户请你把还在问他的 ${ids} 按现在的情况更新：这些是在你们后来的对话之前问的。\n` +
+      `- 还要问但问法变了：ask_human 带 replaces（写上旧的 id）重新问，写清现在的情况和选项；\n` +
+      `- 已经不用问了：cancel_human，说明原因；\n` +
+      `- 还是原样要问：不用改，用 post_progress 说一句「这个问题还是要你定」。\n做完就结束这一轮。`,
+    resume: true,
+    feed: `你请 ${w.repo?.split("/").pop() || w.id} 按最新情况更新 ${h.id}`,
+  });
+  return { sent: w.id };
+}
+
+/**
  * The user writes to members of a requirement from its drawer, as in a chat: { id (any task of the card), to: [member
  * ids], text, attachments?: [{ path, name }] }. Each one gets it right away (now, even mid-step) and picks the task up
  * again if it had ended; the feed has one line for it. Several at once are each told who else got it, so they don't
