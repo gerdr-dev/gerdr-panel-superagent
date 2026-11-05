@@ -220,6 +220,7 @@ async function brief(ctx: Ctx): Promise<string> {
     `## 一条命令给出这一批全部的决定\n` +
       `gerdr panel run superagent.decide '${ex({ decisions: [{ item: "t12", parts: [{ repo: "/绝对路径" }] }, { item: "c3", decision: "accept", title: "十几个字的标题", parts: [{ repo: "/绝对路径" }] }, { item: "c4", decision: "ignore", reason: "道谢" }] })}'\n\n` +
       `- attach：${ex({ item: "c5", decision: "attach", task: "t9" })}；stop：${ex({ item: "c6", decision: "stop", task: "t9", reason: "…" })}\n` +
+      `- 看板任务也能 stop / attach（它是在管别的任务）：停掉 t9、t12 本身派去交接 ${ex({ item: "t12", decision: "stop", task: "t9", reason: "…", parts: [{ repo: "/绝对路径" }] })}；不带 parts 就只停，t12 算完成。attach 把 t12 的话转给 t9，t12 算完成。\n` +
       `- parts 每项一份活：repo 必填；agent、model、effort 不写就用下面的默认，简单的活可以给便宜的模型；worktree 默认 false。\n` +
       `- 只有一份：就是这件事本身，不用写 prompt。拆成几份并行（用户 @ 了几个 agent，或者活明显能分开做）：每份写 title（十几个字）和 prompt（这一份做什么、和别的份怎么配合）；同一个仓库有两份以上时都写 "worktree": true。\n` +
       `- 几份是同一个需求、要互相配合（前端接后端的新接口）：加 "team": true，成了一张卡片、几个成员，第一份是负责人，成员之间直接对话，不经过你。互不相干的几件事不加，各是一张卡。看不出要动别的仓库就只派一份，worker 发现了会自己拉队友。\n` +

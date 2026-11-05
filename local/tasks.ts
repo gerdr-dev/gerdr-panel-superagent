@@ -190,7 +190,7 @@ const STOPPED_ASK = "Worker 停下了，但没在看板上汇报进展";
 const ENDING = /^(这一轮结束：|Turn ended: |出错：|Error: )/;
 
 /** The worker's last paragraph, whitespace folded, its end kept when long (the card shows two lines). */
-function lastWords(reply: string) {
+export function lastWords(reply: string) {
   const ps = reply.split(/\n\s*\n/).map((p) => p.replace(/\s+/g, " ").trim()).filter((p) => p && !ENDING.test(p));
   const p = ps[ps.length - 1] ?? "";
   return [...p].length > 240 ? "…" + [...p].slice(-240).join("") : p;

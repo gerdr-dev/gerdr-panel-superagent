@@ -1,7 +1,7 @@
 // The Superagent's decisions and its log: what the main session calls (decide) and what the page reads (log,
 // retry). How it works is in _main.ts; why, in DESIGN.md「Superagent」.
 
-import { add, dispatch, drop } from "./tasks";
+import { add, dispatch, drop, edit, lastWords, say } from "./tasks";
 import { find, load, update, type Task } from "./_store";
 import { evaluate, findItem, followUp, mainId, state, updateState, type Item } from "./_main";
 import { workflow } from "./_config";
@@ -32,11 +32,7 @@ export async function decide(input: { decisions: Decision[] }, ctx: Ctx) {
 }
 
 async function one(d: Decision, ctx: Ctx) {
-  if (/^t\d+$/.test(d?.item ?? "")) {
-    if (!d.parts?.length) throw new Error("看板上的任务要给 parts");
-    const out = (await dispatch({ id: d.item, title: d.title, parts: d.parts, team: d.team }, ctx)) as Task[];
-    return { item: d.item, tasks: out.map((t) => t.id) };
-  }
+  if (/^t\d+$/.test(d?.item ?? "")) return boardTask(d, ctx);
   const it = findItem(state(ctx), d?.item ?? "");
   if (it.state !== "pending" && it.state !== "unavailable") throw new Error(`已经处理过了（${it.state}）`);
   const e = it.event;
@@ -85,6 +81,73 @@ async function one(d: Decision, ctx: Ctx) {
     default:
       throw new Error(`decision 是 accept / attach / stop / ignore 之一，不是「${d.decision ?? ""}」`);
   }
+}
+
+/**
+ * A board task. Usually work to send out (parts). Sometimes the user is steering the board itself in it: "关闭 t11，
+ * 新建一个任务来交接", "t9 顺便把 X 也做了". Until 2026-11-05 a board task could only be sent out, so the router,
+ * told to stop t11, sent out a worker "to take over t11" and left t11 running (t52). Now, as for a message:
+ * - stop (task, reason): that task is dropped. With parts this task is sent out as its handover (told what the dropped
+ *   one was doing and where its conversation is); without, this task is done (it was only the instruction).
+ * - attach (task): this task's words go to that task's worker; this one is done.
+ * No ignore: the user wrote it on their own board, so it's meant; what's unclear is asked, not dropped.
+ */
+async function boardTask(d: Decision, ctx: Ctx) {
+  const self = find(load(ctx).store, d.item);
+  if (self.status !== "todo") throw new Error(`${self.id} 已经${self.status === "dropped" ? "放弃了" : "派出去了"}`);
+  const send = async () => ((await dispatch({ id: self.id, title: d.title, parts: d.parts!, team: d.team }, ctx)) as Task[]).map((t) => t.id);
+  const finish = (summary: string) =>
+    edit({ id: self.id, status: "done", routing: undefined, summary, doneAt: Date.now(), ...(d.title ? { title: d.title } : {}) }, ctx);
+  switch (d.decision ?? "accept") {
+    case "accept":
+      if (!d.parts?.length) throw new Error("看板上的任务要派出去就给 parts；它是在停 / 并进别的任务就写 decision: stop / attach 和 task");
+      return { item: self.id, tasks: await send() };
+    case "stop": {
+      const t = other(ctx, self, d.task);
+      if (!d.reason) throw new Error("stop 要写 reason");
+      const said = lastWords(String((t.session && ctx.sessions.get(t.session)?.reply) ?? ""));
+      await drop({ id: t.id, reason: `你在 ${self.id} 里说停：${d.reason}` }, ctx);
+      if (!d.parts?.length) {
+        finish(`停了 ${t.id}「${t.title}」`);
+        return { item: self.id, stopped: t.id };
+      }
+      edit({ id: self.id, from: t.id, prompt: `${self.prompt ?? self.title}\n\n${handover(t, said)}` }, ctx);
+      return { item: self.id, stopped: t.id, tasks: await send() };
+    }
+    case "attach": {
+      const t = other(ctx, self, d.task);
+      const files = self.attachments?.length ? `\n附件：\n${self.attachments.map((a) => `- ${a.name}：${a.path}`).join("\n")}` : "";
+      const text = `用户在看板上补充（${self.id}）：${self.prompt ?? self.title}${files}`;
+      if (t.session) await say({ id: t.id, text }, ctx);
+      // Not sent out yet: it becomes part of what its worker is told
+      else edit({ id: t.id, prompt: `${t.prompt ?? t.title}\n\n${text}`, attachments: [...(t.attachments ?? []), ...(self.attachments ?? [])] }, ctx);
+      finish(`并进了 ${t.id}「${t.title}」`);
+      return { item: self.id, tasks: [t.id] };
+    }
+    default:
+      throw new Error(`看板上的任务 decision 是 accept / stop / attach 之一，不是「${d.decision}」`);
+  }
+}
+
+/** The task a board task acts on: another one, still alive. */
+function other(ctx: Ctx, self: Task, id?: string) {
+  if (id === self.id) throw new Error(`task 是它要停 / 并进的那个任务，不是 ${self.id} 自己`);
+  return live(ctx, id);
+}
+
+/** What a handover worker is told about the task it takes over: what it was for, how far it got, where to read more. */
+function handover(t: Task, said: string) {
+  return [
+    `## 交接：接手 ${t.id}「${t.title}」（它已停掉）`,
+    `它要做的：${t.request ?? t.prompt ?? t.title}`,
+    t.repo && `它的仓库：${t.repo}${t.worktree ? "（在 worktree 里，改动可能还在那个分支上）" : ""}`,
+    t.summary && `它最后的进展：${t.summary}`,
+    t.links?.length && `它的产物：\n${t.links.map((l) => `- ${l.label}：${l.url}`).join("\n")}`,
+    said && `它最后说：${said}`,
+    t.session && `它做到哪、试过什么，读它的对话：gerdr session read ${t.session}。先接着它的进度做，别从头再来。`,
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 /**
