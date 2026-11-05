@@ -13,7 +13,7 @@ import { SettingsSheet, TABS, type SettingsTab } from "../components/SettingsShe
 import { phoneMenu, usePhoneMenu } from "../lib/phoneMenu";
 import { ago, day, since, type Task, useTasks, waitedSince } from "../lib/tasks";
 import { project, run } from "../lib/gerdr";
-import { onShowSession } from "@gerdr/core";
+import { DefaultCard, onShowSession } from "@gerdr/core";
 import { isSubmitEnter } from "../lib/utils";
 import { Md } from "../lib/markdown";
 import { usePhone, useSwipePages } from "../lib/swipe";
@@ -1406,6 +1406,49 @@ function teamNeeds(t: Task, tasks: Task[]) {
 }
 
 /**
+ * A step / decision as the chat's card draws it (local/board.ts ask_human and questionCard): Gerdr's built-in card,
+ * answered through the same functions. One per question still open; the ones answered while others wait as a line.
+ * Null for what that card can't do — a secret (Gerdr's password dialog on the board), an expired link to redo.
+ */
+function askCards(h: Task): Record<string, unknown>[] | null {
+  const kind = h.handBack?.kind ?? "none";
+  if (kind === "secret" || (h.expiresAt && h.expiresAt < Date.now())) return null;
+  if (kind === "questions") {
+    const qs = (h.questions ?? []).filter((q) => !q.dropped);
+    const out: Record<string, unknown>[] = [];
+    qs.forEach((q, i) => {
+      const choice = q.kind === "choice";
+      out.push({
+        ref: `${h.id}#${q.id}`,
+        kicker: `${choice ? "等你决定" : "要你给"} · ${h.id}${qs.length > 1 ? ` · 第 ${i + 1} / ${qs.length} 个` : ""}${q.answer ? ` · 已答：${q.answer}` : ""}`,
+        title: q.title,
+        body: [q.steps, !choice && q.label ? `要交回：${q.label}` : ""].filter(Boolean).join("\n\n") || undefined,
+        tone: "info",
+        choose: q.answer ? undefined : { project, fn: "tasks.answerQuestion", input: { id: h.id, q: q.id }, field: "value", options: q.options ?? [], multi: q.multi, other: true },
+      });
+    });
+    return out;
+  }
+  const left = h.expiresAt ? `（${Math.round((h.expiresAt - Date.now()) / 60000)} 分钟内有效）` : "";
+  const choose =
+    kind === "choice"
+      ? { project, fn: "tasks.complete", input: { id: h.id }, field: "value", options: h.handBack?.options ?? [], multi: h.handBack?.multi, other: true }
+      : kind === "value"
+        ? { project, fn: "tasks.complete", input: { id: h.id }, field: "value", options: [], other: true }
+        : { project, fn: "tasks.complete", input: { id: h.id }, field: "value", options: ["做完了"], other: false };
+  return [
+    {
+      ref: h.id,
+      kicker: `${kind === "choice" ? "等你决定" : "要你做"} · ${h.id}${left}`,
+      title: h.title,
+      body: [h.steps, kind === "value" ? `做完要交回：${h.handBack?.label || "一个值"}` : "", h.verify ? `做完后 agent 会核验：${h.verify}` : ""].filter(Boolean).join("\n\n") || undefined,
+      tone: kind === "choice" ? "info" : "warn",
+      choose,
+    },
+  ];
+}
+
+/**
  * A member waiting on the user with a question of its own (its words), not one of the board's states: an approval, an
  * error, a session it started, a stop — or the board's old ask about a stop.
  */
@@ -1589,16 +1632,22 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
   const row = (x: FeedItem) => {
     if (x.type === "ask") {
       const m = who(x.h.askedBy) ?? ms.find((y) => y.blockedBy?.includes(x.h.id));
+      const cards = askCards(x.h);
       return (
         <div className="flex gap-2">
           <Avatar m={m} lead={m?.id === t.id} />
           <div className="min-w-0 flex-1 space-y-1">
             {head(m, x.h.handBack?.kind === "choice" || x.h.questions ? "要你决定" : "要你做", x.at, "text-warn")}
-            <div className="rounded-lg rounded-tl-sm border border-warn/50 bg-card p-3">
-              <InFeed.Provider value>
-                <HumanCard t={x.h} byId={byId} act={act} onGo={onGo} />
-              </InFeed.Provider>
-            </div>
+            {cards ? (
+              // The same card as in its chat (Gerdr's built-in one): answered right here, one card per question
+              cards.map((c) => <DefaultCard key={String(c.ref)} card={c as any} />)
+            ) : (
+              <div className="rounded-lg rounded-tl-sm border border-warn/50 bg-card p-3">
+                <InFeed.Provider value>
+                  <HumanCard t={x.h} byId={byId} act={act} onGo={onGo} />
+                </InFeed.Provider>
+              </div>
+            )}
           </div>
         </div>
       );
