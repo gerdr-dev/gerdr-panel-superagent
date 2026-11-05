@@ -143,11 +143,15 @@
 .shimmer {
   -webkit-mask-image: linear-gradient(90deg, rgb(0 0 0 / 0.45) calc(50% - 16px), #000 50%, rgb(0 0 0 / 0.45) calc(50% + 16px));
   mask-image: linear-gradient(90deg, rgb(0 0 0 / 0.45) calc(50% - 16px), #000 50%, rgb(0 0 0 / 0.45) calc(50% + 16px));
-  -webkit-mask-size: 250% 100%;
-  mask-size: 250% 100%;
+  /* Wider than the text by its own width plus 32px: the band (centre of the mask, 16px each side) then starts 32px
+     before the text and ends 32px past it, so both ends of a loop are the plainly dim label and the restart doesn't
+     show. A size in % alone (as in .gerdr-shimmer) leaves part of the band on a short label like 在等 at the ends,
+     and it jumps from one side to the other. */
+  -webkit-mask-size: calc(200% + 64px) 100%;
+  mask-size: calc(200% + 64px) 100%;
   -webkit-mask-repeat: no-repeat;
   mask-repeat: no-repeat;
-  animation: shimmer 2s linear infinite;
+  animation: shimmer 1.6s linear infinite;
 }
 @keyframes shimmer {
   from {
