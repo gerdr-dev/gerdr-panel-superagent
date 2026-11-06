@@ -87,19 +87,32 @@ export type Task = {
 export function useTasks() {
   const [tasks, setTasks] = useState<Task[] | null>(null);
   const [error, setError] = useState("");
-  const busy = useRef(false);
-  const reload = useCallback(async () => {
-    if (busy.current) return;
-    busy.current = true;
-    try {
-      const r = await run<{ tasks: Task[] }>("tasks.list");
-      setTasks(r.tasks);
-      setError("");
-    } catch (e: any) {
-      setError(String(e.message || e));
-    } finally {
-      busy.current = false;
+  // One tasks.list at a time; a reload asked for meanwhile runs once more right after, and its caller waits for that
+  // one. It used to be dropped: on a phone (each call a round trip through the relay) the reload after sending a
+  // message hit the one still in flight and the message showed up only with the next 5 s poll (2026-11-06).
+  const inflight = useRef<Promise<void> | null>(null);
+  const again = useRef(false);
+  const reload = useCallback(() => {
+    if (inflight.current) {
+      again.current = true;
+      return inflight.current;
     }
+    const go = async () => {
+      do {
+        again.current = false;
+        try {
+          const r = await run<{ tasks: Task[] }>("tasks.list");
+          setTasks(r.tasks);
+          setError("");
+        } catch (e: any) {
+          setError(String(e.message || e));
+        }
+      } while (again.current);
+    };
+    inflight.current = go().finally(() => {
+      inflight.current = null;
+    });
+    return inflight.current;
   }, []);
   const data = usePanelChange("user/data");
   const watched = useMemo(() => {

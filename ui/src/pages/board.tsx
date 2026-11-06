@@ -1750,7 +1750,7 @@ function userText(text: string) {
 }
 
 /** What the feed's rows are in FeedChat: its items, plus who's working now and the router rearranging, at the end. */
-type FeedRow = FeedEntry & ({ type: "item"; x: FeedItem } | { type: "working"; ms: Task[] } | { type: "reroute" } | { type: "empty" });
+type FeedRow = FeedEntry & ({ type: "item"; x: FeedItem } | { type: "working"; ms: Task[] } | { type: "reroute" } | { type: "empty" } | { type: "sending" });
 
 function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Task[]; byId: Record<string, Task>; act: Act; onClose: () => void; onGo: (id: string) => void }) {
   const { busy, err, go } = useAction(act);
@@ -1779,10 +1779,14 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
   const box = useRef<HTMLDivElement>(null);
   const [jumpTo, setJumpTo] = useState<{ key: string; seq: number }>();
   const working = ms.filter((m) => m.live?.status === "running");
+  const [outbox, setOutbox] = useState<{ key: string; at: number; text: string; files: { path: string; name?: string }[] }[]>([]);
   const rows: FeedRow[] = [
     ...items.map((x): FeedRow => (x.type === "act" && x.a.kind === "user" ? { key: x.key, at: x.at, type: "item", x, user: { text: userText(x.a.text), files: x.a.files } } : { key: x.key, at: x.at, type: "item", x })),
     ...(!items.length ? [{ key: "empty", at: t.createdAt, type: "empty" as const }] : []),
     ...(t.reroute ? [{ key: "reroute", at: Date.now(), type: "reroute" as const }] : []),
+    // What the user just sent, shown at once as their message until the board has it as a line (a phone's round trips
+    // through the relay took seconds, and the box emptied with nothing in the feed meanwhile)
+    ...outbox.map((o): FeedRow => ({ key: o.key, at: o.at, type: "sending", user: { text: o.text, files: o.files } })),
     // Who's on it right now, like the chat's "working…" line: always last
     ...(working.length && !over ? [{ key: `working:${working.map((m) => m.id).join(",")}`, at: Date.now(), type: "working" as const, ms: working }] : []),
   ];
@@ -2043,7 +2047,14 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
     if (!live.length) throw new Error("还没有成员在做：等调度派出去再发");
     const to = mentionsOf(text, people);
     if (live.length > 1 && !to.length) throw new Error("有几个成员：@ 选发给谁（可以 @ 几个）");
-    await act("message", { id: t.id, to: live.length > 1 ? to.map((a) => a.id) : undefined, text, attachments: files });
+    const o = { key: `sending:${Date.now()}`, at: Date.now(), text, files };
+    setOutbox((x) => [...x, o]);
+    try {
+      // act refreshes the board before it returns: the real line is in the feed by the time this one goes
+      await act("message", { id: t.id, to: live.length > 1 ? to.map((a) => a.id) : undefined, text, attachments: files });
+    } finally {
+      setOutbox((x) => x.filter((y) => y !== o));
+    }
   };
   const hint = (text: string) => {
     if (!live.length) return null;
