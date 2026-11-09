@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlarmClock, Check, Hourglass, MessageSquare, Pencil, SquareTerminal, Undo2, Users } from "lucide-react";
+import { Activity, AlarmClock, Check, Hourglass, MessageSquare, Pencil, SquareTerminal, Undo2, Users } from "lucide-react";
 import { DefaultCard, registerCard, type CardProps } from "@gerdr/core";
 import { run } from "./lib/gerdr";
 
@@ -93,6 +93,24 @@ function TaskTakenBack({ card }: CardProps) {
 }
 
 registerCard("task-taken-back", TaskTakenBack);
+
+/**
+ * A line of progress the worker put on the board (post_progress): shown in its chat as what the board's feed now says,
+ * so the user sees it where they are instead of a folded tool row. A record, not something waiting: no pulse, no state.
+ */
+function TaskProgress({ card }: CardProps) {
+  return (
+    <div className="my-1.5 rounded-lg border border-l-2 border-l-brand bg-card px-3 py-2">
+      <div className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+        <Activity className="size-3.5 shrink-0" />
+        <span>{card.kicker ?? "更新进度"}</span>
+      </div>
+      <p className="mt-1 whitespace-pre-wrap text-[13px]">{card.title}</p>
+    </div>
+  );
+}
+
+registerCard("task-progress", TaskProgress);
 
 /** One thing that wakes it (local/_waits.ts wakeItem). */
 type Wake = { kind: string; text: string; code?: string };

@@ -491,7 +491,10 @@ export function post_progress(input: { text: string }, ctx: Ctx) {
     activity(s, t, { by: t.id, kind: "progress", text });
     Object.assign(t, { viaTools: true, reportedAt: Date.now() });
     const stale = staleAsks(s, t);
-    return stale ? { ok: true, reminder: stale } : { ok: true };
+    // gerdrCard: the line it put on the board, drawn in its chat too — a folded "called post_progress" row hid what
+    // the user would read on the board
+    const gerdrCard = { type: "task-progress", ref: `${t.id}:progress:${Date.now()}`, project: ctx.workspace.project, task: t.id, kicker: `更新进度 · ${t.id}`, title: text, tone: "info" };
+    return stale ? { ok: true, reminder: stale, gerdrCard } : { ok: true, gerdrCard };
   });
 }
 export async function hand_back(input: { event: string; reason: string }, ctx: Ctx) {
