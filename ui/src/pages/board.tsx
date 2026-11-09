@@ -2071,6 +2071,8 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
   };
   const feedRow = (r: FeedRow) => {
     if (r.type === "item") return row(r.x);
+    // Drawn by FeedChat as the user's own message (it has `user`): nothing of the drawer's
+    if (r.type === "sending") return null;
     if (r.type === "empty")
       return <p className="py-8 text-center text-[12px] text-muted-foreground">{t.createdAt < FEEDS_SINCE ? "这是有活动记录之前的任务：看上面的「最新」，或点头像看对话" : "还没有活动"}</p>;
     if (r.type === "reroute")

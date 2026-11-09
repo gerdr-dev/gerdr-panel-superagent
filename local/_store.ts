@@ -304,7 +304,7 @@ export function activity(s: Store, t: Task, a: Omit<Activity, "at">) {
   const root = reqOf(s, t);
   if (!root) return;
   root.activity = [...(root.activity ?? []), { at: Date.now(), ...a }].sort((x, y) => x.at - y.at).slice(-KEEP_ACTIVITY);
-  // Not root.updatedAt: the line is the writing member's, and the root may be another computer's part. The board
+  // Not root.updatedAt: the line is the writing member's, and the root is another member's part. The board
   // works out a card's last change from its members and feed (tasks.ts teams)
 }
 
