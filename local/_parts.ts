@@ -95,6 +95,11 @@ export function readAll(ctx: Ctx, rootOf: RootOf): Loaded {
  * and the writes aren't one step, but two runs writing the same part in that instant is the only way to lose one.
  */
 export function writeChanged(ctx: Ctx, loaded: Loaded, next: { parts: Record<string, string>; meta: string }): boolean | "same" {
+  // A part whose tasks all went elsewhere (a step that was its own part, then blocked an agent task and went with it):
+  // written empty, or its old copy of them would come back on the next read beside the new one
+  const parts = { ...next.parts };
+  for (const k of Object.keys(loaded.files)) if (!(k in parts) && loaded.files[k].text !== emptyText(k)) parts[k] = emptyText(k);
+  next = { ...next, parts };
   const changed = Object.keys(next.parts).filter((k) => next.parts[k] !== loaded.files[k]?.text);
   const metaChanged = next.meta !== loaded.meta?.text;
   if (!changed.length && !metaChanged) return "same";
@@ -107,6 +112,8 @@ export function writeChanged(ctx: Ctx, loaded: Loaded, next: { parts: Record<str
   if (metaChanged) ctx.fs.write(META, next.meta, loaded.meta ? { etag: loaded.meta.etag } : undefined);
   return true;
 }
+
+const emptyText = (id: string) => JSON.stringify({ id, tasks: [], activity: [] } satisfies PartFile, null, 2) + "\n";
 
 /** Once: the single tasks.json of before becomes part files; it is kept as tasks.json.bak. */
 function moveOld(ctx: Ctx) {
