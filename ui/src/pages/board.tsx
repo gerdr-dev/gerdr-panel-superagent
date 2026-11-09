@@ -1750,6 +1750,8 @@ function userText(text: string) {
 }
 
 /** What the feed's rows are in FeedChat: its items, plus who's working now and the router rearranging, at the end. */
+type Tab = "feed" | "info";
+
 type FeedRow = FeedEntry & ({ type: "item"; x: FeedItem } | { type: "working"; ms: Task[] } | { type: "reroute" } | { type: "empty" } | { type: "sending" });
 
 function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Task[]; byId: Record<string, Task>; act: Act; onClose: () => void; onGo: (id: string) => void }) {
@@ -1764,7 +1766,8 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
   const { steps, stuck } = teamNeeds(t, tasks);
   const over = t.status === "done" || t.status === "dropped";
   const request = (t.request ?? t.prompt ?? "").trim();
-  const [unfold, setUnfold] = useState(false);
+  // 动态 (the feed, where the drawer opens), 详情 (the request as written, the latest, links): one at a time under a short header, so a phone keeps the feed in view
+  const [tab, setTab] = useState<Tab>("feed");
   const files = t.attachments ?? [];
   const link = (p: string) => (/[\s()]/.test(p) ? `<${p}>` : p);
   const requestMd = [request, ...files.map((a) => (a.mime?.startsWith("image/") || /\.(png|jpe?g|gif|webp)$/i.test(a.path) ? `![${a.name}](${link(a.path)})` : `[${a.name}](${link(a.path)})`))].filter(Boolean).join("\n\n");
@@ -2122,44 +2125,12 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
             <X className="size-4" />
           </Button>
         </div>
-        {/* What it is and who's on it: stays put while the feed scrolls */}
-        <div className="space-y-2 border-b px-4 py-3">
-          <h3 className="text-[15px] font-medium">{t.title}</h3>
-          {((request && request !== t.title) || files.length > 0) && (
-            <div className="text-[12px] text-muted-foreground">
-              {/* Unfolded: what the user wrote as they wrote it, with the images they pasted (Gerdr's Markdown draws ![](path)) */}
-              {unfold ? (
-                <Md className="max-h-[50vh] overflow-y-auto text-[13px] text-foreground/90">{requestMd}</Md>
-              ) : (
-                <p className="line-clamp-2 whitespace-pre-wrap">
-                  {request !== t.title ? request : ""}
-                  {files.length > 0 && <span className="text-muted-foreground/80">{request !== t.title && request ? " · " : ""}{files.length} 个附件</span>}
-                </p>
-              )}
-              {(request.length > 80 || request.includes("\n") || files.length > 0) && (
-                <button className="mt-0.5 text-brand hover:underline" onClick={() => setUnfold(!unfold)}>
-                  {unfold ? "收起" : "展开原始需求"}
-                </button>
-              )}
-            </div>
-          )}
-          {t.summary && (
-            // What its lead last reported: for a task from before feeds, the only account of where it stands
-            <p className="line-clamp-3 text-[12px] whitespace-pre-wrap">
-              <span className="text-muted-foreground">最新：</span>
-              {t.summary}
-            </p>
-          )}
-          {ms.some((m) => m.links?.length) && (
-            <details className="text-[12px]">
-              <summary className="cursor-pointer text-muted-foreground">产物 · {ms.reduce((n, m) => n + (m.links?.length ?? 0), 0)}</summary>
-              <div className="mt-1.5 space-y-2">
-                {ms.map((m) => (
-                  <Links key={m.id} t={m} />
-                ))}
-              </div>
-            </details>
-          )}
+        {/* What it is and who's on it: stays put while the feed scrolls. Kept short (2026-11-06: request, latest,
+            artifacts and members above the feed left a phone no room for the feed): the rest is under 详情 */}
+        <div className="space-y-2 border-b px-4 pt-3">
+          <h3 className="line-clamp-2 text-[15px] font-medium" title={t.title}>
+            {t.title}
+          </h3>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
             {ms.map((m) => (
               <span key={m.id} className="inline-flex items-center gap-1.5 text-[12px]" title={m.title}>
@@ -2169,7 +2140,48 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
               </span>
             ))}
           </div>
+          <div className="-mb-px flex gap-4 text-[13px]">
+            {(
+              [
+                ["feed", "动态"],
+                ["info", "详情"],
+              ] as [Tab, string][]
+            ).map(([k, label]) => (
+              <button
+                key={k}
+                onClick={() => setTab(k)}
+                className={clsx("border-b-2 pb-2 transition-colors", tab === k ? "border-foreground font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
+        {tab === "info" && (
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-3 text-[13px]">
+            {t.summary && (
+              <section className="space-y-1">
+                <h4 className="text-[12px] text-muted-foreground">最新进展</h4>
+                <p className="whitespace-pre-wrap">{t.summary}</p>
+              </section>
+            )}
+            <section className="space-y-1">
+              <h4 className="text-[12px] text-muted-foreground">原始需求{files.length > 0 ? ` · ${files.length} 个附件` : ""}</h4>
+              {/* What the user wrote as they wrote it, with the images they pasted (Gerdr's Markdown draws ![](path)) */}
+              <Md className="text-[13px] text-foreground/90">{requestMd || t.title}</Md>
+            </section>
+            {ms.some((m) => m.links?.length) && (
+              <section className="space-y-1.5">
+                <h4 className="text-[12px] text-muted-foreground">产物链接</h4>
+                {ms.map((m) => (
+                  <Links key={m.id} t={m} />
+                ))}
+              </section>
+            )}
+          </div>
+        )}
+        {/* The feed stays mounted under the other tabs: its scroll place, draft and jumps carry on */}
+        <div className={clsx("flex min-h-0 flex-1 flex-col", tab !== "feed" && "hidden")}>
         {FeedChat ? (
           // The feed as a chat (Gerdr's FeedChat): members' lines drawn here, the user's as their own messages, its input
           // box writing to the members (one without @, several by @)
@@ -2238,6 +2250,7 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
           {t.status !== "dropped" && <FeedComposer t={t} ms={ms} act={act} />}
           </>
         )}
+        </div>
         <div className="flex flex-wrap items-center justify-end gap-2 border-t px-4 py-2.5">
           {err && <p role="alert" className="mr-auto text-[12px] text-bad">{err}</p>}
           {rejecting && (
