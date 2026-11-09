@@ -7,6 +7,7 @@ import { applyBlock } from "./_apply";
 import { activity, find, load, memberName, members, note, reqOf, teamOf, update, type Store, type Task } from "./_store";
 import { handBack } from "./_main";
 import { waitCard } from "./waits";
+import { eventCard } from "./_cards";
 import { endWaits, isOutside, open, question } from "./_waits";
 import { wake } from "./_wake";
 import { add } from "./tasks";
@@ -201,7 +202,11 @@ export async function task_update(input: { state: string; summary?: string; link
     }
     const fresh = open(t).filter((w) => isOutside(w) && !before.has(w.id));
     const stale = staleAsks(s, t);
-    return { id: t.id, status: t.status, column: question(t) ? "等你" : t.status, ...(stale ? { reminder: stale } : {}), ...(fresh.length ? { gerdrCard: waitCard(ctx, t, fresh) } : {}) };
+    // One card per call: a wait it just started is what's next, so that one; otherwise what it changed on the card
+    const kind = state === "review" || state === "done" ? state : "working";
+    const said = input.summary?.trim() || (kind === "review" ? "有结论了，等你看" : kind === "done" ? "做完了" : "");
+    const gerdrCard = fresh.length ? waitCard(ctx, t, fresh) : said || input.links?.length ? eventCard(ctx, t.id, kind, said || "加了链接", { links: input.links }) : undefined;
+    return { id: t.id, status: t.status, column: question(t) ? "等你" : t.status, ...(stale ? { reminder: stale } : {}), ...(gerdrCard ? { gerdrCard } : {}) };
   });
   await closeSessions(ctx, closing);
   return out;
@@ -434,7 +439,7 @@ export async function add_teammate(input: { repo: string; title?: string; prompt
     ctx,
   )) as Task;
   update(ctx, (s) => activity(s, find(s, m.id), { by: t.id, to: m.id, kind: "join", text: `拉了 ${memberName(m)} 进来：${m.title}` }));
-  return { id: m.id, title: m.title, note: `${m.id} 已经开始做了。它会直接 tell 你；你要等它的结果就 wait_for {"type":"teammate","who":"${m.id}"}，然后结束这一轮。` };
+  return { id: m.id, title: m.title, gerdrCard: eventCard(ctx, t.id, "join", `${memberName(m)}：${m.title}`), note: `${m.id} 已经开始做了。它会直接 tell 你；你要等它的结果就 wait_for {"type":"teammate","who":"${m.id}"}，然后结束这一轮。` };
 }
 
 export async function tell(input: { to: string; text: string; summary?: string }, ctx: Ctx) {
@@ -476,7 +481,7 @@ export async function tell(input: { to: string; text: string; summary?: string }
     ends: isOutside,
     resume: true,
   });
-  return { sent: to.id, note: `已送到 ${memberName(to)}。要等它回话：wait_for {"type":"teammate","who":"${to.id}"}，然后结束这一轮。` };
+  return { sent: to.id, gerdrCard: eventCard(ctx, from.id, "tell", `给 ${memberName(to)}：${input.summary?.trim() || text}`), note: `已送到 ${memberName(to)}。要等它回话：wait_for {"type":"teammate","who":"${to.id}"}，然后结束这一轮。` };
 }
 
 export function post_progress(input: { text: string }, ctx: Ctx) {
@@ -493,7 +498,7 @@ export function post_progress(input: { text: string }, ctx: Ctx) {
     const stale = staleAsks(s, t);
     // gerdrCard: the line it put on the board, drawn in its chat too — a folded "called post_progress" row hid what
     // the user would read on the board
-    const gerdrCard = { type: "task-progress", ref: `${t.id}:progress:${Date.now()}`, project: ctx.workspace.project, task: t.id, kicker: `更新进度 · ${t.id}`, title: text, tone: "info" };
+    const gerdrCard = eventCard(ctx, t.id, "progress", text);
     return stale ? { ok: true, reminder: stale, gerdrCard } : { ok: true, gerdrCard };
   });
 }
@@ -501,7 +506,8 @@ export async function hand_back(input: { event: string; reason: string }, ctx: C
   const { store } = load(ctx);
   const t = mine(store, ctx);
   if (!input?.reason?.trim()) throw new Error("写一句为什么不是这个任务的事");
-  return handBack(ctx, t.id, input.event, input.reason.trim(), store.tasks);
+  const r = await handBack(ctx, t.id, input.event, input.reason.trim(), store.tasks);
+  return { ...r, gerdrCard: eventCard(ctx, t.id, "handBack", input.reason.trim()) };
 }
 
 /**

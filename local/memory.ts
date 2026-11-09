@@ -4,6 +4,7 @@
 import { workflow } from "./_config";
 import { addLine, editMemory, GENERAL, MEMORY, nameOf, pathOf, readMemory } from "./_memory";
 import { load } from "./_store";
+import { eventCard } from "./_cards";
 
 export const tools = {
   remember: {
@@ -43,11 +44,12 @@ export function remember(input: { text?: string; repo?: string; replaces?: strin
   const repo = (input?.repo ?? "").trim() || (mine ? mine.repo : "");
   if (!repo) throw new Error('说清记在哪个仓库：repo 写仓库的绝对路径，对所有仓库都成立的写 "general"');
   const name = repo === "general" ? GENERAL : nameOf(repo);
+  const where = repo === "general" ? "记在所有仓库通用的记忆里" : `记在 ${nameOf(repo)} 的记忆里`;
   const line = text && `${text}（${today()}${mine ? `，${mine.id}` : ""}）`;
   if (!old) {
     if (readMemory(ctx, name).split("\n").some((l) => l.replace(/（[^（）]*）\s*$/, "").replace(/^- /, "").trim() === text)) return { ok: true, note: "已经记着这一条了" };
     addLine(ctx, name, line);
-    return { ok: true, file: `${ctx.fs.root}/${pathOf(name)}` };
+    return { ok: true, file: `${ctx.fs.root}/${pathOf(name)}`, gerdrCard: eventCard(ctx, mine ? mine.id : undefined, "remember", text, { body: where }) };
   }
   let found = 0;
   editMemory(ctx, name, (cur) => {
@@ -60,8 +62,9 @@ export function remember(input: { text?: string; repo?: string; replaces?: strin
     return lines.join("\n");
   });
   if (!found) throw new Error(`「${old}」不在 ${name} 的记忆里：先看看原来那条怎么写的（${ctx.fs.root}/${pathOf(name)}）`);
-  if (found > 1) return { ok: true, note: `「${old}」对上了 ${found} 行，都换掉了：去文件里看一眼对不对（${ctx.fs.root}/${pathOf(name)}）` };
-  return { ok: true, file: `${ctx.fs.root}/${pathOf(name)}` };
+  const gerdrCard = eventCard(ctx, mine ? mine.id : undefined, "remember", text || `删掉：${old}`, { body: text ? `${where}，换掉了「${old}」` : where });
+  if (found > 1) return { ok: true, gerdrCard, note: `「${old}」对上了 ${found} 行，都换掉了：去文件里看一眼对不对（${ctx.fs.root}/${pathOf(name)}）` };
+  return { ok: true, file: `${ctx.fs.root}/${pathOf(name)}`, gerdrCard };
 }
 
 // ---- the 记忆 page ----

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Activity, AlarmClock, Check, Hourglass, MessageSquare, Pencil, SquareTerminal, Undo2, Users } from "lucide-react";
+import { Activity, AlarmClock, BookmarkPlus, Check, CircleCheck, CornerUpLeft, Eye, FileText, Hourglass, Link2, MessageSquare, Pencil, Send, SquareTerminal, Undo2, UserPlus, Users } from "lucide-react";
 import { DefaultCard, registerCard, type CardProps } from "@gerdr/core";
 import { run } from "./lib/gerdr";
 
@@ -94,23 +94,70 @@ function TaskTakenBack({ card }: CardProps) {
 
 registerCard("task-taken-back", TaskTakenBack);
 
+/** What a worker's tool changed on the board (local/_cards.ts eventCard). */
+type Event = { kind?: string; level?: "card" | "line"; kicker?: string; title?: string; body?: string; links?: { label?: string; url: string }[] };
+
+const EVENT_ICON: Record<string, typeof Activity> = {
+  progress: Activity,
+  working: FileText,
+  review: Eye,
+  done: CircleCheck,
+  join: UserPlus,
+  tell: Send,
+  handBack: CornerUpLeft,
+  remember: BookmarkPlus,
+};
+
+// The left edge says how much it matters: done green, review yellow (the user's turn), the rest the brand's
+const EDGE: Record<string, string> = { done: "border-l-ok", review: "border-l-warn" };
+const ICON_TONE: Record<string, string> = { done: "text-ok", review: "text-warn" };
+
 /**
- * A line of progress the worker put on the board (post_progress): shown in its chat as what the board's feed now says,
- * so the user sees it where they are instead of a folded tool row. A record, not something waiting: no pulse, no state.
+ * Every change a worker's tool made on the board, in its chat too: the user may be reading the chat, not the board, and
+ * a folded "called task_update" row said nothing of what changed. Loud as it matters (eventCard's level): a result, a
+ * teammate pulled in or a line for the feed is a card; bookkeeping (summary updated, a message to a teammate, a memory
+ * kept) is one quiet line. A record, not something waiting: no pulse, no state to poll.
  */
-function TaskProgress({ card }: CardProps) {
-  return (
-    <div className="my-1.5 rounded-lg border border-l-2 border-l-brand bg-card px-3 py-2">
-      <div className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
-        <Activity className="size-3.5 shrink-0" />
-        <span>{card.kicker ?? "更新进度"}</span>
+function TaskEvent({ card }: CardProps) {
+  const e = card as Event;
+  const kind = e.kind ?? "progress";
+  const Icon = EVENT_ICON[kind] ?? Activity;
+  if (e.level === "line")
+    return (
+      <div className="my-1 flex items-baseline gap-1.5 px-1 text-[12px] text-muted-foreground">
+        <Icon className="size-3 shrink-0 translate-y-0.5" />
+        <span className="min-w-0 line-clamp-2">
+          <span className="text-foreground/80">{e.kicker}</span>
+          {e.title ? `：${e.title}` : ""}
+          {e.body ? `（${e.body}）` : ""}
+        </span>
       </div>
-      <p className="mt-1 whitespace-pre-wrap text-[13px]">{card.title}</p>
+    );
+  return (
+    <div className={`my-1.5 rounded-lg border border-l-2 bg-card px-3 py-2 ${EDGE[kind] ?? "border-l-brand"}`}>
+      <div className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+        <Icon className={`size-3.5 shrink-0 ${ICON_TONE[kind] ?? ""}`} />
+        <span>{e.kicker}</span>
+      </div>
+      {e.title && <p className="mt-1 whitespace-pre-wrap text-[13px]">{e.title}</p>}
+      {e.body && <p className="mt-1 whitespace-pre-wrap text-[12px] text-muted-foreground">{e.body}</p>}
+      {e.links && (
+        <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[12px]">
+          {e.links.map((l) => (
+            <a key={l.url} href={l.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-brand hover:underline">
+              <Link2 className="size-3 shrink-0" />
+              {l.label || l.url}
+            </a>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-registerCard("task-progress", TaskProgress);
+registerCard("task-event", TaskEvent);
+// post_progress's cards from before task-event (2026-11-09): kicker and title only, drawn the same
+registerCard("task-progress", (p) => <TaskEvent {...p} card={{ ...p.card, kind: "progress", level: "card" }} />);
 
 /** One thing that wakes it (local/_waits.ts wakeItem). */
 type Wake = { kind: string; text: string; code?: string };
