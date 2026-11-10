@@ -3,7 +3,7 @@
 
 import { list } from "./tasks";
 import { append, entries, type Entry } from "./_log";
-import { capture, mainId, state, toMain, updateState, type Item } from "./_main";
+import { askText, capture, mainId, state, toMain, updateState, type Item } from "./_main";
 
 /** A line the page folds: what happened to an outside message (the 去向 log), drawn between the messages. */
 type Note = { id: string; at: number; who: "note"; text: string; state: Item["state"]; tasks?: string[] };
@@ -103,14 +103,14 @@ export async function status(input: { since?: number }, ctx: Ctx) {
     }
     if (t.column === "you") {
       if (t.owner === "human") {
-        const qs = (t.questions ?? []).filter((q: any) => !q.dropped && !q.answer);
-        const asks = qs.length
-          ? qs.map((q: any) => `    - 问题 ${q.id}：${q.title}${q.options?.length ? `（选项：${q.options.join(" / ")}）` : ""}`).join("\n")
-          : t.steps
-            ? `    步骤：${cut(t.steps, 400)}`
-            : "";
-        you.push(`- ${head} ${t.handBack?.kind === "choice" ? "待决定" : qs.length ? "待回答" : "要用户亲手做"}${t.askedBy ? `（${t.askedBy} 问的）` : ""}\n${asks}`);
+        const ask = askText(t);
+        you.push(`- ${head} ${t.handBack?.kind === "choice" ? "待决定" : t.questions?.length ? "待回答" : "要用户亲手做"}${t.askedBy ? `（${t.askedBy} 问的）` : ""}${ask ? `\n${ask}` : ""}`);
       } else {
+        const ask = askText(t);
+        if (ask && !t.live?.status?.match(/waiting|error/)) {
+          you.push(`- ${head} 在等用户回答\n${ask}`);
+          continue;
+        }
         const why = t.live?.status === "waiting" ? `worker 在等批准：${t.live.waiting ?? ""}` : t.live?.status === "error" ? "worker 出错了" : t.question ? `问：${t.question}` : t.stopped ? `${t.stopWhy ?? "停下了"}${t.said ? `，它最后说：${cut(t.said, 200)}` : ""}` : "在等用户";
         you.push(`- ${head} ${why}`);
       }

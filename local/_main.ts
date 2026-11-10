@@ -310,6 +310,9 @@ function talkText(ctx: Ctx) {
       `他做完了自己的步骤 \`tasks.complete ${ex({ id: "t5", value: "要交回的值（没有就不写）" })}\`；` +
       `转告 worker \`tasks.say ${ex({ id: "t5", text: "…" })}\`；不做了 \`tasks.drop ${ex({ id: "t5", reason: "…" })}\`。\n` +
       `- 不要用你自带的提问工具（AskUserQuestion）：有要问用户的，直接在回复里问，他会在秘书页上答你。\n` +
+      `- **worker 要用户回答的，你来问**：[动态] 和 secretary.status 里等用户的事带着问题、选项和交答案的命令。把问题和选项写进你的回复，` +
+      `让用户在这里直接答；他答了，你用给出的命令替他交（一个问题一条命令），再告诉他交了。不要让他去点卡片、去看板或 worker 的对话里答。` +
+      `只有密钥不能经过对话，让他在看板上填。\n` +
       `- 改这个面板本身（设置、流程、触发器、定时任务、页面）不归你：告诉用户去面板右边的面板助手那里说。\n` +
       `- 你的对话每隔一阵会换成新的会话，只带最近 7 天的聊天：要长期记住的事当场记下 —— 用户交代的活进看板（任务），` +
       `他的偏好和规矩用 \`remember\` 记进记忆，做事方式写进流程（skill）。只留在聊天里的，过几天就忘了。`,
@@ -448,6 +451,29 @@ export async function capture(ctx: Ctx, beforeSend = false) {
   append(ctx, { who: "agent", text, kind: why === "user" ? "reply" : why === "brief" ? "brief" : "notice", session: m.id });
 }
 
+/**
+ * What a task waiting on the user asks of them, with how the secretary hands in the answer, so it can ask the user
+ * itself in the conversation and answer for them (the user: "the secretary shouldn't send me to click the question;
+ * it should ask me and I answer"). Indented lines under the task's line; "" when it asks nothing answerable.
+ */
+export function askText(t: any): string {
+  const ex = (o: unknown) => `'${JSON.stringify(o)}'`;
+  const opts = (o?: string[]) => (o?.length ? `（选项：${o.join(" / ")}）` : "");
+  if (t.owner === "human") {
+    const qs = (t.questions ?? []).filter((q: any) => !q.dropped && !q.answer);
+    if (qs.length)
+      return qs
+        .map((q: any) => `    - 问题 ${q.id}：${q.title}${opts(q.options)}${q.kind === "value" && q.label ? `（要一个值：${q.label}）` : ""} → tasks.answerQuestion ${ex({ id: t.id, q: q.id, value: "…" })}`)
+        .join("\n");
+    const k = t.handBack?.kind;
+    if (k === "choice") return `    要用户选：${t.title}${opts(t.handBack.options)} → tasks.complete ${ex({ id: t.id, value: "选的那项" })}`;
+    if (k === "value") return `    要用户给：${t.handBack.label ?? t.title} → tasks.complete ${ex({ id: t.id, value: "…" })}`;
+    if (k === "secret") return `    要用户交一个密钥（${t.handBack.label ?? t.handBack.name ?? ""}）：不能经过对话，请他在看板上 ${t.id} 那里填`;
+    return t.steps ? `    要用户亲手做：${t.steps.replace(/\n/g, "\n    ")}\n    他说做完了 → tasks.complete ${ex({ id: t.id })}` : "";
+  }
+  return t.question ? `    worker 问：${t.question} → tasks.answer ${ex({ id: t.id, answer: "用户的回答" })}` : "";
+}
+
 /** Where a task stands, for news: what changes it is a change of status; progress within one isn't. */
 const STATUS: Record<string, string> = { todo: "待办", active: "在做", you: "等你", review: "待验收", done: "做完了", dropped: "放弃了" };
 
@@ -477,8 +503,9 @@ export async function notice(ctx: Ctx, tasks: any[]) {
       const open = (t.questions ?? []).filter((q: any) => !q.dropped && !q.answer).map((q: any) => q.id);
       now[t.id] = `you|${t.question ?? ""}|${t.stopped ? "stopped" : ""}|${t.live?.status === "waiting" || t.live?.status === "error" ? t.live.status : ""}|${open.join(",")}`;
       const l = waiting.get(t.id);
+      const ask = askText(t);
       lines[t.id] = l
-        ? `${l.title}${l.body ? `\n  ${l.body.replace(/\n/g, "\n  ")}` : ""}`
+        ? `${l.title}${ask ? `\n${ask}` : l.body ? `\n  ${l.body.replace(/\n/g, "\n  ")}` : ""}`
         : `${head} 的 worker ${t.live?.status === "error" ? "出错了" : `在等你批准：${t.live?.waiting ?? ""}`}`;
     } else if (t.column === "review") {
       now[t.id] = "review";
