@@ -106,7 +106,9 @@ export async function list(input: unknown, ctx: Ctx) {
         const turn = sess.turnStartedAt ?? 0;
         for (const w of endWaits(t, (w) => w.kind === "user" && !w.item && w.since < turn, "在对话里回复了")) note(t, `问：${w.what}\n（在对话里回复了）`);
         endWaits(t, (w) => isOutside(w) && w.since < turn, "接着做了");
-        if (t.status === "review") Object.assign(t, { status: "running", updatedAt: Date.now() });
+        // Only a review reported before this turn: one reported in this very turn (task_update, then a closing line) is
+        // the turn's result, not rework — taking it back made the worker report it again and again (t41, 2026-11-10)
+        if (t.status === "review" && (t.reportedAt ?? 0) < turn) Object.assign(t, { status: "running", updatedAt: Date.now() });
       }
       // Stopped by the user (or Gerdr restarting): theirs, not a worker that went quiet. No "it stopped without
       // reporting" for them to answer, and no reminder — a reminder would start it again against their stop
