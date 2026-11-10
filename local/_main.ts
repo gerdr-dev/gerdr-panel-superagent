@@ -95,6 +95,8 @@ type State = {
   noticed?: Record<string, string>;
   /** Each task's status as last told to the secretary (notice): task id → its key, so each change is told once. */
   states?: Record<string, string>;
+  /** The secretary's agent / model / effort / mode its session started with (设置): a change starts a new one. */
+  who?: string;
   /** When the last briefing was asked for: the next one covers what happened since. */
   briefAt?: number;
   /**
@@ -375,15 +377,19 @@ export async function toMain(ctx: Ctx, blocks: string[], why: Why = "route", att
   const body = blocks.join("\n\n");
   const idle = cur?.status === "idle";
   const cold = !!cur && idle && Date.now() - cur.updatedAt > COLD;
+  const r = workflow(ctx).router;
+  // Who it runs as (agent, model, effort, mode) is fixed when a session starts: changed in 设置, the next one takes it
+  const who = JSON.stringify(r);
+  const changed = idle && !!s.who && s.who !== who;
   let id: string;
-  if (!cur || cur.status === "error" || cold || (idle && s.handled >= ROTATE)) {
-    const r = workflow(ctx).router;
+  if (!cur || cur.status === "error" || cold || changed || (idle && s.handled >= ROTATE)) {
     const past = windowText(ctx);
     const sess = await ctx.sessions.start({
       cwd: ctx.workspace.dir,
       agent: r.agent || undefined,
       model: r.model || undefined,
       effort: r.effort || undefined,
+      mode: r.mode || undefined,
       title: "Superagent 秘书",
       prompt: [b, past && `## 最近 7 天你和用户的对话（之前的会话里说的，现在接着）\n\n${past}`, body].filter(Boolean).join("\n\n---\n\n"),
       tags: { superagent: "main" },
@@ -391,7 +397,7 @@ export async function toMain(ctx: Ctx, blocks: string[], why: Why = "route", att
       attachments,
     });
     updateState(ctx, (x) => {
-      Object.assign(x, { main: sess.id, mains: [...(x.mains ?? []), sess.id], brief: h, handled: blocks.length });
+      Object.assign(x, { main: sess.id, mains: [...(x.mains ?? []), sess.id], brief: h, handled: blocks.length, who });
     });
     // The one it replaces finished its last turn: let it go (still readable, as every one before it)
     if (cur && cur.status === "idle") await ctx.sessions.close(cur.id).catch(() => {});

@@ -11,7 +11,8 @@
 // skills/; a value an agent also needs (repositories, the worker's default model) is written into its message by
 // the code, from here. DESIGN.md, 「设置和流程」.
 
-export type Who = { agent: string; model: string; effort: string };
+/** mode: the permission mode its sessions start in (claude: default / acceptEdits / plan / auto; codex: ask / auto / read-only). */
+export type Who = { agent: string; model: string; effort: string; mode: string };
 
 export type Repo = {
   path: string;
@@ -31,8 +32,8 @@ export type Settings = {
 };
 
 export const DEFAULTS: Settings = {
-  router: { agent: "", model: "", effort: "" },
-  worker: { agent: "", model: "", effort: "" },
+  router: { agent: "", model: "", effort: "", mode: "" },
+  worker: { agent: "", model: "", effort: "", mode: "" },
   repos: [],
   gitlab: { host: "gitlab.com" },
   proactive: "observe",
@@ -40,7 +41,7 @@ export const DEFAULTS: Settings = {
 
 const str = (v: unknown, d: string) => (typeof v === "string" ? v.trim() : d);
 const oneOf = <T extends string>(v: unknown, ok: readonly T[], d: T): T => (ok.includes(v as T) ? (v as T) : d);
-const who = (v: any, d: Who): Who => ({ agent: str(v?.agent, d.agent), model: str(v?.model, d.model), effort: str(v?.effort, d.effort) });
+const who = (v: any, d: Who): Who => ({ agent: str(v?.agent, d.agent), model: str(v?.model, d.model), effort: str(v?.effort, d.effort), mode: str(v?.mode, d.mode) });
 
 /** Whatever is stored (partial, old, hand-edited) → complete settings: a missing or unfitting value is the default. */
 export function normalize(raw: any): Settings {

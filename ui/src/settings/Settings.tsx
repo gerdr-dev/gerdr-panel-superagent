@@ -165,6 +165,17 @@ function WhoFields({ who, onChange }: { who: Who; onChange: (w: Who) => void }) 
       <Field label="思考强度" hint="low / medium / high……看 agent 和模型支持什么。空着用默认。">
         <input className={input} value={who.effort} placeholder="默认" onChange={(e) => onChange({ ...who, effort: e.target.value })} />
       </Field>
+      <Field
+        label="权限模式"
+        hint="它的会话用什么权限模式开：claude 是 default / acceptEdits / plan / auto，codex 是 ask / auto / read-only。空着用 Gerdr 设置里的默认（那个默认是全部自动批准时不算）。会话要人批准时会停下来等你：不想它停，就给 auto。"
+      >
+        <input className={input} list="gerdr-modes" value={who.mode} placeholder="默认" onChange={(e) => onChange({ ...who, mode: e.target.value })} />
+        <datalist id="gerdr-modes">
+          {["default", "acceptEdits", "plan", "auto", "ask", "read-only"].map((m) => (
+            <option key={m} value={m} />
+          ))}
+        </datalist>
+      </Field>
     </>
   );
 }

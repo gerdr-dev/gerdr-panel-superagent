@@ -426,7 +426,6 @@ export async function start(
   const sess = await ctx.sessions.start({
     cwd,
     ...who,
-    mode: input.mode,
     title: t.title,
     prompt: (prompt || "看附件，照里面的做。") + WORKER_PROTOCOL.split("{id}").join(t.id) + forWorker(ctx, repo),
     attachments: (t.attachments ?? []).map((a) => a.path),
@@ -451,7 +450,7 @@ export async function start(
  * Which agent / model / effort a worker runs on. The defaults (设置 → worker) go with their agent: a model named there is
  * that agent's (a claude model means nothing to codex), so a task on another agent only gets a model it names itself.
  */
-function workerOf(ctx: Ctx, t: Task, input: { agent?: string; model?: string; effort?: string }) {
+function workerOf(ctx: Ctx, t: Task, input: { agent?: string; model?: string; effort?: string; mode?: string }) {
   const w = workflow(ctx).worker;
   const agent = input.agent || t.agent || w.agent;
   const same = agent === w.agent;
@@ -459,6 +458,8 @@ function workerOf(ctx: Ctx, t: Task, input: { agent?: string; model?: string; ef
     agent: agent || undefined,
     model: input.model || t.model || (same ? w.model : "") || undefined,
     effort: input.effort || t.effort || (same ? w.effort : "") || undefined,
+    // Modes are an agent's own words (claude's acceptEdits means nothing to codex): the setting only goes with its agent
+    mode: input.mode || (same ? w.mode : "") || undefined,
   };
 }
 
