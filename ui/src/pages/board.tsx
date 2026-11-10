@@ -1627,7 +1627,7 @@ function stillWaiting(t: Task, a: NonNullable<Task["activity"]>[number], m?: Tas
 }
 
 /** When a step / question item was last asked: its newest open question's time (older items have none: created). */
-function askedAt(h: Task) {
+export function askedAt(h: Task) {
   const qs = (h.questions ?? []).filter((q) => !q.dropped && q.answer == null);
   // Items from before questions had a time: the last one joined when the item last changed
   if (qs.length && !qs.some((q) => q.at)) return Math.max(h.createdAt, h.updatedAt);
@@ -1660,8 +1660,167 @@ function Avatar({ m, lead, size = "md" }: { m?: Task; lead?: boolean; size?: "sm
   );
 }
 
+/**
+ * A thing waiting on the user, as a requirement's feed draws it: a step / decision its worker asked (answered right
+ * here, Gerdr's own card), or a member stuck on them (an approval, an error, stopped, a question in its chat). Shared
+ * with the secretary's page, which draws its conversation the way a feed is drawn (DESIGN.md「秘书」). `lead`: the
+ * requirement's lead (ringed); `activity`: its feed, to tell a question overtaken by what was said since.
+ */
+export function NeedRow({ x, lead, activity, byId, act, onGo, nobody }: { x: Exclude<FeedItem, { type: "act" }>; lead?: string; activity: NonNullable<Task["activity"]>; byId: Record<string, Task>; act: Act; onGo: (id: string) => void; /** Who a step nobody's worker asked is from (one the secretary noted down): its name and face */ nobody?: { name: string; face: React.ReactNode } }) {
+  const { busy, go } = useAction(act);
+  const ms = Object.values(byId);
+  const who = (id?: string) => (id ? byId[id] : undefined);
+  const when = (ms: number) => new Date(ms).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  const head = (m: Task | undefined, label: string, at: number, tone?: string) => (
+    <div className="flex items-baseline gap-1.5 text-[11px] text-muted-foreground">
+      <span className="font-medium text-foreground/80">{memberLabel(m) || nobody?.name || "?"}</span>
+      {m && <span>{m.id}</span>}
+      <span className={tone}>{label}</span>
+      <span className="tabular-nums">{when(at)}</span>
+    </div>
+  );
+  const t = { id: lead, activity };
+  if (x.type === "ask") {
+    const m = who(x.h.askedBy) ?? ms.find((y) => y.blockedBy?.includes(x.h.id));
+    const cards = askCards(x.h);
+    // Asked before the user and its worker talked on: it may be moot or different now. One click has the worker
+    // ask it again as things stand (it then shows at the bottom) or take it back
+    const said = Math.max(0, ...(t.activity ?? []).filter((a) => a.kind === "user" && a.by === m?.id).map((a) => a.at));
+    // Until it asks again (a newer question) or its turn is over (it kept the question as is)
+    const refreshing = (x.h.refreshing ?? 0) > x.at && (m?.live?.status === "running" || Date.now() - x.h.refreshing! < 60_000);
+    const stale = said > firstAsked(x.h);
+    return (
+      <div className="flex gap-2">
+        {!m && nobody ? nobody.face : <Avatar m={m} lead={m?.id === t.id} />}
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex items-baseline gap-2">
+            {head(m, x.h.handBack?.kind === "choice" || x.h.questions ? "要你决定" : "要你做", x.at, "text-warn")}
+            {refreshing ? (
+              <span className="shimmer text-[11px] text-muted-foreground">在按最新情况更新…</span>
+            ) : (
+              stale && (
+                <button
+                  className="text-[11px] text-brand hover:underline disabled:opacity-50"
+                  disabled={!!busy}
+                  title="这个问题是在你们后来的对话之前问的：让它按现在的情况重新问，或者撤回"
+                  onClick={() => go(`refresh${x.h.id}`, "refreshAsk", { id: x.h.id })}
+                >
+                  {busy === `refresh${x.h.id}` ? "发送中…" : "按最新情况更新"}
+                </button>
+              )
+            )}
+          </div>
+          {cards ? (
+            // The same card as in its chat (Gerdr's built-in one): answered right here, one card per question
+            <>
+              {cards.map((c) => {
+                // After the step's own id: a team id starts with "#" itself (#1-1#2)
+                const qid = String(c.ref).slice(x.h.id.length + 1);
+                const q = x.h.questions?.find((y) => y.id === qid);
+                const several = (x.h.questions ?? []).filter((y) => !y.dropped).length > 1;
+                return (
+                  <div key={String(c.ref)}>
+                    <DefaultCard card={c as any} />
+                    {/* One of several gone moot (the worker didn't take it back): set it aside, the rest go when answered */}
+                    {q && several && q.answer == null && (
+                      <button
+                        className="mt-1 ml-1 text-[11px] text-muted-foreground hover:text-foreground hover:underline disabled:opacity-50"
+                        disabled={!!busy}
+                        onClick={() => go(`skip${c.ref}`, "skipQuestion", { id: x.h.id, q: qid })}
+                      >
+                        {busy === `skip${c.ref}` ? "…" : "这个不用答了"}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+              {(() => {
+                // Some answered, some not: the answers wait for the rest unless sent now
+                const qs = (x.h.questions ?? []).filter((y) => !y.dropped);
+                const ready = qs.filter((y) => y.answer != null && !y.sent).length;
+                const left = qs.filter((y) => y.answer == null).length;
+                return ready > 0 && left > 0 ? (
+                  <div className="flex items-center gap-2 px-1 text-[11px] text-muted-foreground">
+                    <span>已答 {qs.length - left} / {qs.length}，答完一起发给它</span>
+                    <button className="text-brand hover:underline disabled:opacity-50" disabled={!!busy} onClick={() => go(`send${x.h.id}`, "sendAnswered", { id: x.h.id })}>
+                      {busy === `send${x.h.id}` ? "发送中…" : "先把已答的发给它"}
+                    </button>
+                  </div>
+                ) : null;
+              })()}
+            </>
+          ) : (
+            <div className="rounded-lg rounded-tl-sm border border-warn/50 bg-card p-3">
+              <InFeed.Provider value>
+                <HumanCard t={x.h} byId={byId} act={act} onGo={onGo} />
+              </InFeed.Provider>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+  if (x.type === "stuck") {
+    // A question the worker itself asked is its words: a message from it. Everything else here is the board saying
+    // how things stand (stopped, an error, an approval, a session it started) — a system line, not a bubble
+    const said = (
+      // Its last words are its own: quoted under the line, two lines at most (the rest is in its chat)
+      x.m.said && <p className="ml-5 line-clamp-2 border-l-2 pl-2 text-[12px] text-muted-foreground">{x.m.said}</p>
+    );
+    if (!realQuestion(x.m)) {
+      // The conversation that waits: its own, or the helper it started that wants an approval (maybe on another
+      // computer). Opening the member's own chat there left the user nowhere near the button to press
+      const waiter = x.m.live?.status === "waiting" ? x.m.session : x.m.helpers?.find((k) => k.left)?.id;
+      return (
+        <div className="space-y-1.5">
+          <div className="space-y-1.5 rounded-md border border-warn/40 bg-warn/5 px-3 py-1.5 text-[12px]">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="size-3.5 shrink-0 text-warn" />
+              <span className="min-w-0 flex-1">
+                <span className="font-medium">{memberLabel(x.m)}</span> · {stuckText(x.m)}
+                <span className="text-muted-foreground tabular-nums"> · {when(x.at)}</span>
+              </span>
+              {!waiter && x.m.session && (
+                <Button variant="outline" onClick={() => openChat(x.m.session!, x.m.id)}>
+                  <MessageSquare className="size-3.5" />
+                  去对话
+                </Button>
+              )}
+            </div>
+            {waiter && <Waiting session={waiter} task={waiter === x.m.session ? x.m.id : undefined} />}
+          </div>
+          {said}
+        </div>
+      );
+    }
+    return (
+      <div className="flex gap-2">
+        <Avatar m={x.m} lead={x.m.id === t.id} />
+        <div className="min-w-0 flex-1 space-y-1">
+          {head(x.m, "问你", x.at, "text-warn")}
+          <div className="flex items-start gap-2 rounded-lg rounded-tl-sm border border-warn/50 bg-warn/5 px-3 py-2 text-[13px]">
+            <Md className="flex-1">{x.m.question ?? ""}</Md>
+            {x.m.session && (
+              <Button variant="outline" onClick={() => openChat(x.m.session!, x.m.id)}>
+                <MessageSquare className="size-3.5" />
+                去回答
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+  return null;
+}
+
+/** For a page other than the board (the secretary's): where Avatar, 去对话 and the cards' links open a conversation. */
+export function setOpenChat(fn: (session: string, task?: string) => void) {
+  openChat = fn;
+}
+
 /** One thing in the feed, in time order: a line of activity, a step / decision waiting on the user, a member stuck on them. */
-type FeedItem = { at: number; key: string } & ({ type: "act"; a: NonNullable<Task["activity"]>[number] } | { type: "ask"; h: Task } | { type: "stuck"; m: Task });
+export type FeedItem = { at: number; key: string } & ({ type: "act"; a: NonNullable<Task["activity"]>[number] } | { type: "ask"; h: Task } | { type: "stuck"; m: Task });
 
 /**
  * Opening a requirement: drawn like a group chat. On top what it is (its request as first put, folded when long) and
@@ -1861,137 +2020,8 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
     </div>
   );
   const row = (x: FeedItem) => {
-    if (x.type === "ask") {
-      const m = who(x.h.askedBy) ?? ms.find((y) => y.blockedBy?.includes(x.h.id));
-      const cards = askCards(x.h);
-      // Asked before the user and its worker talked on: it may be moot or different now. One click has the worker
-      // ask it again as things stand (it then shows at the bottom) or take it back
-      const said = Math.max(0, ...(t.activity ?? []).filter((a) => a.kind === "user" && a.by === m?.id).map((a) => a.at));
-      // Until it asks again (a newer question) or its turn is over (it kept the question as is)
-      const refreshing = (x.h.refreshing ?? 0) > x.at && (m?.live?.status === "running" || Date.now() - x.h.refreshing! < 60_000);
-      const stale = said > firstAsked(x.h);
-      return (
-        <div className="flex gap-2">
-          <Avatar m={m} lead={m?.id === t.id} />
-          <div className="min-w-0 flex-1 space-y-1">
-            <div className="flex items-baseline gap-2">
-              {head(m, x.h.handBack?.kind === "choice" || x.h.questions ? "要你决定" : "要你做", x.at, "text-warn")}
-              {refreshing ? (
-                <span className="shimmer text-[11px] text-muted-foreground">在按最新情况更新…</span>
-              ) : (
-                stale && (
-                  <button
-                    className="text-[11px] text-brand hover:underline disabled:opacity-50"
-                    disabled={!!busy}
-                    title="这个问题是在你们后来的对话之前问的：让它按现在的情况重新问，或者撤回"
-                    onClick={() => go(`refresh${x.h.id}`, "refreshAsk", { id: x.h.id })}
-                  >
-                    {busy === `refresh${x.h.id}` ? "发送中…" : "按最新情况更新"}
-                  </button>
-                )
-              )}
-            </div>
-            {cards ? (
-              // The same card as in its chat (Gerdr's built-in one): answered right here, one card per question
-              <>
-                {cards.map((c) => {
-                  // After the step's own id: a team id starts with "#" itself (#1-1#2)
-                  const qid = String(c.ref).slice(x.h.id.length + 1);
-                  const q = x.h.questions?.find((y) => y.id === qid);
-                  const several = (x.h.questions ?? []).filter((y) => !y.dropped).length > 1;
-                  return (
-                    <div key={String(c.ref)}>
-                      <DefaultCard card={c as any} />
-                      {/* One of several gone moot (the worker didn't take it back): set it aside, the rest go when answered */}
-                      {q && several && q.answer == null && (
-                        <button
-                          className="mt-1 ml-1 text-[11px] text-muted-foreground hover:text-foreground hover:underline disabled:opacity-50"
-                          disabled={!!busy}
-                          onClick={() => go(`skip${c.ref}`, "skipQuestion", { id: x.h.id, q: qid })}
-                        >
-                          {busy === `skip${c.ref}` ? "…" : "这个不用答了"}
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
-                {(() => {
-                  // Some answered, some not: the answers wait for the rest unless sent now
-                  const qs = (x.h.questions ?? []).filter((y) => !y.dropped);
-                  const ready = qs.filter((y) => y.answer != null && !y.sent).length;
-                  const left = qs.filter((y) => y.answer == null).length;
-                  return ready > 0 && left > 0 ? (
-                    <div className="flex items-center gap-2 px-1 text-[11px] text-muted-foreground">
-                      <span>已答 {qs.length - left} / {qs.length}，答完一起发给它</span>
-                      <button className="text-brand hover:underline disabled:opacity-50" disabled={!!busy} onClick={() => go(`send${x.h.id}`, "sendAnswered", { id: x.h.id })}>
-                        {busy === `send${x.h.id}` ? "发送中…" : "先把已答的发给它"}
-                      </button>
-                    </div>
-                  ) : null;
-                })()}
-              </>
-            ) : (
-              <div className="rounded-lg rounded-tl-sm border border-warn/50 bg-card p-3">
-                <InFeed.Provider value>
-                  <HumanCard t={x.h} byId={byId} act={act} onGo={onGo} />
-                </InFeed.Provider>
-              </div>
-            )}
-          </div>
-        </div>
-      );
-    }
-    if (x.type === "stuck") {
-      // A question the worker itself asked is its words: a message from it. Everything else here is the board saying
-      // how things stand (stopped, an error, an approval, a session it started) — a system line, not a bubble
-      const said = (
-        // Its last words are its own: quoted under the line, two lines at most (the rest is in its chat)
-        x.m.said && <p className="ml-5 line-clamp-2 border-l-2 pl-2 text-[12px] text-muted-foreground">{x.m.said}</p>
-      );
-      if (!realQuestion(x.m)) {
-        // The conversation that waits: its own, or the helper it started that wants an approval (maybe on another
-        // computer). Opening the member's own chat there left the user nowhere near the button to press
-        const waiter = x.m.live?.status === "waiting" ? x.m.session : x.m.helpers?.find((k) => k.left)?.id;
-        return (
-          <div className="space-y-1.5">
-            <div className="space-y-1.5 rounded-md border border-warn/40 bg-warn/5 px-3 py-1.5 text-[12px]">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="size-3.5 shrink-0 text-warn" />
-                <span className="min-w-0 flex-1">
-                  <span className="font-medium">{memberLabel(x.m)}</span> · {stuckText(x.m)}
-                  <span className="text-muted-foreground tabular-nums"> · {when(x.at)}</span>
-                </span>
-                {!waiter && x.m.session && (
-                  <Button variant="outline" onClick={() => openChat(x.m.session!, x.m.id)}>
-                    <MessageSquare className="size-3.5" />
-                    去对话
-                  </Button>
-                )}
-              </div>
-              {waiter && <Waiting session={waiter} task={waiter === x.m.session ? x.m.id : undefined} />}
-            </div>
-            {said}
-          </div>
-        );
-      }
-      return (
-        <div className="flex gap-2">
-          <Avatar m={x.m} lead={x.m.id === t.id} />
-          <div className="min-w-0 flex-1 space-y-1">
-            {head(x.m, "问你", x.at, "text-warn")}
-            <div className="flex items-start gap-2 rounded-lg rounded-tl-sm border border-warn/50 bg-warn/5 px-3 py-2 text-[13px]">
-              <Md className="flex-1">{x.m.question ?? ""}</Md>
-              {x.m.session && (
-                <Button variant="outline" onClick={() => openChat(x.m.session!, x.m.id)}>
-                  <MessageSquare className="size-3.5" />
-                  去回答
-                </Button>
-              )}
-            </div>
-          </div>
-        </div>
-      );
-    }
+    // What waits on the user: the same rows as on the secretary's page (NeedRow)
+    if (x.type !== "act") return <NeedRow x={x} lead={t.id} activity={t.activity ?? []} byId={byId} act={act} onGo={onGo} />;
     const a = x.a;
     // The user's own doing: on the right, like their messages in a chat
     if (a.kind === "user")

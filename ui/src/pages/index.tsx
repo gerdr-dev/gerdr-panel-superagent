@@ -1,7 +1,7 @@
 import { ChevronRight, Hand, Inbox, Settings } from "lucide-react";
 import clsx from "clsx";
 import * as core from "@gerdr/core";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { Button } from "../components/Button";
 import { ChatDrawer } from "../components/ChatDrawer";
@@ -11,7 +11,8 @@ import { run } from "../lib/gerdr";
 import { Linger } from "../lib/linger";
 import { Md } from "../lib/markdown";
 import { phoneMenu, usePhoneMenu } from "../lib/phoneMenu";
-import { useTasks, type Task } from "../lib/tasks";
+import { useTasks, waitedSince, type Task } from "../lib/tasks";
+import { askedAt, NeedRow, setOpenChat, type FeedItem as NeedItem } from "./board";
 import { sessionsKey, usePanelChange, useRefresh, useSessions } from "../lib/visible";
 
 // The secretary (DESIGN.md「秘书」): one conversation in the middle of the page, where the user hands everything over
@@ -26,11 +27,12 @@ type Main = { id: string; status: string; waiting?: string; waitingKind?: string
 type Feed = { entries: (Entry | Note)[]; main: Main | null; busy: boolean };
 
 type FeedEntry = { key: string; at: number; user?: { text: string; files?: File[] } };
-type Row = FeedEntry & ({ type: "msg"; e: Entry } | { type: "notes"; notes: Note[] } | { type: "busy"; session?: string } | { type: "waiting"; m: Main } | { type: "hello" });
+type Need = Exclude<NeedItem, { type: "act" }>;
+type Row = FeedEntry & ({ type: "need"; x: Need } | { type: "msg"; e: Entry } | { type: "notes"; notes: Note[] } | { type: "busy"; session?: string } | { type: "waiting"; m: Main } | { type: "hello" });
 
 // Gerdr's FeedChat and PixelLoader, through the namespace: a Gerdr from before them says so instead of breaking
 const FeedChat = (core as unknown as {
-  FeedChat?: <E extends FeedEntry>(p: { id: string; entries: E[]; render: (e: E) => React.ReactNode; onSend: (m: { text: string; files: File[] }) => Promise<void>; placeholder?: string; className?: string }) => React.ReactNode;
+  FeedChat?: <E extends FeedEntry>(p: { id: string; entries: E[]; render: (e: E) => React.ReactNode; onSend: (m: { text: string; files: File[] }) => Promise<void>; placeholder?: string; jump?: { key: string; seq: number }; className?: string }) => React.ReactNode;
 }).FeedChat;
 const PixelLoader = (core as unknown as { PixelLoader?: (p: { className?: string }) => React.ReactNode }).PixelLoader;
 
@@ -65,13 +67,18 @@ function useFeed() {
 
 export default function SecretaryPage() {
   const { feed, main, error, reload } = useFeed();
-  const { tasks } = useTasks();
+  const { tasks, act } = useTasks();
   const navigate = useNavigate();
   const [settings, setSettings] = useState<SettingsTab | null>(null);
   const [peek, setPeek] = useState<string | null>(null);
+  // The rows shared with the board (NeedRow) open conversations through this
+  useEffect(() => setOpenChat((session) => setPeek(session)), []);
+  const [jump, setJump] = useState<{ key: string; seq: number }>();
   usePhoneMenu(TABS.map((x) => ({ id: x.id, label: x.label, icon: <x.icon className="size-4" />, onSelect: () => setSettings(x.id) })));
 
-  const rows = useMemo(() => toRows(feed, main), [feed, main]);
+  const byId = useMemo(() => Object.fromEntries((tasks ?? []).map((t) => [t.id, t])), [tasks]);
+  const needs = useMemo(() => needsOf(tasks), [tasks]);
+  const rows = useMemo(() => toRows(feed, main, needs), [feed, main, needs]);
   const send = useCallback(
     async (m: { text: string; files: File[] }) => {
       await run("secretary.say", { text: m.text, files: m.files });
@@ -80,7 +87,10 @@ export default function SecretaryPage() {
     [reload],
   );
   const toTask = useCallback((id: string) => navigate(`/board?open=${id}`), [navigate]);
-  const render = useCallback((r: Row) => <RowView r={r} onPeek={setPeek} onTask={toTask} />, [toTask]);
+  const render = useCallback(
+    (r: Row) => (r.type === "need" ? <NeedRow x={r.x} activity={[]} byId={byId} act={act} onGo={toTask} nobody={{ name: "秘书", face: <Face onPeek={setPeek} /> }} /> : <RowView r={r} onPeek={setPeek} onTask={toTask} />),
+    [toTask, byId, act],
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -96,7 +106,7 @@ export default function SecretaryPage() {
           </Button>
         </div>
       </header>
-      <Waiting tasks={tasks} onTask={toTask} />
+      <Waiting needs={needs} onJump={(key) => setJump((j) => ({ key, seq: (j?.seq ?? 0) + 1 }))} />
       {error && <p role="alert" className="px-4 pt-3 text-[13px] text-bad">读取失败：{error}</p>}
       {/* Full width, so the whole page scrolls the conversation and its scrollbar sits at the right edge; the chat
           itself keeps the text in a centred column (800px, like every Gerdr chat) */}
@@ -107,7 +117,7 @@ export default function SecretaryPage() {
           ) : !feed ? (
             !error && <p className="p-8 text-center text-[13px] text-muted-foreground">正在加载…</p>
           ) : (
-            <FeedChat id="secretary" entries={rows} render={render} onSend={send} placeholder="什么事都可以交给秘书，也可以问它进度" />
+            <FeedChat id="secretary" entries={rows} render={render} onSend={send} jump={jump} placeholder="什么事都可以交给秘书，也可以问它进度" />
           )}
         </div>
       </div>
@@ -121,7 +131,19 @@ export default function SecretaryPage() {
  * The rows: messages as they are, runs of outside messages it handled folded into one line, and at the end what the
  * secretary is doing now (busy, or waiting for an approval). An empty conversation gets a line on what it's for.
  */
-function toRows(feed: Feed | null, main: Main | null): Row[] {
+/**
+ * What waits on the user across the board, as a requirement's feed has it (board.tsx teamNeeds): the steps and
+ * decisions workers asked, and workers stuck on the user.
+ */
+function needsOf(tasks: Task[] | null): Need[] {
+  const live = (tasks ?? []).filter((t) => t.status !== "done" && t.status !== "dropped");
+  return [
+    ...live.filter((t) => t.owner === "human" && t.ready).map((h): Need => ({ at: askedAt(h), key: `h${h.id}`, type: "ask", h })),
+    ...live.filter((t) => t.owner === "agent" && t.column === "you").map((m): Need => ({ at: waitedSince(m), key: `s${m.id}`, type: "stuck", m })),
+  ];
+}
+
+function toRows(feed: Feed | null, main: Main | null, needs: Need[]): Row[] {
   const out: Row[] = [];
   for (const e of feed?.entries ?? []) {
     if (e.who === "note") {
@@ -131,6 +153,13 @@ function toRows(feed: Feed | null, main: Main | null): Row[] {
       continue;
     }
     out.push(e.who === "user" ? { key: e.id, at: e.at, user: { text: e.text, files: e.files }, type: "msg", e } : { key: e.id, at: e.at, type: "msg", e });
+  }
+  // What waits on the user, where it was asked among the messages (FeedChat keeps rows in the order given)
+  for (const x of needs) {
+    const i = out.findIndex((r) => r.at > x.at);
+    const row: Row = { key: x.key, at: x.at, type: "need", x };
+    if (i < 0) out.push(row);
+    else out.splice(i, 0, row);
   }
   if (!out.length) out.push({ key: "hello", at: 0, type: "hello" });
   if (main?.status === "waiting") out.push({ key: "waiting", at: Date.now(), type: "waiting", m: main });
@@ -143,7 +172,7 @@ function toRows(feed: Feed | null, main: Main | null): Row[] {
  * its conversation (what it looked up, the commands it ran). Without a session (an old entry) it's just a face.
  */
 function Face({ session, onPeek }: { session?: string; onPeek: (id: string) => void }) {
-  const face = <span className="grid size-7 shrink-0 place-items-center rounded-full bg-brand/15 text-[11px] font-medium text-brand ring-1 ring-brand/40">秘</span>;
+  const face = <span className="grid size-8 shrink-0 place-items-center rounded-full bg-brand/15 text-[11px] font-medium text-brand ring-1 ring-brand/40">秘</span>;
   if (!session) return face;
   return (
     <button title="打开秘书的对话：它查了什么、调了哪些命令" aria-label="打开秘书的对话" onClick={() => onPeek(session)} className="shrink-0 rounded-full hover:opacity-80">
@@ -203,33 +232,38 @@ function RowView({ r, onPeek, onTask }: { r: Row; onPeek: (id: string) => void; 
   const e = r.e;
   // The user's own messages are FeedChat's to draw (r.user)
   if (e.who === "user") return null;
+  // Like a member's line in a requirement's feed: face, who and when, the words in a bubble
   return (
-    <div className={clsx("flex items-start gap-2.5 py-2", e.kind === "brief" && "py-3")}>
+    <div className="flex gap-2">
       <Face session={e.session} onPeek={onPeek} />
-      <div className={clsx("min-w-0 flex-1", e.kind === "brief" && "rounded-xl border bg-muted/40 px-4 py-3")}>
-        <p className="mb-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          <span className="font-medium">{e.kind === "brief" ? "简报" : "秘书"}</span>
-          <span>{time(e.at)}</span>
-          {e.kind === "notice" && <span>· 主动告诉你</span>}
-        </p>
-        <Md>{e.text}</Md>
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="flex items-baseline gap-1.5 text-[11px] text-muted-foreground">
+          <span className="font-medium text-foreground/80">秘书</span>
+          {e.kind === "brief" ? <span className="text-brand">简报</span> : e.kind === "notice" && <span>主动告诉你</span>}
+          <span className="tabular-nums">{time(e.at)}</span>
+        </div>
+        <div className={clsx("w-fit max-w-full rounded-lg rounded-tl-sm px-3 py-2", e.kind === "brief" ? "border bg-card" : "bg-muted")}>
+          <Md>{e.text}</Md>
+        </div>
       </div>
     </div>
   );
 }
 
-/** What waits on the user, one chip each: opens the board on that task. Nothing when nothing waits. */
-function Waiting({ tasks, onTask }: { tasks: Task[] | null; onTask: (id: string) => void }) {
-  const you = (tasks ?? []).filter((t) => !t.in && t.status !== "done" && t.status !== "dropped" && (t.teamColumn ?? t.column) === "you");
-  if (!you.length) return null;
+/** What waits on the user, one chip each: scrolls the conversation to it (it's a card there). Nothing when nothing waits. */
+function Waiting({ needs, onJump }: { needs: Need[]; onJump: (key: string) => void }) {
+  if (!needs.length) return null;
   return (
     <div className="flex items-center gap-2 overflow-x-auto border-b bg-warn/5 px-4 py-2 text-[12px]">
-      <span className="shrink-0 font-medium text-warn">等你 {you.length}</span>
-      {you.map((t) => (
-        <button key={t.id} className="max-w-64 shrink-0 truncate rounded-full border bg-background px-2.5 py-0.5 hover:border-brand" title={t.title} onClick={() => onTask(t.id)}>
-          {t.id} {t.title}
-        </button>
-      ))}
+      <span className="shrink-0 font-medium text-warn">等你 {needs.length}</span>
+      {needs.map((x) => {
+        const t = x.type === "ask" ? x.h : x.m;
+        return (
+          <button key={x.key} className="max-w-64 shrink-0 truncate rounded-full border bg-background px-2.5 py-0.5 hover:border-brand" title={t.title} onClick={() => onJump(x.key)}>
+            {t.id} {t.title}
+          </button>
+        );
+      })}
     </div>
   );
 }
