@@ -99,12 +99,6 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
             <Repos repos={s.repos} onChange={(v) => put("repos", v)} />
           </Section>
 
-          <Section title="GitLab" note="盯 MR 的定时任务（mrwatch）查 MR 时找的 GitLab（glab 要先在这台电脑上登录过它）。要不要变基写在「流程 → mr」里；每个仓库谁来合、能不能直推，在「记忆」里。都由 worker 照着做。">
-            <Field label="地址">
-              <input className={clsx(input, "font-mono text-[12px]")} value={s.gitlab.host} placeholder="gitlab.com" onChange={(e) => put("gitlab", { host: e.target.value })} />
-            </Field>
-          </Section>
-
           <Section
             title="主动工作"
             note="不是找你的事（触发器里设成「不是找我的」的来源：频道闲聊、告警、没人跟的 MR）。照「流程 → proactive」里你写的规则判断；新加一条规则时，先改回「只记录」看几天。"

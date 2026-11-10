@@ -49,10 +49,42 @@ function ours(ctx: Ctx): Record<string, Ours> {
   return out;
 }
 
-/** For the 触发器 page: every source one can subscribe to, and whether it makes tasks now. */
+/** The panel's own triggers (triggers/*.json, shipped with it, like mr.json): always on, not the user's choice. */
+export function builtin(input: unknown, ctx: Ctx): { id: string; on: string; name?: string; key?: string }[] {
+  const out: { id: string; on: string; name?: string; key?: string }[] = [];
+  for (const f of ctx.fs.stat("triggers") ? ctx.fs.list("triggers") : []) {
+    const name = f.path.split("/").pop() ?? "";
+    if (f.dir || !name.endsWith(".json")) continue;
+    try {
+      const t = JSON.parse(ctx.fs.read(f.path));
+      if (t.on) out.push({ id: name.slice(0, -5), on: t.on, name: t.name, key: t.key });
+    } catch {
+      // a broken file is Gerdr's to report (gerdr panel triggers)
+    }
+  }
+  return out;
+}
+
+/** "gitlab/*" matches "gitlab/mr.merged": a trigger's on, as Gerdr reads it. */
+function covers(on: string, what: string) {
+  return new RegExp(`^${on.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`).test(what);
+}
+
+/**
+ * For the 触发器 page: every source one can subscribe to, and whether it makes tasks now. `by`: one of the panel's
+ * own triggers already takes it (the page shows that instead of a switch: turning it on too would take it twice).
+ */
 export function sources(input: unknown, ctx: Ctx) {
   const on = ours(ctx);
-  const list: (Source & { enabled: boolean; key?: string; allow?: string[]; inferred?: boolean })[] = (events(ctx).catalog() as Source[]).map((s) => ({ ...s, enabled: !!on[s.on], key: on[s.on]?.key, allow: on[s.on]?.allow, inferred: on[s.on]?.inferred }));
+  const own = builtin(input, ctx);
+  const list: (Source & { enabled: boolean; key?: string; allow?: string[]; inferred?: boolean; by?: string })[] = (events(ctx).catalog() as Source[]).map((s) => ({
+    ...s,
+    enabled: !!on[s.on],
+    key: on[s.on]?.key,
+    allow: on[s.on]?.allow,
+    inferred: on[s.on]?.inferred,
+    by: on[s.on] ? undefined : own.find((b) => covers(b.on, s.on))?.name,
+  }));
   // Turned on earlier for a source that's gone from the catalog (its add-on removed): still listed, so it can be turned off
   for (const [k, v] of Object.entries(on)) if (!list.some((s) => s.on === k)) list.push({ on: k, enabled: true, key: v.key, allow: v.allow, inferred: v.inferred });
   return list;
@@ -96,6 +128,9 @@ export function setSource(input: { on: string; enabled: boolean; key?: string; t
 export async function onEvent(input: { event: GerdrEvent; trigger?: string; allow?: string[]; inferred?: boolean }, ctx: Ctx) {
   const e = input?.event;
   if (!e?.id) throw new Error("没有事件（这个函数由 triggers/*.json 调用）");
+  // Another panel's own watcher (mrwatch in another project's install): its tasks' news, not this panel's. Not logged:
+  // it never came here (2026-11-10: the default project's board judged the lb project's MRs, one turn each)
+  if (e.data?.panel && e.data.panel !== ctx.workspace.project) return { notMine: true };
   const { store } = load(ctx);
   if (store.tasks.some((t) => t.origin?.id === e.id || t.followups?.includes(e.id)) || state(ctx).items.some((x) => x.event.id === e.id)) return { duplicate: true };
   const ev = compact(e);

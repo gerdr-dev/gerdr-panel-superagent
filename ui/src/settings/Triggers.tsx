@@ -11,14 +11,18 @@ import { usePoll } from "../lib/visible";
 // neither. Turning one on writes a Gerdr trigger file (triggers/inbox-*.json, local/inbox.ts); its runs come from
 // /api/work/triggers.
 
-type Source = { on: string; title?: string; description?: string; addon?: string; canReply?: boolean; seen?: number; enabled: boolean; key?: string; allow?: string[]; inferred?: boolean };
+type Source = { on: string; title?: string; description?: string; addon?: string; canReply?: boolean; seen?: number; enabled: boolean; key?: string; allow?: string[]; inferred?: boolean; by?: string };
+/** One of the panel's own triggers (triggers/*.json): always on. */
+type Builtin = { id: string; on: string; name?: string; key?: string };
 type TriggerInfo = { id: string; on: string; runs: number; last?: { startedAt: string; ok: boolean; error?: string } };
 
 export default function TriggersPage() {
   const [list, setList] = useState<Source[] | null>(null);
+  const [own, setOwn] = useState<Builtin[]>([]);
   const [runs, setRuns] = useState<Record<string, TriggerInfo>>({});
   const [err, setErr] = useState("");
   const load = () => {
+    run<Builtin[]>("inbox.builtin").then(setOwn, () => {});
     run<Source[]>("inbox.sources").then(
       (l) => (setList(l), setErr("")),
       (e) => setErr(String(e.message || e)),
@@ -34,11 +38,20 @@ export default function TriggersPage() {
       <header>
         <h1 className="text-[22px] font-semibold tracking-tight">触发器</h1>
         <p className="mt-1 text-[13px] text-muted-foreground">
-          外面发生的事（私信、@ 你、告警……）交给 Superagent：已有任务的对话里的后续直接交给那个任务，其余的由它判断是不是活、派给谁（每条去了哪，看「去向」）。
+          这个面板收哪些外面发生的事（私信、@ 你、MR、告警……），都在这一页。已有任务的对话里的后续直接交给那个任务，其余的由秘书判断是不是活、派给谁（每条去了哪，看「去向」）。
           能选什么取决于装了哪些插件、有哪些事件来过；来源支持回复的，接了活、有了结果都会回到原来的对话里说一声。
         </p>
       </header>
       {err && <p role="alert" className="text-[13px] text-bad">{err}</p>}
+      {own.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-[13px] font-medium text-muted-foreground">面板自带，一直开着</h2>
+          {own.map((b) => (
+            <OwnRow key={b.id} b={b} info={runs[b.on]} />
+          ))}
+        </section>
+      )}
+      {list && list.length > 0 && <h2 className="pt-2 text-[13px] font-medium text-muted-foreground">你选的：勾上就收进来</h2>}
       {!list && !err && <p className="p-8 text-center text-[13px] text-muted-foreground">正在加载…</p>}
       {list?.length === 0 && (
         <p className="rounded-xl border border-dashed p-6 text-center text-[13px] text-muted-foreground">
@@ -50,6 +63,79 @@ export default function TriggersPage() {
           <Row key={s.on} s={s} info={runs[s.on]} onSaved={load} />
         ))}
       </div>
+    </div>
+  );
+}
+
+/**
+ * One of the panel's own triggers. The MR one (triggers/mr.json) carries what it needs: the GitLab the MR watcher
+ * (schedules/mrwatch) asks, a setting (gitlab.host), shown here so everything about what comes in is on one page.
+ */
+function OwnRow({ b, info }: { b: Builtin; info?: TriggerInfo }) {
+  const last = info?.last;
+  return (
+    <article className="space-y-2 rounded-xl border bg-card p-4 max-md:p-3">
+      <div className="min-w-0">
+        <h3 className="flex items-center gap-2 text-[14px] font-medium">
+          <Zap className="size-3.5 text-brand" />
+          {b.name || b.on}
+        </h3>
+        <p className="mt-0.5 text-[12px] text-muted-foreground">
+          <span className="font-mono">{b.on}</span>
+          {b.key && <> · 只要 <span className="font-mono">{b.key}</span></>}
+          {info && (
+            <span className={clsx(last && !last.ok && "text-bad")}>
+              {" "}· 收过 {info.runs} 条{last ? ` · 上次${since(Date.parse(last.startedAt))}前${last.ok ? "" : `失败：${last.error}`}` : ""}
+            </span>
+          )}
+        </p>
+      </div>
+      {b.id === "mr" && <GitLab />}
+    </article>
+  );
+}
+
+function GitLab() {
+  const [host, setHost] = useState<string | null>(null);
+  const [cur, setCur] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  usePoll(
+    () =>
+      run<{ settings: { gitlab: { host: string } } }>("settings.get").then(
+        (r) => (setCur(r.settings.gitlab.host), setHost((h) => h ?? r.settings.gitlab.host)),
+        () => {},
+      ),
+    60_000,
+  );
+  const save = async () => {
+    setBusy(true);
+    setErr("");
+    try {
+      await run("settings.set", { gitlab: { host: (host ?? "").trim() } });
+      setCur((host ?? "").trim());
+    } catch (e: any) {
+      setErr(String(e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="space-y-1 text-[12px] text-muted-foreground">
+      <p>
+        这个面板的任务在跟的 MR（worker 开的、在等的），由定时任务 mrwatch 去 GitLab 查：新的 review 意见、流水线、能合了、合并了，交给跟着它的任务。
+        别的项目的面板发出的 MR 消息不收。
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <span>GitLab 地址（glab 要先在这台电脑上登录过它）</span>
+        <input className="h-7 w-56 rounded-md border bg-background px-2 font-mono text-[12px] text-foreground" value={host ?? ""} placeholder="gitlab.com" onChange={(e) => setHost(e.target.value)} onKeyDown={(e) => e.key === "Enter" && host !== cur && save()} />
+        {host !== null && host.trim() !== cur && (
+          <Button disabled={busy} onClick={save}>
+            保存
+          </Button>
+        )}
+      </div>
+      {err && <p className="text-bad">{err}</p>}
     </div>
   );
 }
@@ -90,11 +176,16 @@ function Row({ s, info, onSaved }: { s: Source; info?: TriggerInfo; onSaved: () 
           </p>
           {s.description && <p className="mt-1 text-[12px] text-muted-foreground">{s.description}</p>}
         </div>
-        <label className="flex shrink-0 cursor-pointer items-center gap-2 text-[13px]">
-          {busy && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
-          <input type="checkbox" className="size-4 accent-[var(--brand)]" checked={s.enabled} disabled={busy} onChange={(e) => save(e.target.checked)} />
-          收进来
-        </label>
+        {s.by ? (
+          // Taken by one of the panel's own triggers already: a second one would take each event twice
+          <span className="shrink-0 text-[12px] text-muted-foreground">已由「{s.by}」收着</span>
+        ) : (
+          <label className="flex shrink-0 cursor-pointer items-center gap-2 text-[13px]">
+            {busy && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
+            <input type="checkbox" className="size-4 accent-[var(--brand)]" checked={s.enabled} disabled={busy} onChange={(e) => save(e.target.checked)} />
+            收进来
+          </label>
+        )}
       </div>
       {s.enabled && (
         <div className="flex flex-wrap items-center gap-2 text-[12px]">

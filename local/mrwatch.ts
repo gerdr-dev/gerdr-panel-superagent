@@ -129,7 +129,9 @@ async function one(key: string, st: State, ctx: Ctx): Promise<string> {
   const say = (e: Out) => {
     said.push(e.kind);
     if (dry) return void would.push(`${e.kind}: ${e.title}`);
-    ctx.events.emit({ ...e, source: "gitlab", key, data: { project, iid, mr: url, state, pipeline: pipe?.status } });
+    // Tagged with this panel, its id too: events are the whole computer's, and another panel's MR trigger must not
+    // take what this one's tasks follow (inbox.onEvent drops another panel's); two panels following one MR each get theirs
+    ctx.events.emit({ ...e, id: `${ctx.workspace.project}|${e.id}`, source: "gitlab", key, data: { project, iid, mr: url, state, pipeline: pipe?.status, panel: ctx.workspace.project } });
   };
   const done = () => (dry ? `would: ${would.splice(0).join("; ") || "nothing"} (${seen.state})` : said.join(", ") || "nothing new");
 
