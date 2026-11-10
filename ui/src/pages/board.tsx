@@ -1452,6 +1452,39 @@ function teamNeeds(t: Task, tasks: Task[]) {
   return { steps, stuck };
 }
 
+export type Need = Exclude<FeedItem, { type: "act" }>;
+
+/** Asked of the user and since answered or taken back: shown as its record, no longer waiting. */
+export const isRecord = (x: Need) => x.type === "ask" && (x.h.status === "done" || x.h.status === "dropped");
+
+/**
+ * What a feed shows of the user's part, for both feeds (DESIGN.md「一个架构」): the steps and questions asked of them,
+ * open (answerable cards) or answered / taken back (their record, where they were asked — as a chat keeps a card and
+ * turns it into 已处理), and agents stuck on them. `tasks` is the feed's scope: a requirement's own, or every task for
+ * the secretary's page; `from`: records asked before it are left out (before the conversation shown). Never filter
+ * answered ones out on one page only: that is how a question vanished on the click from one and not the other.
+ */
+export function needsIn(tasks: Task[], from = 0): Need[] {
+  const out: Need[] = [];
+  for (const x of tasks) {
+    const over = x.status === "done" || x.status === "dropped";
+    if (x.owner === "human" && (over ? askedAt(x) >= from : x.ready)) out.push({ at: askedAt(x), key: `h${x.id}`, type: "ask", h: x });
+    else if (x.owner === "agent" && !over && x.column === "you") out.push({ at: waitedSince(x), key: `s${x.id}`, type: "stuck", m: x });
+  }
+  return out;
+}
+
+/**
+ * A line that records an answer shown by its item's record (Activity.of), or, from before lines carried `of`, one of
+ * the lines the board wrote for an answer: not drawn, the record says it. Kept in the feed's data all the same (team
+ * mode syncs it; the worker's chat has it).
+ */
+export function recordedElsewhere(a: NonNullable<Task["activity"]>[number], records: Set<string>) {
+  if (a.kind !== "user") return false;
+  if (a.of) return records.has(a.of);
+  return records.size > 0 && /^你(答了 \d+ 个问题：|答了「|做完了「|说「.*」不用答了|先发了答案：)/.test(a.text);
+}
+
 /**
  * A step / decision as the chat's card draws it (local/board.ts ask_human and questionCard): Gerdr's built-in card,
  * answered through the same functions. One per question still open; the ones answered while others wait as a line.
@@ -1675,7 +1708,8 @@ export function NeedRow({ x, lead, activity, byId, act, onGo, nobody }: { x: Exc
   const head = (m: Task | undefined, label: string, at: number, tone?: string) => (
     <div className="flex items-baseline gap-1.5 text-[11px] text-muted-foreground">
       <span className="font-medium text-foreground/80">{memberLabel(m) || nobody?.name || "?"}</span>
-      {m && <span>{m.id}</span>}
+      {/* Its number, unless the name already is it (a member with no repository is named by its id) */}
+      {m && memberLabel(m) !== m.id && <span>{m.id}</span>}
       <span className={tone}>{label}</span>
       <span className="tabular-nums">{when(at)}</span>
     </div>
@@ -1800,7 +1834,7 @@ export function NeedRow({ x, lead, activity, byId, act, onGo, nobody }: { x: Exc
             <div className="flex items-center gap-2">
               <AlertTriangle className="size-3.5 shrink-0 text-warn" />
               <span className="min-w-0 flex-1">
-                <span className="font-medium">{memberLabel(x.m)}</span> {x.m.id}「{x.m.title}」 · {stuckText(x.m)}
+                <span className="font-medium">{memberLabel(x.m)}</span> {memberLabel(x.m) !== x.m.id && `${x.m.id} `}「{x.m.title}」 · {stuckText(x.m)}
                 <span className="text-muted-foreground tabular-nums"> · {when(x.at)}</span>
               </span>
               {!waiter && x.m.session && (
@@ -2042,7 +2076,6 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
   const [rerouting, setRerouting] = useState(false);
   const [why, setWhy] = useState("");
   const ms = (t.members ?? []).map((id) => byId[id]).filter(Boolean);
-  const { steps, stuck } = teamNeeds(t, tasks);
   const over = t.status === "done" || t.status === "dropped";
   const request = (t.request ?? t.prompt ?? "").trim();
   // 动态 (the feed, where the drawer opens), 详情 (the request as written, the latest, links): one at a time under a short header, so a phone keeps the feed in view
@@ -2050,13 +2083,17 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
   const files = t.attachments ?? [];
   const link = (p: string) => (/[\s()]/.test(p) ? `<${p}>` : p);
   const requestMd = [request, ...files.map((a) => (a.mime?.startsWith("image/") || /\.(png|jpe?g|gif|webp)$/i.test(a.path) ? `![${a.name}](${link(a.path)})` : `[${a.name}](${link(a.path)})`))].filter(Boolean).join("\n\n");
+  // The user's part as on the secretary's page (needsIn): open ones while the requirement is on, records always.
+  // An open one sits at its newest open question: one asked later joins the same item, and must not sit up where
+  // the first was (t63)
+  const needs = needsIn(tasks.filter((x) => x.id === t.id || x.in === t.id)).filter((x) => isRecord(x) || !over);
+  const records = new Set(needs.filter(isRecord).map((x) => (x as { h: Task }).h.id));
   const items: FeedItem[] = [
-    ...(t.activity ?? []).map((a, i) => ({ at: a.at, key: `a${i}`, type: "act" as const, a })),
-    // At its newest open question: one asked later joins the same item, and must not sit up where the first was (t63)
-    ...(over ? [] : steps.map((h) => ({ at: askedAt(h), key: `h${h.id}`, type: "ask" as const, h }))),
-    ...(over ? [] : stuck.map((m) => ({ at: waitedSince(m), key: `s${m.id}`, type: "stuck" as const, m }))),
+    ...(t.activity ?? []).flatMap((a, i) => (recordedElsewhere(a, records) ? [] : [{ at: a.at, key: `a${i}`, type: "act" as const, a }])),
+    ...needs,
   ].sort((a, b) => a.at - b.at);
-  const pending = items.filter((x) => x.type !== "act");
+  // What the jump pill and the scroll on opening point at: what still waits, not records
+  const pending = items.filter((x) => x.type !== "act" && !isRecord(x));
   const scroller = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLDivElement>(null);
   const [jumpTo, setJumpTo] = useState<{ key: string; seq: number }>();

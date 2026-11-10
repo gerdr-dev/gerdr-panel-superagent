@@ -10,8 +10,8 @@ import { Views } from "../components/Views";
 import { project, run } from "../lib/gerdr";
 import { Linger } from "../lib/linger";
 import { phoneMenu, usePhoneMenu } from "../lib/phoneMenu";
-import { useTasks, waitedSince, type Task } from "../lib/tasks";
-import { askedAt, LineRow, NeedRow, setOpenChat, WorkingRow, type FeedItem as NeedItem } from "./board";
+import { useTasks, type Task } from "../lib/tasks";
+import { isRecord, LineRow, NeedRow, needsIn, setOpenChat, WorkingRow, type Need } from "./board";
 import { sessionsKey, usePanelChange, useRefresh, useSessions } from "../lib/visible";
 
 // The secretary (DESIGN.md「秘书」): one conversation in the middle of the page, where the user hands everything over
@@ -28,7 +28,6 @@ type Main = { id: string; status: string; waiting?: string; waitingKind?: string
 type Feed = { entries: (Entry | Note)[]; main: Main | null; busy: boolean };
 
 type FeedEntry = { key: string; at: number; user?: { text: string; files?: File[] } };
-type Need = Exclude<NeedItem, { type: "act" }>;
 type Row = FeedEntry & ({ type: "need"; x: Need } | { type: "line"; e: Entry } | { type: "notes"; notes: Note[] } | { type: "busy"; m: Main } | { type: "waiting"; m: Main } | { type: "hello" });
 
 // Gerdr's FeedChat, through the namespace: a Gerdr from before it says so instead of breaking
@@ -79,7 +78,8 @@ export default function SecretaryPage() {
   const byId = useMemo(() => Object.fromEntries((tasks ?? []).map((t) => [t.id, t])), [tasks]);
   // Only from where the conversation shown starts: older answered steps belong to before it
   const from = feed?.entries[0]?.at ?? Infinity;
-  const needs = useMemo(() => needsOf(tasks, from), [tasks, from]);
+  // The user's part, by the same rule as a requirement's feed (needsIn), over every task
+  const needs = useMemo(() => needsIn(tasks ?? [], from), [tasks, from]);
   const rows = useMemo(() => toRows(feed, main, needs), [feed, main, needs]);
   const send = useCallback(
     async (m: { text: string; files: File[] }) => {
@@ -120,7 +120,7 @@ export default function SecretaryPage() {
           </Button>
         </div>
       </header>
-      <Waiting needs={needs.filter((x) => x.type !== "ask" || (x.h.status !== "done" && x.h.status !== "dropped"))} onJump={(key) => setJump((j) => ({ key, seq: (j?.seq ?? 0) + 1 }))} />
+      <Waiting needs={needs.filter((x) => !isRecord(x))} onJump={(key) => setJump((j) => ({ key, seq: (j?.seq ?? 0) + 1 }))} />
       {error && <p role="alert" className="px-4 pt-3 text-[13px] text-bad">读取失败：{error}</p>}
       {/* Full width, so the whole page scrolls the conversation and its scrollbar sits at the right edge; the chat
           itself keeps the text in a centred column (800px, like every Gerdr chat) */}
@@ -145,21 +145,6 @@ export default function SecretaryPage() {
  * The rows: messages as they are, runs of outside messages it handled folded into one line, and at the end what the
  * secretary is doing now (busy, or waiting for an approval). An empty conversation gets a line on what it's for.
  */
-/**
- * What waits on the user across the board, as a requirement's feed has it (board.tsx teamNeeds): the steps and
- * decisions workers asked, and workers stuck on the user.
- */
-function needsOf(tasks: Task[] | null, from: number): Need[] {
-  const live = (tasks ?? []).filter((t) => t.status !== "done" && t.status !== "dropped");
-  // What was asked here and is answered (or taken back) now: kept where it was asked, as its record (NeedRow)
-  const over = (tasks ?? []).filter((t) => t.owner === "human" && (t.status === "done" || t.status === "dropped") && askedAt(t) >= from);
-  return [
-    ...live.filter((t) => t.owner === "human" && t.ready).map((h): Need => ({ at: askedAt(h), key: `h${h.id}`, type: "ask", h })),
-    ...over.map((h): Need => ({ at: askedAt(h), key: `h${h.id}`, type: "ask", h })),
-    ...live.filter((t) => t.owner === "agent" && t.column === "you").map((m): Need => ({ at: waitedSince(m), key: `s${m.id}`, type: "stuck", m })),
-  ];
-}
-
 function toRows(feed: Feed | null, main: Main | null, needs: Need[]): Row[] {
   const out: Row[] = [];
   for (const e of feed?.entries ?? []) {

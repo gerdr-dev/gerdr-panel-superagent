@@ -33,6 +33,8 @@
 ---
 
 改看板（`ui/src/pages/board.tsx`、`local/tasks.ts` `board.ts` `mrwatch.ts`）之前先读 `DESIGN.md`：为什么这么设计、哪些做法试过被否了。
+秘书页和需求动态是一个架构（行的种类、「你的那部分」、画法都共用，只有范围不同）：加任何会出现在这两页上的东西，
+先读 `DESIGN.md` 的「一个架构」，两页都要照着改、都要打开看。
 
 这个面板有两页：秘书（`ui/src/pages/index.tsx`，对话记录 `local/_log.ts`，会话和换会话在 `local/_main.ts`，
 页面和简报调的函数在 `local/secretary.ts`）和看板（`ui/src/pages/board.tsx`）。看板上派给 agent 的任务和要用户亲手做的人工任务，按「待办 / 进行中 / 等你 / 待验收 / 已完成」排，

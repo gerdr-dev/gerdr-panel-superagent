@@ -26,7 +26,7 @@ export type Question = { id: string; title: string; kind: "choice" | "value"; op
  * and hand-offs only — a member finishing its part, telling a teammate, pulling one in, the user answering.
  * by: the member it's about (a task id); kind: what sort of line, for its icon.
  */
-export type Activity = { at: number; by?: string; kind: "progress" | "tell" | "join" | "done" | "review" | "user" | "stuck" | "wait" | "got" | "message"; text: string; to?: string; files?: { path: string; name?: string }[] };
+export type Activity = { at: number; by?: string; kind: "progress" | "tell" | "join" | "done" | "review" | "user" | "stuck" | "wait" | "got" | "message"; text: string; to?: string; files?: { path: string; name?: string }[]; /** The step / question item (human task) whose answer this line records: drawn by that item's record instead (DESIGN.md「一个架构」) */ of?: string };
 
 export type Task = {
   id: string;

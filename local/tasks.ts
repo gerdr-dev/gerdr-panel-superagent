@@ -569,7 +569,7 @@ export async function complete(input: { id: string; value?: string }, ctx: Ctx) 
     if (h.status === "dropped") throw new Error(`${h.id} 已经不需要了`);
     if ((h.handBack?.kind === "value" || h.handBack?.kind === "choice") && !input.value?.trim()) throw new Error(h.handBack.kind === "choice" ? "选一个，或者写下你的决定" : `要交回：${h.handBack.label || "一个值"}`);
     Object.assign(h, { status: "done", handedBack: input.value?.trim() || undefined, doneAt: Date.now(), updatedAt: Date.now() });
-    activity(s, h, { kind: "user", by: h.askedBy, text: `${h.handBack?.kind === "choice" || h.handBack?.kind === "questions" ? "你答了" : "你做完了"}「${h.title}」${h.handBack?.kind === "secret" || !h.handedBack ? "" : `：${h.handedBack}`}` });
+    activity(s, h, { kind: "user", by: h.askedBy, of: h.id, text: `${h.handBack?.kind === "choice" || h.handBack?.kind === "questions" ? "你答了" : "你做完了"}「${h.title}」${h.handBack?.kind === "secret" || !h.handedBack ? "" : `：${h.handedBack}`}` });
     woken = s.tasks.filter((t) => t.owner === "agent" && t.session && t.status === "running" && t.blockedBy?.includes(h.id) && blockersDone(s, t));
     return h;
   });
@@ -1075,7 +1075,7 @@ export async function answerQuestion(input: { id: string; q: string; value: stri
 function finish(s: Store, h: Task) {
   Object.assign(h, { status: "done", handedBack: summary(h), doneAt: Date.now() });
   for (const q of asked(h)) q.sent = true;
-  activity(s, h, { kind: "user", by: h.askedBy, text: `你答了 ${asked(h).length} 个问题：${summary(h)}` });
+  activity(s, h, { kind: "user", by: h.askedBy, of: h.id, text: `你答了 ${asked(h).length} 个问题：${summary(h)}` });
 }
 
 /** The answers of a finished item go to its worker (and anyone it held up), with the questions the user set aside. */
@@ -1104,7 +1104,7 @@ export async function skipQuestion(input: { id: string; q: string }, ctx: Ctx) {
     if (q.answer != null) throw new Error(`这个问题你已经答了：${q.answer}`);
     Object.assign(q, { dropped: "你说不用答了", skipped: true });
     note(h, `用户说「${q.title}」不用答了`);
-    activity(s, h, { kind: "user", by: h.askedBy, text: `你说「${q.title}」不用答了` });
+    activity(s, h, { kind: "user", by: h.askedBy, of: h.id, text: `你说「${q.title}」不用答了` });
     const left = asked(h);
     if (!left.length) {
       // Nothing left to ask: the item goes, and its worker hears that none of it is needed
@@ -1135,7 +1135,7 @@ export async function sendAnswered(input: { id: string }, ctx: Ctx) {
     rest = asked(h).filter((q) => q.answer == null);
     if (!fresh.length) throw new Error("还没有答了没发的");
     for (const q of fresh) q.sent = true;
-    activity(s, h, { kind: "user", by: h.askedBy, text: `你先发了答案：${fresh.map((q) => `${q.title}：${q.answer}`).join("；")}` });
+    activity(s, h, { kind: "user", by: h.askedBy, of: h.id, text: `你先发了答案：${fresh.map((q) => `${q.title}：${q.answer}`).join("；")}` });
     h.updatedAt = Date.now();
     return h;
   });

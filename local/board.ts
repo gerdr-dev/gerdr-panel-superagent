@@ -338,7 +338,7 @@ function takeBack(s: Store, t: Task, id: string, reason: string) {
       Object.assign(h, { status: "done", handedBack: sum, doneAt: Date.now() });
       for (const x of left) x.sent = true;
       t.blockedBy = (t.blockedBy ?? []).filter((x) => x !== h.id);
-      activity(s, t, { kind: "user", by: t.id, text: `你答了 ${left.length} 个问题：${sum}` });
+      activity(s, t, { kind: "user", by: t.id, of: h.id, text: `你答了 ${left.length} 个问题：${sum}` });
     }
     return {
       id,
