@@ -1777,7 +1777,7 @@ export function NeedRow({ x, lead, activity, byId, act, onGo, nobody }: { x: Exc
             <div className="flex items-center gap-2">
               <AlertTriangle className="size-3.5 shrink-0 text-warn" />
               <span className="min-w-0 flex-1">
-                <span className="font-medium">{memberLabel(x.m)}</span> · {stuckText(x.m)}
+                <span className="font-medium">{memberLabel(x.m)}</span> {x.m.id}「{x.m.title}」 · {stuckText(x.m)}
                 <span className="text-muted-foreground tabular-nums"> · {when(x.at)}</span>
               </span>
               {!waiter && x.m.session && (

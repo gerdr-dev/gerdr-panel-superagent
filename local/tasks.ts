@@ -126,7 +126,7 @@ export async function list(input: unknown, ctx: Ctx) {
       if (b && sess.byPerson && b.state === "review" && t.status === "running") applyBlock(s, t, { ...b, state: undefined });
       else if (b) applyBlock(s, t, b);
       else if (t.status === "running" && sess.status === "idle" && !t.viaTools && !cancelled) askUser(t, `${STOPPED_ASK}：去对话里看看它说了什么，让它接着做，或者直接「标为完成」`);
-      else if (t.status === "running" && sess.status === "idle" && t.viaTools && !settled(t) && !cancelled) {
+      else if (t.status === "running" && sess.status === "idle" && t.viaTools && !settled(t) && !cancelled && !busyBehind(sess)) {
         // It stopped in no state the board knows: a question written only in its reply (t3, 2026-11-04), "I'll wait"
         // with nothing to wake it (t29), "working" reported and then nothing (t30), work handed to a session with no
         // timeout on it (#1, 2026-11-06). Reminded once to put itself in one; if it stops like that again, it is put in
@@ -324,10 +324,20 @@ function column(s: Store, t: Task, sess: any): "you" | "review" | "active" | "do
   return "active";
 }
 
+/**
+ * A command its worker left running in the background (a render, a long build): when it ends the agent is woken with
+ * its result, so the worker is waiting on it, not stopped (t47, 2026-11-10: "两条成片正在后台渲染" was put under
+ * 等你 as stopped without a report). Once it ends and the worker still says nothing, the usual checks apply.
+ */
+function busyBehind(sess: any) {
+  return !!sess?.tasks?.some((k: any) => k.background && k.status === "running");
+}
+
 /** Its worker isn't running and the task waits on nothing. */
 function stopped(t: Task, sess: any) {
   if (t.owner !== "agent" || t.status !== "running") return false;
   if (sess && (sess.status === "running" || sess.status === "starting")) return false;
+  if (busyBehind(sess)) return false;
   return !open(t).length;
 }
 

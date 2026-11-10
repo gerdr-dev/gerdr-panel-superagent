@@ -418,8 +418,12 @@ export async function toMain(ctx: Ctx, blocks: string[], why: Why = "route", att
   return id;
 }
 
-/** 「（无）」, give or take brackets and a full stop. */
-const silent = (text: string) => text.replace(/[（）()。.\s]/g, "") === "无";
+/**
+ * What's left to show once its 「（无）」 are taken out: several messages answered in one turn come back as
+ * 「（无）（无）」, and it sometimes ends a real sentence with one ("t46 和 t47 还在做。（无）").
+ */
+const unsilenced = (text: string) => text.replace(/[（(]\s*无\s*[）)]/g, "").trim();
+const silent = (text: string) => !unsilenced(text).replace(/[。.\s]/g, "");
 
 /** Gerdr's note at the end of a reply on how the turn ended (lastReply in its workhost.go): not the secretary's words. */
 const ENDING = /^(这一轮结束：|Turn ended: |出错：|Error: )/;
@@ -454,7 +458,7 @@ export async function capture(ctx: Ctx, beforeSend = false) {
     return w;
   });
   if (!why || !text || silent(text)) return;
-  append(ctx, { who: "agent", text, kind: why === "user" ? "reply" : why === "brief" ? "brief" : "notice", session: m.id });
+  append(ctx, { who: "agent", text: unsilenced(text), kind: why === "user" ? "reply" : why === "brief" ? "brief" : "notice", session: m.id });
 }
 
 /**
