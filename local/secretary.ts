@@ -29,8 +29,12 @@ const cut = (s: string, n: number) => {
  */
 export async function feed(input: { limit?: number }, ctx: Ctx) {
   await capture(ctx);
-  const log = entries(ctx).slice(-(input?.limit ?? 300));
-  const from = log[0]?.at ?? 0;
+  const all = entries(ctx);
+  const log = all.slice(-(input?.limit ?? 300));
+  // Outside messages only from when the secretary began (state.since, set the first time), and not older than the
+  // oldest message shown when the conversation is cut
+  const since = state(ctx).since ?? updateState(ctx, (s) => (s.since ??= Math.min(Date.now(), all[0]?.at ?? Infinity)));
+  const from = Math.max(since, log.length < all.length ? log[0].at : 0);
   const notes: Note[] = state(ctx)
     .items.filter((it) => STATE[it.state] && (it.decidedAt ?? it.at) >= from)
     .map((it) => {
@@ -45,12 +49,12 @@ export async function feed(input: { limit?: number }, ctx: Ctx) {
         text: `${e.source}${who ? ` · ${who}` : ""}：${cut(e.text || e.title || "", 60)} → ${STATE[it.state]}${it.tasks?.length ? ` ${it.tasks.join("、")}` : ""}${it.reason ? `（${cut(it.reason, 40)}）` : ""}`,
       };
     });
-  const all: (Entry | Note)[] = [...log, ...notes].sort((a, b) => a.at - b.at);
+  const merged: (Entry | Note)[] = [...log, ...notes].sort((a, b) => a.at - b.at);
   const id = mainId(ctx);
   const m = id ? ctx.sessions.get(id) : null;
   const s = state(ctx);
   return {
-    entries: all,
+    entries: merged,
     main: m ? { id: m.id, status: m.status, waiting: m.waiting, waitingKind: m.waitingKind, error: m.error } : null,
     // Its turn is about the user's words: the page shows it "typing"
     busy: !!s.awaiting,

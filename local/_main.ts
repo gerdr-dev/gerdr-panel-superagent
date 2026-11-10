@@ -95,6 +95,11 @@ type State = {
   noticed?: Record<string, string>;
   /** When the last briefing was asked for: the next one covers what happened since. */
   briefAt?: number;
+  /**
+   * When the secretary page was first opened (ms): the 去向 log goes back to before there was a secretary, and those
+   * old outside messages aren't part of its conversation.
+   */
+  since?: number;
 };
 
 function load(ctx: Ctx): { s: State; etag?: string } {
