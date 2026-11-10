@@ -8,8 +8,9 @@
 // The main session is the secretary (DESIGN.md「秘书」): the one agent the user talks to, and the one that routes. It
 // never waits and never does the work itself, and gets everything as messages (a batch arriving while it decides
 // waits for its next pause): the user's words from the page (secretary.ts say), board tasks and outside messages to
-// route, news about tasks that need the user (notice), and the briefing on its schedule. What it says back is taken
-// from its reply at the end of each turn (capture) into the conversation the page shows (_log.ts). It replaced a
+// route, news about tasks that need the user (notice), and the briefing on its schedule. What the user sees of it is
+// what it sends with its message tool (board.ts message_user → secretaryMessage, _log.ts), as a worker's feed lines; a turn
+// the user waited on that sent nothing gets one reminder (settle). It replaced a
 // one-off router per task and the panel's own chat on the right. Every event is logged with where it went
 // (user/data/superagent.json items), so "what happened to that message" always has an answer.
 
@@ -20,7 +21,7 @@ import { textOf } from "./playbooks";
 import { DATA, migrate } from "./_user";
 import { activity, find, load as loadTasks, note, update as updateTasks, type Task } from "./_store";
 import { wake } from "./_wake";
-import { append, windowText } from "./_log";
+import { append, windowText, SECRETARY as SECRETARY_ID } from "./_log";
 import { waitingLines } from "./_inbox";
 import { isOutside, waitingOn } from "./_waits";
 
@@ -33,13 +34,6 @@ const STATE = `${DATA}/superagent.json`;
 const COLD = 3600_000;
 /** And after this many messages without ever going cold (a busy inbox): its context mustn't grow without end. */
 const ROTATE = 150;
-/** What the secretary replies when there's nothing to tell the user (a turn about routing, news it keeps for later). */
-/**
- * A machine marker, not a word: it reads the same whatever language the secretary is told in or answers in, and
- * never turns up in a real sentence. 「（无）」 was the word before (2026-11-10): an English reply would have said
- * "(none)" and shown, and 「附件：（无）」 would have lost it.
- */
-export const SILENT = "<silent/>";
 /** Items kept in the log. */
 const KEEP = 300;
 
@@ -84,7 +78,7 @@ export type Item = {
   decidedAt?: number;
 };
 
-/** Why the secretary is having a turn, for what its reply is (capture): an answer to the user, a briefing, its own news. */
+/** Why the secretary is having a turn: the user's words, a briefing (both owe the user a message), its own news, routing. */
 export type Why = "user" | "brief" | "notice" | "route";
 
 type State = {
@@ -94,8 +88,13 @@ type State = {
   handled: number;
   next: number;
   items: Item[];
-  /** Messages sent since its reply was last taken: what the turn was for (the strongest reason wins). */
-  awaiting?: { why: Why; /** when the last message went in */ sent: number };
+  /**
+   * Messages sent since its last turn ended: what the turn is for (the strongest reason wins), for the page's "busy"
+   * and for the one reminder when a turn the user (or a briefing) waited on ends without a message to them.
+   */
+  awaiting?: { why: Why; /** when the last message went in */ sent: number; /** reminded once already */ nudged?: boolean };
+  /** When it last sent the user a message (its message tool): a turn that sent one needs no reminder. */
+  messageAt?: number;
   /** Before 2026-11-10's status news: what was told as needing the user. Unused now. */
   noticed?: Record<string, string>;
   /** Each task's status as last told to the secretary (notice): task id → its key, so each change is told once. */
@@ -306,7 +305,8 @@ function talkText(ctx: Ctx) {
     `## 和用户说话\n` +
       `- 你收到的消息有几种：[用户] 是用户在秘书页上对你说的话；[任务 tN] / [消息 cN] / [重新安排 tN] 是要派的活（见下面）；` +
       `[动态] 是任务的状态变了（开始做、等用户、待验收、做完、放弃、接着做；中途的进展不会来）；[简报] 是到了写简报的时间。\n` +
-      `- **你这一轮最后的回复就是用户看到的话**（工具调用和中间过程他看不到）。没有要告诉他的（派活、分拣、不急的动态），整条回复只写「${SILENT}」。\n` +
+      `- **对用户说话一律用 message_user 工具**（简报带 \`"brief": true\`）：秘书页上只有它发的消息，你回复里的文字和中间过程用户都看不到。` +
+      `没有要告诉他的（派活、分拣、不急的动态）就不调用。他问你的、交代你的，每次都要用 message 回一句。\n` +
       `- 用户问到的、你要说的，先查事实再说：\`gerdr panel run secretary.status\` 给出等他的事（带问题的 id 和选项）、在做的、待验收的、最近完成的。` +
       `不要凭记忆说「做完了」。问到某一件事的细节（做到哪、动态里写了什么、开了哪个 MR、它最后说了什么）：` +
       `\`gerdr panel run tasks.list '${ex({ id: "t12" })}'\` 只给这一件（和它的成员），别不带 id 拉整块看板。\n` +
@@ -316,7 +316,7 @@ function talkText(ctx: Ctx) {
       `验收 \`tasks.accept ${ex({ id: "t5" })}\` / 打回 \`tasks.reject ${ex({ id: "t5", feedback: "…" })}\`；` +
       `他做完了自己的步骤 \`tasks.complete ${ex({ id: "t5", value: "要交回的值（没有就不写）" })}\`；` +
       `转告 worker \`tasks.say ${ex({ id: "t5", text: "…" })}\`；不做了 \`tasks.drop ${ex({ id: "t5", reason: "…" })}\`。\n` +
-      `- 不要用你自带的提问工具（AskUserQuestion）：有要问用户的，直接在回复里问，他会在秘书页上答你。\n` +
+      `- 不要用你自带的提问工具（AskUserQuestion）：有要问用户的，用 message_user 问，他会在秘书页上答你。\n` +
       `- **要用户回答的问题会作为卡片出现在秘书页的对话里**（[动态] 和 secretary.status 里带着问题、选项和交答案的命令）：` +
       `他可以直接点卡片，也可以对你说。你说一句要他决定什么、为什么要紧就行，不用重复选项，更不要让他去看板或 worker 的对话里答。` +
       `他用文字答了，你用给出的命令替他交（一个问题一条命令），再告诉他交了。密钥不经过对话：卡片上会让他在看板上填。\n` +
@@ -373,8 +373,6 @@ const RANK: Record<Why, number> = { route: 0, notice: 1, brief: 2, user: 3 };
  * roles), the new brief goes first.
  */
 export async function toMain(ctx: Ctx, blocks: string[], why: Why = "route", attachments?: string[]): Promise<string> {
-  // What it said since the last message, before this one resets that (a reply in the middle of its turn included)
-  await capture(ctx, true);
   const b = await brief(ctx);
   const h = hash(b);
   const s = state(ctx);
@@ -423,51 +421,46 @@ export async function toMain(ctx: Ctx, blocks: string[], why: Why = "route", att
   return id;
 }
 
-/**
- * What's left to show once its silence markers are taken out: several messages answered in one turn come back with
- * one each, and it sometimes ends a real sentence with one. A whole reply that is only 「（无）」 (the old word, from
- * sessions told before the marker) counts too, until those sessions are replaced.
- */
-const unsilenced = (text: string) => {
-  const t = text.replace(/<\s*silent\s*\/?\s*>/gi, "").trim();
-  return /^([（(]\s*无\s*[）)][。.\s]*)+$/.test(t) ? "" : t;
-};
-const silent = (text: string) => !unsilenced(text).replace(/[。.\s]/g, "");
-
-/** Gerdr's note at the end of a reply on how the turn ended (lastReply in its workhost.go): not the secretary's words. */
-const ENDING = /^(这一轮结束：|Turn ended: |出错：|Error: )/;
+/** Its message to the user (board.ts message_user, called from the secretary's session): a line on the secretary's page. */
+export function secretaryMessage(ctx: Ctx, input: { text: string; files?: { path: string; name?: string }[]; brief?: boolean }) {
+  const e = append(ctx, { kind: input.brief ? "brief" : "message", by: SECRETARY_ID, text: input.text, ...(input.files?.length ? { files: input.files } : {}), session: ctx.caller.session || undefined });
+  updateState(ctx, (s) => {
+    s.messageAt = e.at;
+  });
+  return e;
+}
 
 /**
- * Takes what the secretary said since it was last sent something into the conversation the page shows (_log.ts),
- * once: when its turn is over, or right before another message goes to it (a reply in the middle of a turn, which
- * that message would otherwise reset). Its silence marker (SILENT) is nothing to show. Called from the page's refreshes, the
- * board's (tasks.list, also on a schedule) and toMain, so a reply lands whether or not anyone has the page open.
+ * When a turn is over: what the user (or a briefing) waited on got a message, or the secretary is reminded once to send
+ * one — its reply text shows nowhere (the user: a reply taken from the turn can't tell which of several messages it
+ * answers, when they come in mid-turn; so the secretary says things with its message tool, as a worker reports).
+ * Routing and news turns need no message. Called from the page's refreshes and the board's (tasks.list, also on a
+ * schedule), so it happens whether or not anyone has the page open.
  */
-export async function capture(ctx: Ctx, beforeSend = false) {
+export async function settle(ctx: Ctx) {
   const s = state(ctx);
   if (!s.main || !s.awaiting) return;
   const m = ctx.sessions.get(s.main);
   if (!m) return;
-  const text = m.reply
-    .split(/\n\s*\n/)
-    .filter((p) => !ENDING.test(p.trim()))
-    .join("\n\n")
-    .trim();
-  // Over: idle or failed (waiting for an approval isn't: the turn goes on after it). Right after a message went in it
-  // can still read idle with nothing said yet, before the turn starts: that isn't over until a while has passed.
-  const ended = m.status === "idle" || m.status === "error";
-  const over = ended && (!!text || Date.now() - s.awaiting.sent > 30_000);
-  // Mid-turn, only right before a message goes in (it resets the reply), and only when it has said something
-  if (!over && !(beforeSend && text)) return;
-  const why = updateState(ctx, (x) => {
-    if (!x.awaiting || x.main !== m.id) return null;
-    const w = x.awaiting.why;
-    // Mid-turn: the turn goes on, and so does what it is for
-    if (over) x.awaiting = undefined;
-    return w;
+  // Right after a message went in it can still read idle, before the turn starts: not over until a while has passed
+  const over = (m.status === "idle" || m.status === "error") && (m.updatedAt > s.awaiting.sent + 1000 || Date.now() - s.awaiting.sent > 30_000);
+  if (!over) return;
+  const a = s.awaiting;
+  const owed = (a.why === "user" || a.why === "brief") && (s.messageAt ?? 0) < a.sent && !a.nudged && m.status === "idle";
+  const go = updateState(ctx, (x) => {
+    if (!x.awaiting || x.main !== m.id || x.awaiting.sent !== a.sent) return false;
+    x.awaiting = owed ? { ...x.awaiting, sent: Date.now(), nudged: true } : undefined;
+    return owed;
   });
-  if (!why || !text || silent(text)) return;
-  append(ctx, { who: "agent", text: unsilenced(text), kind: why === "user" ? "reply" : why === "brief" ? "brief" : "notice", session: m.id });
+  if (go)
+    await ctx.sessions
+      .send(
+        m.id,
+        a.why === "brief"
+          ? `[看板] 简报还没发给用户：用 message_user 工具发（带 "brief": true）。你回复里的文字他看不到。`
+          : `[看板] 用户在等你回话：用 message_user 工具回他。你回复里的文字他看不到。`,
+      )
+      .catch(() => {});
 }
 
 /**

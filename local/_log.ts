@@ -1,7 +1,8 @@
 import { DATA } from "./_user";
 
-// The secretary's conversation with the user, as the user sees it (DESIGN.md「秘书」): what they said, what the
-// secretary said back, and the briefings. Kept by the panel, not read from the agent's transcript, because the agent
+// The secretary's conversation with the user, as the user sees it (DESIGN.md「秘书」): what they said, the messages
+// the secretary sent them (its message tool, board.ts), and the briefings. The same lines as a requirement's feed
+// (Activity in _store.ts), so both pages draw them alike. Kept by the panel, not read from the agent's transcript, because the agent
 // session behind it is replaced whenever the old one's prompt cache has expired anyway (_main.ts toMain): the page
 // shows one conversation across all of them, and a new session starts from the last WINDOW of this log.
 //
@@ -16,24 +17,40 @@ export const WINDOW = 7 * 24 * 3600_000;
 /** And at most this many characters of it (the newest kept): a chatty week mustn't fill the context. */
 const WINDOW_CHARS = 30_000;
 
+/** The secretary as a line's `by`: the one speaker on its page that isn't a task. */
+export const SECRETARY = "secretary";
+
+/**
+ * A line, shaped as a requirement's feed line (Activity): kind user (the user's words, no `by`), message (the
+ * secretary to the user, by SECRETARY) or brief (a briefing). id for the page's rows; session: the secretary session
+ * it was said in (its face opens it).
+ */
 export type Entry = {
   id: string;
   at: number;
-  who: "user" | "agent";
+  kind: "user" | "message" | "brief";
+  by?: string;
   text: string;
   files?: { path: string; name?: string; mime?: string }[];
-  /** agent: why it spoke — answering the user, a briefing, or on its own (news about a task). */
-  kind?: "reply" | "brief" | "notice";
-  /** The agent session it was said in (to open "what was it doing"). */
   session?: string;
 };
 
 type Log = { next: number; entries: Entry[] };
 
+/** A line written before the lines were feed lines ({ who: user | agent, kind: reply / notice / brief }). */
+function upgrade(e: any): Entry {
+  // Every line not the user's is the secretary's (a few on 2026-11-10 were written with the wrong `by`)
+  if (!e.who) return e.kind === "user" ? e : { ...e, by: SECRETARY };
+  const { who, kind, ...rest } = e;
+  return who === "user" ? { ...rest, kind: "user" } : { ...rest, kind: kind === "brief" ? "brief" : "message", by: SECRETARY };
+}
+
 function load(ctx: Ctx): { l: Log; etag?: string } {
   const st = ctx.fs.stat(LOG);
   if (!st) return { l: { next: 1, entries: [] } };
-  return { l: JSON.parse(ctx.fs.read(LOG)), etag: st.etag };
+  const l: Log = JSON.parse(ctx.fs.read(LOG));
+  l.entries = l.entries.map(upgrade);
+  return { l, etag: st.etag };
 }
 
 export function entries(ctx: Ctx): Entry[] {
@@ -68,7 +85,7 @@ export function windowText(ctx: Ctx): string {
   let size = 0;
   for (const e of [...entries(ctx)].reverse()) {
     if (e.at < from) break;
-    const who = e.who === "user" ? "用户" : e.kind === "brief" ? "你（简报）" : "你";
+    const who = e.kind === "user" ? "用户" : e.kind === "brief" ? "你（简报）" : "你";
     const files = e.files?.length ? `\n（附件：${e.files.map((f) => f.path).join("、")}）` : "";
     const line = `[${stamp(e.at)}] ${who}：${e.text}${files}`;
     if (size + line.length > WINDOW_CHARS) break;

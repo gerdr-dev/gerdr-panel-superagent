@@ -5,7 +5,7 @@
 
 import { applyBlock } from "./_apply";
 import { activity, bouncesOf, find, load, memberName, members, note, reqOf, splitRef, teamOf, update, type Store, type Task } from "./_store";
-import { handBack } from "./_main";
+import { handBack, isMain, secretaryMessage } from "./_main";
 import { waitCard } from "./waits";
 import { eventCard } from "./_cards";
 import { endWaits, isOutside, open, question } from "./_waits";
@@ -119,6 +119,19 @@ export const tools = {
         summary: { type: "string", description: "A line for the requirement's activity feed, which the user reads. Only when the user's rules say this message belongs there (the my-workflow skill, references/activity.md); left out, the message stays between you two" },
       },
       required: ["to", "text"],
+    },
+  },
+  message_user: {
+    description:
+      "Says something to the user: a line in the feed they follow (your requirement's, or the secretary's page if you are the secretary), shown in your chat too. Your reply text and your chat are not what they read: whenever they spoke to you, answer with this; whatever you want them to know, say it with this. Short, in their language, Markdown; a file to look at as ![](/absolute/path). Not for asking them to decide or do something (ask_human) or for reporting a state (task_update).",
+    input: {
+      type: "object",
+      properties: {
+        text: { type: "string" },
+        files: { type: "array", items: { type: "object", properties: { path: { type: "string" }, name: { type: "string" } }, required: ["path"] }, description: "Files that go with it (absolute paths)" },
+        brief: { type: "boolean", description: "The secretary's briefing (only the secretary)" },
+      },
+      required: ["text"],
     },
   },
   post_progress: {
@@ -483,6 +496,27 @@ export async function tell(input: { to: string; text: string; summary?: string }
     resume: true,
   });
   return { sent: to.id, gerdrCard: eventCard(ctx, from.id, "tell", `给 ${memberName(to)}：${input.summary?.trim() || text}`), note: `已送到 ${memberName(to)}。要等它回话：wait_for [{"type":"teammate","who":"${to.id}"},{"type":"time","minutes":N}]（N 是超时），然后结束这一轮。` };
+}
+
+/**
+ * A message to the user (DESIGN.md「消息」): a feed line of its own kind, drawn in the caller's chat too, so the feed
+ * stays a part of the chat. From the secretary it goes on the secretary's page. Answers the user's words in the feed
+ * (asked is cleared).
+ */
+export function message_user(input: { text: string; files?: { path: string; name?: string }[]; brief?: boolean }, ctx: Ctx) {
+  const text = input?.text?.trim();
+  if (!text) throw new Error("text 是空的");
+  const files = (input.files ?? []).filter((f) => f?.path);
+  if (isMain(ctx, ctx.caller.session)) {
+    secretaryMessage(ctx, { text, files, brief: !!input.brief });
+    return { ok: true, gerdrCard: eventCard(ctx, undefined, "message", text) };
+  }
+  return update(ctx, (s) => {
+    const t = mine(s, ctx);
+    activity(s, t, { by: t.id, kind: "message", text, ...(files.length ? { files } : {}) });
+    Object.assign(t, { asked: undefined, viaTools: true, reportedAt: Date.now() });
+    return { ok: true, gerdrCard: eventCard(ctx, t.id, "message", text) };
+  });
 }
 
 export function post_progress(input: { text: string }, ctx: Ctx) {

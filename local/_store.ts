@@ -26,7 +26,7 @@ export type Question = { id: string; title: string; kind: "choice" | "value"; op
  * and hand-offs only — a member finishing its part, telling a teammate, pulling one in, the user answering.
  * by: the member it's about (a task id); kind: what sort of line, for its icon.
  */
-export type Activity = { at: number; by?: string; kind: "progress" | "tell" | "join" | "done" | "review" | "user" | "stuck" | "wait" | "got"; text: string; to?: string; files?: { path: string; name?: string }[] };
+export type Activity = { at: number; by?: string; kind: "progress" | "tell" | "join" | "done" | "review" | "user" | "stuck" | "wait" | "got" | "message"; text: string; to?: string; files?: { path: string; name?: string }[] };
 
 export type Task = {
   id: string;
@@ -50,6 +50,11 @@ export type Task = {
   reroute?: { feedback: string; at: number; router?: string };
   /** When the user last typed in its worker's chat that the feed has (Gerdr's personSaid): each one is logged once. */
   heard?: number;
+  /**
+   * The user spoke to it from the requirement's feed (tasks.message) and is owed a message back (board.ts message);
+   * nudged: reminded once already. Cleared by its message.
+   */
+  asked?: { at: number; nudged?: boolean };
   /** Dropped by the board because nothing it unblocked was still going (tasks.ts dropOrphans), not by anyone: a handover can take it back. */
   orphaned?: number;
   /**

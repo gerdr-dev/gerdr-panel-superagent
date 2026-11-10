@@ -6,7 +6,7 @@ import { applyBlock } from "./_apply";
 import { askUser, endQuestions, endWaits, isOutside, open, question, syncAgents, syncSessions, wakeText, type Wait } from "./_waits";
 import { wake } from "./_wake";
 import { allAgents, mentionsIn } from "./_agents";
-import { capture, isMain, notice, rerouteTask, routeTask, sweep } from "./_main";
+import { isMain, notice, rerouteTask, routeTask, settle, sweep } from "./_main";
 
 export type { Task };
 
@@ -71,7 +71,7 @@ export async function list(input: unknown, ctx: Ctx) {
     }));
   const kids: Record<string, ReturnType<typeof kidsOf>> = {};
   for (const t of store.tasks) if (t.owner === "agent" && t.status !== "done" && t.status !== "dropped") kids[t.id] = kidsOf(t);
-  const nudge: { session: string; id: string; out: string[] }[] = [];
+  const nudge: { session: string; id: string; out: string[]; reply?: boolean }[] = [];
   const s = update(ctx, (s) => {
     nudge.length = 0; // update retries this function on a write race: decide afresh each time
     for (const t of s.tasks) {
@@ -119,6 +119,17 @@ export async function list(input: unknown, ctx: Ctx) {
       if (!sess || (sess.status !== "idle" && sess.status !== "error")) continue;
       if (t.synced === sess.updatedAt) continue;
       t.synced = sess.updatedAt;
+      // The user spoke to it from the feed and its turn ended without a message back: reminded once to answer with
+      // the message tool (they read the feed, not its chat); after that it's left to the checks below
+      if (t.asked && sess.status === "idle" && sess.updatedAt > t.asked.at + 1000 && !cancelled) {
+        if (!t.asked.nudged) {
+          t.asked.nudged = true;
+          nudge.push({ session: sess.id, id: t.id, out: [], reply: true });
+          t.updatedAt = Date.now();
+          continue;
+        }
+        t.asked = undefined;
+      }
       const b = lastBlock(sess.reply ?? "");
       // The user asked it something in its chat and it answered: they're reading that answer and will carry on, so
       // "review" (come and look) means nothing here; the task stays where it is with the new summary. done /
@@ -126,7 +137,7 @@ export async function list(input: unknown, ctx: Ctx) {
       if (b && sess.byPerson && b.state === "review" && t.status === "running") applyBlock(s, t, { ...b, state: undefined });
       else if (b) applyBlock(s, t, b);
       else if (t.status === "running" && sess.status === "idle" && !t.viaTools && !cancelled) askUser(t, `${STOPPED_ASK}：去对话里看看它说了什么，让它接着做，或者直接「标为完成」`);
-      else if (t.status === "running" && sess.status === "idle" && t.viaTools && !settled(t) && !cancelled && !busyBehind(sess)) {
+      else if (t.status === "running" && sess.status === "idle" && t.viaTools && !settled(t) && !cancelled && !busyBehind(sess) && !repliedLast(s, t)) {
         // It stopped in no state the board knows: a question written only in its reply (t3, 2026-11-04), "I'll wait"
         // with nothing to wake it (t29), "working" reported and then nothing (t30), work handed to a session with no
         // timeout on it (#1, 2026-11-06). Reminded once to put itself in one; if it stops like that again, it is put in
@@ -152,7 +163,9 @@ export async function list(input: unknown, ctx: Ctx) {
     await ctx.sessions
       .send(
         n.session,
-        n.out.length
+        n.reply
+          ? `[看板] 用户在需求面板里等你回话（任务 ${n.id}）：用 message_user 工具回他。他看的是面板，不看你的对话，你回复里的文字他看不到。`
+          : n.out.length
           ? `[看板] 你把活派出去了，但没有等它（任务 ${n.id}）：${n.out.join("；")}。\n` +
               `派活的人要自己盯着：现在用 wait_for 等它，what 写等谁做什么，wake 里一定要有 {"type":"time","minutes":N} 作超时（按它要做多久估）。` +
               `它回报会先叫醒你；到了超时还没回报，你去看它卡在哪（gerdr session read），卡住或那台电脑下线了就换个做法或 ask_human。然后结束这一轮。`
@@ -190,7 +203,7 @@ export async function list(input: unknown, ctx: Ctx) {
         ready: blockersDone(s, t),
         // Stopped with nothing to wait on (shown under 等你): what it last said, for the card
         stopped: halted || undefined,
-        stopWhy: halted ? stopWhy(t, sess) : undefined,
+        stopWhy: halted ? stopWhy(t, sess, s) : undefined,
         said: said || undefined,
       };
     });
@@ -199,7 +212,7 @@ export async function list(input: unknown, ctx: Ctx) {
   // The secretary's side (_main.ts): its finished reply into the conversation, and news of what newly needs the user.
   // Here because the board's sync runs every minute with or without the page open; a failure mustn't break the board.
   try {
-    await capture(ctx);
+    await settle(ctx);
     await notice(ctx, tasks);
   } catch (err: any) {
     ctx.log(`秘书那边没跟上：${err?.message ?? err}`);
@@ -251,7 +264,18 @@ export function lastWords(reply: string) {
 }
 
 /** Why a worker stopped with nothing going on, for the card: the user's stop, a restart, an error, or nothing said. */
-function stopWhy(t: Task, sess: any) {
+/**
+ * Its last word in the feed is a message to the user, after the user last spoke: it answered and waits for them. Not
+ * "stopped without a report" (no reminder); under 等你 as having answered.
+ */
+function repliedLast(s: Store, t: Task) {
+  const feed = reqOf(s, t)?.activity ?? [];
+  const mine = feed.filter((a) => a.by === t.id).pop();
+  const user = Math.max(0, ...feed.filter((a) => a.kind === "user").map((a) => a.at));
+  return mine?.kind === "message" && mine.at >= user;
+}
+
+function stopWhy(t: Task, sess: any, s?: Store) {
   if (sess?.status === "error") return `出错了${sess.error ? `：${sess.error}` : ""}`;
   if (sess?.stopReason === "cancelled") {
     const err = String(sess.reply ?? "").split(/\n\s*\n/).reverse().find((p) => /^(出错：|Error: )/.test(p.trim()));
@@ -259,6 +283,7 @@ function stopWhy(t: Task, sess: any) {
   }
   if (sess?.stopReason && sess.stopReason !== "end_turn") return `这一轮没正常结束（${sess.stopReason}）`;
   if (!sess) return "对话关掉了";
+  if (s && repliedLast(s, t)) return "回了你的话，等你接着说";
   return `停下了，没在看板上说接下来要什么${(t.nudges ?? 0) > 0 ? "（提醒过一次）" : ""}`;
 }
 
@@ -646,7 +671,9 @@ export async function message(input: { id: string; to?: string[]; text: string; 
     const others = targets.filter((x) => x !== m);
     await wake(ctx, m.id, {
       how: "你发了消息",
-      text: `[看板] 用户在需求的面板里对你说${others.length ? `（同时发给了 ${others.map((x) => `${x.id}（${name(x)}）`).join("、")}，谁做哪部分不清楚就先和它说好）` : ""}：\n\n${text}${list}`,
+      text:
+        `[看板] 用户在需求的面板里对你说${others.length ? `（同时发给了 ${others.map((x) => `${x.id}（${name(x)}）`).join("、")}，谁做哪部分不清楚就先和它说好）` : ""}：\n\n${text}${list}\n\n` +
+        `回他用 message_user 工具：他在面板里看，不看你的对话。`,
       files: files.map((a) => a.path),
       resume: true,
       // One line for all of them, written with the first
@@ -654,6 +681,10 @@ export async function message(input: { id: string; to?: string[]; text: string; 
       feedFiles: i === 0 ? files : undefined,
     });
   }
+  // Each of them owes the user an answer now (board.ts message_user clears it; list reminds once)
+  update(ctx, (s) => {
+    for (const m of targets) find(s, m.id).asked = { at: Date.now() };
+  });
   return { sent: targets.map((m) => m.id) };
 }
 

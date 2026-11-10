@@ -1643,7 +1643,7 @@ function firstAsked(h: Task) {
 /** When every task started getting a feed (842e672, 2026-11-05): older ones have none to show. */
 const FEEDS_SINCE = new Date("2026-11-05T12:00:00+08:00").getTime();
 
-const KIND: Record<string, string> = { wait: "在等", progress: "进展", tell: "通知", join: "加入", done: "完成", review: "待你看", user: "你", stuck: "卡住", got: "等到了" };
+const KIND: Record<string, string> = { wait: "在等", progress: "进展", tell: "通知", join: "加入", done: "完成", review: "待你看", user: "你", stuck: "卡住", got: "等到了", message: "说", brief: "简报" };
 
 /** A member's face in the feed: its repository's initials (order-api → OA); the lead's ringed. A click opens its chat. */
 function Avatar({ m, lead, size = "md" }: { m?: Task; lead?: boolean; size?: "sm" | "md" }) {
@@ -1817,6 +1817,98 @@ export function NeedRow({ x, lead, activity, byId, act, onGo, nobody }: { x: Exc
 /** For a page other than the board (the secretary's): where Avatar, 去对话 and the cards' links open a conversation. */
 export function setOpenChat(fn: (session: string, task?: string) => void) {
   openChat = fn;
+}
+
+/** Who a line is by on a page where that's no task: the secretary on its own page. */
+export type Speaker = { id: string; name: string; face: React.ReactNode };
+
+/**
+ * A line of a feed (Activity), as a requirement's feed draws it: the user's on the right, the board's own across the
+ * middle, a member's (or the secretary's: `speaker`) with its face, name and kind. Shared with the secretary's page,
+ * so both are one feed (DESIGN.md「一个架构」). `lead`: the requirement's lead (ringed); `activity`: the whole feed, to
+ * tell a 在等 line still in effect.
+ */
+export function LineRow({ a, lead, activity, byId, speaker }: { a: NonNullable<Task["activity"]>[number]; lead?: string; activity: NonNullable<Task["activity"]>; byId: Record<string, Task>; speaker?: Speaker }) {
+  const who = (id?: string) => (id ? byId[id] : undefined);
+  const when = (at: number) => new Date(at).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  const sp = a.by && !byId[a.by] && speaker?.id === a.by ? speaker : undefined;
+  const head = (m: Task | undefined, label: string, at: number, tone?: string) => (
+    <div className="flex items-baseline gap-1.5 text-[11px] text-muted-foreground">
+      <span className="font-medium text-foreground/80">{sp?.name ?? (memberLabel(m) || "?")}</span>
+      <span className={tone}>{label}</span>
+      <span className="tabular-nums">{when(at)}</span>
+    </div>
+  );
+  const t = { id: lead, activity } as unknown as Task;
+  // The user's own doing: on the right, like their messages in a chat
+  if (a.kind === "user")
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[85%] space-y-1 text-right">
+          <div className="text-[11px] text-muted-foreground tabular-nums">你 · {when(a.at)}</div>
+          <p className="rounded-lg rounded-tr-sm bg-brand/10 px-3 py-2 text-left text-[13px] whitespace-pre-wrap">{a.text}</p>
+        </div>
+      </div>
+    );
+  // The board's own lines (who joined, members going round): across, like a group chat's "X invited Y"
+  if (a.kind === "stuck")
+    return (
+      <p className="flex items-center justify-center gap-1.5 px-6 text-center text-[11px] text-warn">
+        <AlertTriangle className="size-3 shrink-0" />
+        {who(a.by) ? `${memberLabel(who(a.by))} ` : ""}
+        {a.text} · {when(a.at)}
+      </p>
+    );
+  // What a wait came to (an approval, a reply): the board's line, the worker's own result follows it
+  if (a.kind === "got")
+    return (
+      <p className="flex items-center justify-center gap-1.5 px-6 text-center text-[11px] text-ok">
+        <Check className="size-3 shrink-0" />
+        <span className="line-clamp-2">
+          {who(a.by) ? `${memberLabel(who(a.by))} ` : ""}
+          {a.text} · {when(a.at)}
+        </span>
+      </p>
+    );
+  if (a.kind === "join" || !a.by)
+    return (
+      <p className="px-6 text-center text-[11px] text-muted-foreground">
+        {who(a.by) ? `${memberLabel(who(a.by))} ` : ""}
+        {a.text} · {when(a.at)}
+      </p>
+    );
+  const m = who(a.by);
+  const to = who(a.to);
+  // A 在等 line still in effect (its member's latest line, and it still waits on that) shimmers like "思考中…"
+  const waiting = stillWaiting(t, a, m);
+  return (
+    <div className="flex gap-2">
+      {sp ? sp.face : <Avatar m={m} lead={m?.id === t.id} />}
+      <div className="min-w-0 flex-1 space-y-1">
+        {head(m, `${KIND[a.kind] ?? a.kind}${to ? ` → ${memberLabel(to)}` : ""}`, a.at, a.kind === "done" ? "text-ok" : a.kind === "review" ? "text-warn" : waiting ? "shimmer text-foreground/80" : undefined)}
+        {/* What members write is Markdown (code, lists, paths, links): drawn as the chat draws it */}
+        <div className={clsx("w-fit max-w-full rounded-lg rounded-tl-sm px-3 py-2", a.kind === "done" ? "bg-ok/10" : a.kind === "brief" ? "border bg-card" : "bg-muted")}>
+          <Md>{a.text}</Md>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Who's on it right now, as the chat's "working…" line: each one's face, name and how long its turn has run. */
+export function WorkingRow({ items }: { items: { key: string; face: React.ReactNode; name: string; since?: number }[] }) {
+  return (
+    <div className="space-y-1.5">
+      {items.map((x) => (
+        <div key={x.key} className="flex items-center gap-2 text-[12px] text-muted-foreground">
+          {x.face}
+          {PixelLoader ? <PixelLoader className="size-3.5 text-brand" /> : <Loader2 className="size-3.5 animate-spin text-brand" />}
+          <span className="shimmer font-medium text-foreground/80">{x.name}</span>
+          <span>在跑{x.since ? ` · ${since(x.since)}` : ""}</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 /** One thing in the feed, in time order: a line of activity, a step / decision waiting on the user, a member stuck on them. */
@@ -2022,60 +2114,8 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
   const row = (x: FeedItem) => {
     // What waits on the user: the same rows as on the secretary's page (NeedRow)
     if (x.type !== "act") return <NeedRow x={x} lead={t.id} activity={t.activity ?? []} byId={byId} act={act} onGo={onGo} />;
-    const a = x.a;
-    // The user's own doing: on the right, like their messages in a chat
-    if (a.kind === "user")
-      return (
-        <div className="flex justify-end">
-          <div className="max-w-[85%] space-y-1 text-right">
-            <div className="text-[11px] text-muted-foreground tabular-nums">你 · {when(a.at)}</div>
-            <p className="rounded-lg rounded-tr-sm bg-brand/10 px-3 py-2 text-left text-[13px] whitespace-pre-wrap">{a.text}</p>
-          </div>
-        </div>
-      );
-    // The board's own lines (who joined, members going round): across, like a group chat's "X invited Y"
-    if (a.kind === "stuck")
-      return (
-        <p className="flex items-center justify-center gap-1.5 px-6 text-center text-[11px] text-warn">
-          <AlertTriangle className="size-3 shrink-0" />
-          {who(a.by) ? `${memberLabel(who(a.by))} ` : ""}
-          {a.text} · {when(a.at)}
-        </p>
-      );
-    // What a wait came to (an approval, a reply): the board's line, the worker's own result follows it
-    if (a.kind === "got")
-      return (
-        <p className="flex items-center justify-center gap-1.5 px-6 text-center text-[11px] text-ok">
-          <Check className="size-3 shrink-0" />
-          <span className="line-clamp-2">
-            {who(a.by) ? `${memberLabel(who(a.by))} ` : ""}
-            {a.text} · {when(a.at)}
-          </span>
-        </p>
-      );
-    if (a.kind === "join" || !a.by)
-      return (
-        <p className="px-6 text-center text-[11px] text-muted-foreground">
-          {who(a.by) ? `${memberLabel(who(a.by))} ` : ""}
-          {a.text} · {when(a.at)}
-        </p>
-      );
-    const m = who(a.by);
-    const to = who(a.to);
-    // A 在等 line still in effect (its member's latest line, and it still waits on that) shimmers like "思考中…"
-    const waiting = stillWaiting(t, a, m);
-    return (
-      <div className="flex gap-2">
-        <Avatar m={m} lead={m?.id === t.id} />
-        <div className="min-w-0 flex-1 space-y-1">
-          {head(m, `${KIND[a.kind] ?? a.kind}${to ? ` → ${memberLabel(to)}` : ""}`, a.at, a.kind === "done" ? "text-ok" : a.kind === "review" ? "text-warn" : waiting ? "shimmer text-foreground/80" : undefined)}
-          {/* What members write is Markdown (code, lists, paths, links): drawn as the chat draws it */}
-          <div className={clsx("w-fit max-w-full rounded-lg rounded-tl-sm px-3 py-2", a.kind === "done" ? "bg-ok/10" : "bg-muted")}>
-            <Md>{a.text}</Md>
-          </div>
-        </div>
-      </div>
-    );
+    // A line of the feed: the same rows as on the secretary's page (LineRow)
+    return <LineRow a={x.a} lead={t.id} activity={t.activity ?? []} byId={byId} />;
   };
   // Writing from the drawer (FeedChat's box): to its one member as is; with several, to the ones @-ed
   const live = ms.filter((m) => m.status !== "dropped" && m.session);
@@ -2123,18 +2163,7 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
         </p>
       );
     // Who's working now, as the chat's "working…" line: each member's face, name and how long its turn has run
-    return (
-      <div className="space-y-1.5">
-        {r.ms.map((m) => (
-          <div key={m.id} className="flex items-center gap-2 text-[12px] text-muted-foreground">
-            <Avatar m={m} lead={m.id === t.id} size="sm" />
-            {PixelLoader ? <PixelLoader className="size-3.5 text-brand" /> : <Loader2 className="size-3.5 animate-spin text-brand" />}
-            <span className="shimmer font-medium text-foreground/80">{memberLabel(m)}</span>
-            <span>在跑 · {since(m.live?.turnStartedAt)}</span>
-          </div>
-        ))}
-      </div>
-    );
+    return <WorkingRow items={r.ms.map((m) => ({ key: m.id, face: <Avatar m={m} lead={m.id === t.id} size="sm" />, name: memberLabel(m), since: m.live?.turnStartedAt }))} />;
   };
   return (
     <Sheet open modal={false} onOpenChange={(o) => !o && onClose()}>

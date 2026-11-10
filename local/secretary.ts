@@ -3,7 +3,7 @@
 
 import { list } from "./tasks";
 import { append, entries, type Entry } from "./_log";
-import { askText, capture, mainId, state, toMain, updateState, type Item } from "./_main";
+import { askText, mainId, settle, state, toMain, updateState, type Item } from "./_main";
 
 /** A line the page folds: what happened to an outside message (the 去向 log), drawn between the messages. */
 type Note = { id: string; at: number; who: "note"; text: string; state: Item["state"]; tasks?: string[] };
@@ -25,10 +25,11 @@ const cut = (s: string, n: number) => {
 
 /**
  * The conversation for the page: { entries (oldest first: the user's and the secretary's messages, and the outside
- * messages it handled as notes), main (its session now: running / waiting) }. Takes a finished reply in first.
+ * messages it handled as notes), main (its session now: running / waiting) }. Reminds it first if a turn ended owing
+ * the user a message (settle).
  */
 export async function feed(input: { limit?: number }, ctx: Ctx) {
-  await capture(ctx);
+  await settle(ctx);
   const all = entries(ctx);
   const log = all.slice(-(input?.limit ?? 300));
   // Outside messages only from when the secretary began (state.since, set the first time), and not older than the
@@ -56,7 +57,7 @@ export async function feed(input: { limit?: number }, ctx: Ctx) {
   return {
     entries: merged,
     main: m ? { id: m.id, status: m.status, waiting: m.waiting, waitingKind: m.waitingKind, error: m.error } : null,
-    // Its turn is about the user's words: the page shows it "typing"
+    // It's on something: the page shows it working, as a requirement's feed shows a member running
     busy: !!s.awaiting,
   };
 }
@@ -66,7 +67,7 @@ export async function say(input: { text: string; files?: { path: string; name?: 
   const text = (input?.text ?? "").trim();
   const files = (input?.files ?? []).filter((f) => f?.path);
   if (!text && !files.length) throw new Error("说点什么");
-  const e = append(ctx, { who: "user", text, ...(files.length ? { files } : {}) });
+  const e = append(ctx, { kind: "user", text, ...(files.length ? { files } : {}) });
   await toMain(ctx, [`[用户] ${text}`], "user", files.map((f) => f.path));
   return e;
 }

@@ -10,7 +10,7 @@ const toast = (core as unknown as { toast?: ((m: string, o?: Record<string, unkn
 export type Link = { label: string; url: string; at?: number };
 export type Live = { status: string; waiting?: string; waitingSince?: number; turnStartedAt?: number; updatedAt: number; error?: string; title?: string } | null;
 /** A line in a requirement's activity feed (local/_store.ts). */
-export type Activity = { at: number; by?: string; to?: string; kind: "progress" | "tell" | "join" | "done" | "review" | "user" | "stuck" | "wait" | "got"; text: string; files?: { path: string; name?: string }[] };
+export type Activity = { at: number; by?: string; to?: string; kind: "progress" | "tell" | "join" | "done" | "review" | "user" | "stuck" | "wait" | "got" | "message" | "brief"; text: string; files?: { path: string; name?: string }[] };
 export type Task = {
   id: string;
   title: string;

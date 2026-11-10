@@ -9,32 +9,32 @@ import { SettingsSheet, TABS, type SettingsTab } from "../components/SettingsShe
 import { Views } from "../components/Views";
 import { project, run } from "../lib/gerdr";
 import { Linger } from "../lib/linger";
-import { Md } from "../lib/markdown";
 import { phoneMenu, usePhoneMenu } from "../lib/phoneMenu";
 import { useTasks, waitedSince, type Task } from "../lib/tasks";
-import { askedAt, NeedRow, setOpenChat, type FeedItem as NeedItem } from "./board";
+import { askedAt, LineRow, NeedRow, setOpenChat, WorkingRow, type FeedItem as NeedItem } from "./board";
 import { sessionsKey, usePanelChange, useRefresh, useSessions } from "../lib/visible";
 
 // The secretary (DESIGN.md「秘书」): one conversation in the middle of the page, where the user hands everything over
-// and asks how things stand. The conversation is the panel's own log (local/_log.ts) across every session the
-// secretary has been: the page draws it with Gerdr's FeedChat, not the session's chat. What waits on the user is a
-// line above it, each item opening the board on that task.
+// and asks how things stand. It is a feed like a requirement's (DESIGN.md「一个架构」): the same lines (local/_log.ts,
+// the secretary's messages by "secretary") drawn by the same rows (board.tsx LineRow, NeedRow, WorkingRow), across
+// every session the secretary has been, with what waits on the user from every task among them. Less than a
+// requirement's: no lines between members; more: the outside messages it handled, folded to a line.
 
 type File = { path: string; name?: string; mime?: string };
-type Entry = { id: string; at: number; who: "user" | "agent"; text: string; files?: File[]; kind?: "reply" | "brief" | "notice"; session?: string };
+/** A line of the secretary's page: a feed line (Activity) with an id and the session it was said in. */
+type Entry = { id: string; at: number; kind: "user" | "message" | "brief"; by?: string; text: string; files?: File[]; session?: string };
 type Note = { id: string; at: number; who: "note"; text: string; state: string; tasks?: string[] };
-type Main = { id: string; status: string; waiting?: string; waitingKind?: string; error?: string };
+type Main = { id: string; status: string; waiting?: string; waitingKind?: string; error?: string; turnStartedAt?: number };
 type Feed = { entries: (Entry | Note)[]; main: Main | null; busy: boolean };
 
 type FeedEntry = { key: string; at: number; user?: { text: string; files?: File[] } };
 type Need = Exclude<NeedItem, { type: "act" }>;
-type Row = FeedEntry & ({ type: "need"; x: Need } | { type: "msg"; e: Entry } | { type: "notes"; notes: Note[] } | { type: "busy"; session?: string } | { type: "waiting"; m: Main } | { type: "hello" });
+type Row = FeedEntry & ({ type: "need"; x: Need } | { type: "line"; e: Entry } | { type: "notes"; notes: Note[] } | { type: "busy"; m: Main } | { type: "waiting"; m: Main } | { type: "hello" });
 
-// Gerdr's FeedChat and PixelLoader, through the namespace: a Gerdr from before them says so instead of breaking
+// Gerdr's FeedChat, through the namespace: a Gerdr from before it says so instead of breaking
 const FeedChat = (core as unknown as {
   FeedChat?: <E extends FeedEntry>(p: { id: string; entries: E[]; render: (e: E) => React.ReactNode; onSend: (m: { text: string; files: File[] }) => Promise<void>; placeholder?: string; jump?: { key: string; seq: number }; className?: string }) => React.ReactNode;
 }).FeedChat;
-const PixelLoader = (core as unknown as { PixelLoader?: (p: { className?: string }) => React.ReactNode }).PixelLoader;
 
 function time(ms: number) {
   const d = new Date(ms);
@@ -61,7 +61,7 @@ function useFeed() {
   useRefresh(reload, [data, sessionsKey(main)], { fallback: 30_000, poll: 3000 });
   // Its status as Gerdr pushes it now, over what the last feed said
   const live = main[0];
-  const m: Main | null = feed?.main && live ? { ...feed.main, status: live.status, waiting: live.waiting, waitingKind: live.waitingKind } : (feed?.main ?? null);
+  const m: Main | null = feed?.main && live ? { ...feed.main, status: live.status, waiting: live.waiting, waitingKind: live.waitingKind, turnStartedAt: live.turnStartedAt as number | undefined } : (feed?.main ?? null);
   return { feed, main: m, error, reload };
 }
 
@@ -87,10 +87,22 @@ export default function SecretaryPage() {
     [reload],
   );
   const toTask = useCallback((id: string) => navigate(`/board?open=${id}`), [navigate]);
+  // Each row padded as a requirement's feed pads its rows
   const render = useCallback(
-    (r: Row) => (r.type === "need" ? <NeedRow x={r.x} activity={[]} byId={byId} act={act} onGo={toTask} nobody={{ name: "秘书", face: <Face onPeek={setPeek} /> }} /> : <RowView r={r} onPeek={setPeek} onTask={toTask} />),
+    (r: Row) => <div className="px-1 py-1.5">{rowOf(r)}</div>,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [toTask, byId, act],
   );
+  const rowOf = (r: Row) =>
+      r.type === "need" ? (
+        <NeedRow x={r.x} activity={[]} byId={byId} act={act} onGo={toTask} nobody={{ name: "秘书", face: <Face onPeek={setPeek} /> }} />
+      ) : r.type === "line" ? (
+        <LineRow a={r.e} activity={[]} byId={byId} speaker={{ id: "secretary", name: "秘书", face: <Face session={r.e.session} onPeek={setPeek} /> }} />
+      ) : r.type === "busy" ? (
+        <WorkingRow items={[{ key: "secretary", face: <Face session={r.m.id} onPeek={setPeek} small />, name: "秘书", since: r.m.turnStartedAt }]} />
+      ) : (
+        <RowView r={r} onPeek={setPeek} onTask={toTask} />
+      );
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -152,7 +164,8 @@ function toRows(feed: Feed | null, main: Main | null, needs: Need[]): Row[] {
       else out.push({ key: `n-${e.id}`, at: e.at, type: "notes", notes: [e] });
       continue;
     }
-    out.push(e.who === "user" ? { key: e.id, at: e.at, user: { text: e.text, files: e.files }, type: "msg", e } : { key: e.id, at: e.at, type: "msg", e });
+    // The user's own: FeedChat draws it as their message (`user`), as in a requirement's feed
+    out.push(e.kind === "user" ? { key: e.id, at: e.at, user: { text: e.text, files: e.files }, type: "line", e } : { key: e.id, at: e.at, type: "line", e });
   }
   // What waits on the user, where it was asked among the messages (FeedChat keeps rows in the order given)
   for (const x of needs) {
@@ -163,7 +176,7 @@ function toRows(feed: Feed | null, main: Main | null, needs: Need[]): Row[] {
   }
   if (!out.length) out.push({ key: "hello", at: 0, type: "hello" });
   if (main?.status === "waiting") out.push({ key: "waiting", at: Date.now(), type: "waiting", m: main });
-  else if (feed?.busy && main && main.status !== "error") out.push({ key: "busy", at: Date.now(), type: "busy", session: main.id });
+  else if (feed?.busy && main && main.status !== "error") out.push({ key: "busy", at: Date.now(), type: "busy", m: main });
   return out;
 }
 
@@ -171,8 +184,8 @@ function toRows(feed: Feed | null, main: Main | null, needs: Need[]): Row[] {
  * The secretary's face beside what it says and while it works, like a member's in a requirement's feed: a tap opens
  * its conversation (what it looked up, the commands it ran). Without a session (an old entry) it's just a face.
  */
-function Face({ session, onPeek }: { session?: string; onPeek: (id: string) => void }) {
-  const face = <span className="grid size-8 shrink-0 place-items-center rounded-full bg-brand/15 text-[11px] font-medium text-brand ring-1 ring-brand/40">秘</span>;
+function Face({ session, onPeek, small }: { session?: string; onPeek: (id: string) => void; small?: boolean }) {
+  const face = <span className={clsx("grid shrink-0 place-items-center rounded-full bg-brand/15 font-medium text-brand ring-1 ring-brand/40", small ? "size-6 text-[10px]" : "size-8 text-[11px]")}>秘</span>;
   if (!session) return face;
   return (
     <button title="打开秘书的对话：它查了什么、调了哪些命令" aria-label="打开秘书的对话" onClick={() => onPeek(session)} className="shrink-0 rounded-full hover:opacity-80">
@@ -188,14 +201,6 @@ function RowView({ r, onPeek, onTask }: { r: Row; onPeek: (id: string) => void; 
         <p className="text-[15px] font-medium text-foreground">我是你的秘书</p>
         <p className="mt-2">什么事都可以交给我：我派给合适的 agent 去做，替你记着、跟着。</p>
         <p>要你拍板的我会来问你；进度、日报随时问我，到点我也会给你写简报。</p>
-      </div>
-    );
-  if (r.type === "busy")
-    return (
-      <div className="flex items-center gap-2.5 py-2 text-[13px] text-muted-foreground">
-        <Face session={r.session} onPeek={onPeek} />
-        {PixelLoader && <PixelLoader />}
-        秘书在处理…
       </div>
     );
   if (r.type === "waiting")
@@ -229,25 +234,7 @@ function RowView({ r, onPeek, onTask }: { r: Row; onPeek: (id: string) => void; 
         </ul>
       </details>
     );
-  const e = r.e;
-  // The user's own messages are FeedChat's to draw (r.user)
-  if (e.who === "user") return null;
-  // Like a member's line in a requirement's feed: face, who and when, the words in a bubble
-  return (
-    <div className="flex gap-2">
-      <Face session={e.session} onPeek={onPeek} />
-      <div className="min-w-0 flex-1 space-y-1">
-        <div className="flex items-baseline gap-1.5 text-[11px] text-muted-foreground">
-          <span className="font-medium text-foreground/80">秘书</span>
-          {e.kind === "brief" ? <span className="text-brand">简报</span> : e.kind === "notice" && <span>主动告诉你</span>}
-          <span className="tabular-nums">{time(e.at)}</span>
-        </div>
-        <div className={clsx("w-fit max-w-full rounded-lg rounded-tl-sm px-3 py-2", e.kind === "brief" ? "border bg-card" : "bg-muted")}>
-          <Md>{e.text}</Md>
-        </div>
-      </div>
-    </div>
-  );
+  return null;
 }
 
 /** What waits on the user, one chip each: scrolls the conversation to it (it's a card there). Nothing when nothing waits. */
