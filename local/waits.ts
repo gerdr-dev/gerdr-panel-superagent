@@ -293,8 +293,9 @@ export async function onState(input: { state: Record<string, unknown>; detail?: 
   const own = `${DIR}/${input.trigger}.json`;
   if (input.trigger && ctx.fs.stat(own)) ctx.fs.trash(own);
   const iid = /!(\d+)$/.exec(input.key)?.[1];
+  // Lists (an MR's notes) are for conditions to filter, not to read here: their length
   const fields = Object.entries(input.state)
-    .map(([k, v]) => `${k}=${v}`)
+    .map(([k, v]) => `${k}=${Array.isArray(v) ? `[${v.length} 项]` : v && typeof v === "object" ? "{…}" : v}`)
     .join(" ");
   const ev: Ev = {
     id: `${input.source}:state:${input.key}:${Date.now()}`,
