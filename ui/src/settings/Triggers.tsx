@@ -13,7 +13,10 @@ import { usePoll } from "../lib/visible";
 
 type Source = { on: string; title?: string; description?: string; addon?: string; canReply?: boolean; seen?: number; enabled: boolean; key?: string; allow?: string[]; inferred?: boolean; by?: string };
 /** One of the panel's own triggers (triggers/*.json): always on. */
-type Builtin = { id: string; on: string; name?: string; key?: string };
+type Builtin = { id: string; on: string; name?: string; key?: string; off?: boolean };
+
+/** The schedule that feeds one of the panel's own triggers: switched off with it, so it doesn't poll for nothing. */
+const FEEDS: Record<string, string> = { mr: "mrwatch" };
 type TriggerInfo = { id: string; on: string; runs: number; last?: { startedAt: string; ok: boolean; error?: string } };
 
 export default function TriggersPage() {
@@ -45,9 +48,9 @@ export default function TriggersPage() {
       {err && <p role="alert" className="text-[13px] text-bad">{err}</p>}
       {own.length > 0 && (
         <section className="space-y-3">
-          <h2 className="text-[13px] font-medium text-muted-foreground">面板自带，一直开着</h2>
+          <h2 className="text-[13px] font-medium text-muted-foreground">面板自带：默认开着</h2>
           {own.map((b) => (
-            <OwnRow key={b.id} b={b} info={runs[b.on]} />
+            <OwnRow key={b.id} b={b} info={runs[b.on]} onSaved={load} />
           ))}
         </section>
       )}
@@ -71,26 +74,57 @@ export default function TriggersPage() {
  * One of the panel's own triggers. The MR one (triggers/mr.json) carries what it needs: the GitLab the MR watcher
  * (schedules/mrwatch) asks, a setting (gitlab.host), shown here so everything about what comes in is on one page.
  */
-function OwnRow({ b, info }: { b: Builtin; info?: TriggerInfo }) {
+function OwnRow({ b, info, onSaved }: { b: Builtin; info?: TriggerInfo; onSaved: () => void }) {
   const last = info?.last;
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const toggle = async (on: boolean) => {
+    setBusy(true);
+    setErr("");
+    try {
+      await run("inbox.setBuiltin", { id: b.id, on });
+      // Its feeding schedule follows (Gerdr's pause is this machine's, like the 定时任务 page's)
+      const feed = FEEDS[b.id];
+      if (feed)
+        await fetch(`/api/work/schedules/${encodeURIComponent(feed)}/${on ? "resume" : "pause"}?project=${encodeURIComponent(project)}`, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "X-Gerdr": "1", "Content-Type": "application/json" },
+          body: "{}",
+        }).catch(() => {});
+      onSaved();
+    } catch (e: any) {
+      setErr(String(e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <article className="space-y-2 rounded-xl border bg-card p-4 max-md:p-3">
-      <div className="min-w-0">
-        <h3 className="flex items-center gap-2 text-[14px] font-medium">
-          <Zap className="size-3.5 text-brand" />
-          {b.name || b.on}
-        </h3>
-        <p className="mt-0.5 text-[12px] text-muted-foreground">
-          <span className="font-mono">{b.on}</span>
-          {b.key && <> · 只要 <span className="font-mono">{b.key}</span></>}
-          {info && (
-            <span className={clsx(last && !last.ok && "text-bad")}>
-              {" "}· 收过 {info.runs} 条{last ? ` · 上次${since(Date.parse(last.startedAt))}前${last.ok ? "" : `失败：${last.error}`}` : ""}
-            </span>
-          )}
-        </p>
+    <article className={clsx("space-y-2 rounded-xl border bg-card p-4 max-md:p-3", b.off && "opacity-70")}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="flex items-center gap-2 text-[14px] font-medium">
+            <Zap className={clsx("size-3.5", b.off ? "text-muted-foreground" : "text-brand")} />
+            {b.name || b.on}
+          </h3>
+          <p className="mt-0.5 text-[12px] text-muted-foreground">
+            <span className="font-mono">{b.on}</span>
+            {b.key && <> · 只要 <span className="font-mono">{b.key}</span></>}
+            {info && (
+              <span className={clsx(last && !last.ok && "text-bad")}>
+                {" "}· 收过 {info.runs} 条{last ? ` · 上次${since(Date.parse(last.startedAt))}前${last.ok ? "" : `失败：${last.error}`}` : ""}
+              </span>
+            )}
+          </p>
+        </div>
+        <label className="flex shrink-0 cursor-pointer items-center gap-2 text-[13px]">
+          {busy && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
+          <input type="checkbox" className="size-4 accent-[var(--brand)]" checked={!b.off} disabled={busy} onChange={(e) => toggle(e.target.checked)} />
+          收进来
+        </label>
       </div>
-      {b.id === "mr" && <GitLab />}
+      {b.id === "mr" && (b.off ? <p className="text-[12px] text-muted-foreground">关着：mrwatch 也停了，任务开的 MR 有了新情况，worker 不会被叫醒。</p> : <GitLab />)}
+      {err && <p className="text-[12px] text-bad">{err}</p>}
     </article>
   );
 }

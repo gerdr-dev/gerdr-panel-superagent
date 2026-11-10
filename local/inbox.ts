@@ -49,20 +49,44 @@ function ours(ctx: Ctx): Record<string, Ours> {
   return out;
 }
 
-/** The panel's own triggers (triggers/*.json, shipped with it, like mr.json): always on, not the user's choice. */
-export function builtin(input: unknown, ctx: Ctx): { id: string; on: string; name?: string; key?: string }[] {
-  const out: { id: string; on: string; name?: string; key?: string }[] = [];
+type Builtin = { id: string; on: string; name?: string; key?: string; off?: boolean };
+
+/**
+ * The panel's own triggers (triggers/*.json, shipped with it, like mr.json): on unless this person switched one off.
+ * Off is their copy in user/triggers/ (Gerdr reads it over the panel's) marked `input.off`, which onEvent takes as
+ * "not taking these": Gerdr's trigger files have no switch of their own.
+ */
+export function builtin(input: unknown, ctx: Ctx): Builtin[] {
+  const out: Builtin[] = [];
   for (const f of ctx.fs.stat("triggers") ? ctx.fs.list("triggers") : []) {
     const name = f.path.split("/").pop() ?? "";
     if (f.dir || !name.endsWith(".json")) continue;
     try {
       const t = JSON.parse(ctx.fs.read(f.path));
-      if (t.on) out.push({ id: name.slice(0, -5), on: t.on, name: t.name, key: t.key });
+      const own = `${DIR}/${name}`;
+      const off = !!ctx.fs.stat(own) && !!JSON.parse(ctx.fs.read(own)).input?.off;
+      if (t.on) out.push({ id: name.slice(0, -5), on: t.on, name: t.name, key: t.key, ...(off ? { off } : {}) });
     } catch {
       // a broken file is Gerdr's to report (gerdr panel triggers)
     }
   }
   return out;
+}
+
+/** Switches one of the panel's own triggers off (this person's copy marked off) or back on (the copy removed): { id, on }. */
+export function setBuiltin(input: { id: string; on: boolean }, ctx: Ctx) {
+  const id = input?.id ?? "";
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id) || !ctx.fs.stat(`triggers/${id}.json`)) throw new Error(`面板没有自带的触发器 ${id}`);
+  const own = `${DIR}/${id}.json`;
+  if (input.on) {
+    if (ctx.fs.stat(own)) ctx.fs.trash(own);
+    return { id, off: false };
+  }
+  const t = JSON.parse(ctx.fs.read(`triggers/${id}.json`));
+  t.input = { ...(t.input ?? {}), off: true };
+  ctx.fs.mkdir(DIR);
+  ctx.fs.write(own, JSON.stringify(t, null, 2) + "\n");
+  return { id, off: true };
 }
 
 /** "gitlab/*" matches "gitlab/mr.merged": a trigger's on, as Gerdr reads it. */
@@ -83,7 +107,7 @@ export function sources(input: unknown, ctx: Ctx) {
     key: on[s.on]?.key,
     allow: on[s.on]?.allow,
     inferred: on[s.on]?.inferred,
-    by: on[s.on] ? undefined : own.find((b) => covers(b.on, s.on))?.name,
+    by: on[s.on] ? undefined : own.find((b) => !b.off && covers(b.on, s.on))?.name,
   }));
   // Turned on earlier for a source that's gone from the catalog (its add-on removed): still listed, so it can be turned off
   for (const [k, v] of Object.entries(on)) if (!list.some((s) => s.on === k)) list.push({ on: k, enabled: true, key: v.key, allow: v.allow, inferred: v.inferred });
@@ -125,9 +149,11 @@ export function setSource(input: { on: string; enabled: boolean; key?: string; t
  * proactive rules, and not at all while proactive work is off. Every event is logged with where it went (去向). The
  * same event twice (a source re-sending) is handled once.
  */
-export async function onEvent(input: { event: GerdrEvent; trigger?: string; allow?: string[]; inferred?: boolean }, ctx: Ctx) {
+export async function onEvent(input: { event: GerdrEvent; trigger?: string; allow?: string[]; inferred?: boolean; off?: boolean }, ctx: Ctx) {
   const e = input?.event;
   if (!e?.id) throw new Error("没有事件（这个函数由 triggers/*.json 调用）");
+  // One of the panel's own triggers this person switched off (setBuiltin)
+  if (input.off) return { off: true };
   // Another panel's own watcher (mrwatch in another project's install): its tasks' news, not this panel's. Not logged:
   // it never came here (2026-11-10: the default project's board judged the lb project's MRs, one turn each)
   if (e.data?.panel && e.data.panel !== ctx.workspace.project) return { notMine: true };
