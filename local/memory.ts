@@ -4,6 +4,7 @@
 import { workflow } from "./_config";
 import { addLine, editMemory, GENERAL, MEMORY, nameOf, pathOf, readMemory } from "./_memory";
 import { load } from "./_store";
+import { skillFile } from "./_user";
 import { eventCard } from "./_cards";
 
 export const tools = {
@@ -117,7 +118,7 @@ export function forWorker(ctx: Ctx, repo: string) {
   if (!own && !all) return "";
   return (
     `\nThe user's memory for this board — what earlier tasks learned from them; follow it like their rules, and correct it ` +
-    `with the remember tool when they say otherwise (when: their my-workflow skill, references/memory.md):\n` +
+    `with the remember tool when they say otherwise (when: their my-workflow skill, ${skillFile(ctx, "my-workflow/references/memory.md")}):\n` +
     (own ? `\n### ${name}\n${own}\n` : "") +
     (all ? `\n### 所有仓库\n${all}\n` : "")
   );

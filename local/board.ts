@@ -12,6 +12,7 @@ import { endWaits, isOutside, open, question } from "./_waits";
 import { wake } from "./_wake";
 import { add } from "./tasks";
 import { GENERAL, MEMORY, nameOf } from "./_memory";
+import { skillFile } from "./_user";
 
 /**
  * Teammate messages in a row with no part done, nothing for review and no word from the user: past this the members
@@ -159,15 +160,15 @@ export function instructions(input: unknown, ctx: Ctx) {
     ? ` You are one member of requirement ${root.id} ("${root.title}")${root.id === t.id ? ", and its lead: you say when the whole of it is done" : `, led by ${memberName(root)}`}. ` +
       `Teammates, each in its own repository: ${mates.map((x) => `${memberName(x)} "${x.title}"`).join("; ") || "none yet"}. ` +
       `Talk to them straight with tell (it reaches them at once), wait for them with wait_for {type: teammate} plus a {type: time} timeout; ` +
-      `the user follows the requirement's activity feed, not your chats — what goes in it is their my-workflow skill, references/activity.md.`
+      `the user follows the requirement's activity feed, not your chats — what goes in it is their my-workflow skill, ${skillFile(ctx, "my-workflow/references/activity.md")}.`
     : "";
   return (
     `You are the worker of task ${t.id} ("${t.title}") on the user's Superagent board. They follow it on the board, not in ` +
     `this chat. How to work on it (reporting with these tools, asking them, starting other agents, teammates) is their my-workflow ` +
-    `skill, references/board.md: read it before you report or stop. my_task shows the task as the board sees it. ` +
+    `skill, ${skillFile(ctx, "my-workflow/references/board.md")}: read it before you report or stop. my_task shows the task as the board sees it. ` +
     `What the user's memory says about this repository and all of them came in your first message; the files are ` +
     `${ctx.fs.root}/${MEMORY}/${t.repo ? nameOf(t.repo) : "…"}.md and ${GENERAL}.md there — add to them with remember ` +
-    `(when: references/memory.md).` +
+    `(when: ${skillFile(ctx, "my-workflow/references/memory.md")}).` +
     team
   );
 }

@@ -1,4 +1,5 @@
 import { tellInbox } from "./_inbox";
+import { skillFile } from "./_user";
 import { workflow } from "./_config";
 import { forWorker } from "./memory";
 import { activity, blockersDone, find, load, members, newTask, note, reqOf, splitRef, update, type Question, type Store, type Task } from "./_store";
@@ -18,14 +19,18 @@ export type { Task };
 // them over MCP. Older workers ended replies with a ```gerdr-task``` JSON block instead; `list` still reads those.
 
 // What a worker is told besides its task: short, since it shows in the chat as part of the first message. How to
-// use each tool is in the tools' own descriptions (board.ts), the user's way of working in the panel's skills.
+// use each tool is in the tools' own descriptions (board.ts), the user's way of working in the panel's skills — named
+// by absolute path (skillFile): "the skill, references/board.md" had the worker search the disk for it.
 // Old sessions may still end replies with a ```gerdr-task``` block: list() keeps reading those.
-export const WORKER_PROTOCOL = `
+// Not exported: an exported function here is one a page or an agent can call (tasks.<name>).
+function workerProtocol(ctx: Ctx, id: string) {
+  return `
 
 ---
-This is task {id} on the user's Superagent board: they follow it there, not in this chat. How to work on it (reporting
-with the "work" tools, asking them, sessions you start) is their my-workflow skill, references/board.md: read it first.
+This is task ${id} on the user's Superagent board: they follow it there, not in this chat. How to work on it (reporting
+with the "work" tools, asking them, sessions you start) is their my-workflow skill: read ${skillFile(ctx, "my-workflow/references/board.md")} first.
 `;
+}
 
 /** The last ```gerdr-task``` block in a reply, parsed; null when there's none or it isn't JSON. */
 function lastBlock(reply: string): any {
@@ -462,7 +467,7 @@ export async function start(
     cwd,
     ...who,
     title: t.title,
-    prompt: (prompt || "看附件，照里面的做。") + WORKER_PROTOCOL.split("{id}").join(t.id) + forWorker(ctx, repo),
+    prompt: (prompt || "看附件，照里面的做。") + workerProtocol(ctx, t.id) + forWorker(ctx, repo),
     attachments: (t.attachments ?? []).map((a) => a.path),
     tags: { task: t.id },
     // Followed on the board (its drawer shows the chat), not in Code: no tab of it appears there

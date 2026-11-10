@@ -19,6 +19,14 @@ export function effective(ctx: Ctx, rel: string): string | null {
 }
 
 /**
+ * The absolute path of a skill's file as it counts for this person (`my-workflow/references/board.md`), for a message
+ * to an agent: "the skill, references/x.md" sends it searching the disk for the file, a path it can just read.
+ */
+export function skillFile(ctx: Ctx, rel: string): string {
+  return `${ctx.fs.root}/${effective(ctx, `skills/${rel}`) ?? `skills/${rel}`}`;
+}
+
+/**
  * Every file of a shared folder and of its personal copy, by path inside the folder, the personal one winning:
  * { rel, path (to read), mine (they have their own), shared (the panel has one) }.
  */
