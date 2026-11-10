@@ -8,5 +8,7 @@ const GerdrMarkdown = (core as unknown as { Markdown?: React.ComponentType<{ chi
 
 export function Md({ children, className }: { children: string; className?: string }) {
   if (!GerdrMarkdown) return <p className={`whitespace-pre-wrap ${className ?? ""}`}>{children}</p>;
-  return <div className={`min-w-0 text-[13px] leading-relaxed ${className ?? ""}`}><GerdrMarkdown>{children}</GerdrMarkdown></div>;
+  // gerdr-md: the chat's Markdown rules (Gerdr's style.css), as every Markdown in Gerdr has them around it. Without
+  // it inline code kept its own fixed 14px, bigger than the 13px text around it, and lists lost their spacing
+  return <div className={`gerdr-md min-w-0 text-[13px] ${className ?? ""}`}><GerdrMarkdown>{children}</GerdrMarkdown></div>;
 }
