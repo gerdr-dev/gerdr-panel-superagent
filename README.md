@@ -71,6 +71,7 @@
   worktree（同一个仓库同时有两个 worker 时用）。`agent` / `model` / `effort` 不填就用「设置」里给 worker 定的。
   不给 `repo` 就作为 `[任务 tN]` 回到你这里再派；你知道该去哪就直接给上。可选的仓库用 `gerdr panel run tasks.repos` 看。
 - 事实从 `gerdr panel run secretary.status` 查（等用户的、待验收的、在做的、最近完成的），不要凭聊天记忆说。
+  某一件的细节（动态、产物链接、它最后说的话、在等什么）：`gerdr panel run tasks.list '{"id":"t12"}'`。
 - 用户要亲手做的步骤（网页后台点开关、准备账号、审批）记成人工任务：
   `gerdr panel run tasks.add '{"title":"…","owner":"human","steps":"带直达链接的步骤","handBack":{"kind":"none|value|secret","label":"…","name":"SECRET_NAME"},"verify":"agent 怎么核验","minutes":5,"blockedBy":[]}'`
   依赖它的 agent 任务写 `"blockedBy":["t3"]`。密码 / token 永远不要让用户在对话里贴：给 worker 写的代码用的

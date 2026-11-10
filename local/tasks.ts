@@ -47,6 +47,8 @@ function lastBlock(reply: string): any {
 /**
  * Every task with its worker's live state, after applying worker replies not seen yet.
  * `column` is where the board shows it: you (needs the user), review, active, done.
+ * `{ id: "t12" }`: only that task and what belongs to it (its members, the user's steps they asked for), for an agent
+ * asking about one task: the whole board is tens of thousands of characters. Syncing still covers every task.
  */
 export async function list(input: unknown, ctx: Ctx) {
   const live: Record<string, any> = {};
@@ -202,7 +204,13 @@ export async function list(input: unknown, ctx: Ctx) {
   } catch (err: any) {
     ctx.log(`秘书那边没跟上：${err?.message ?? err}`);
   }
-  return { tasks: teams(s, tasks), at: Date.now() };
+  const board = teams(s, tasks);
+  const id = (input as { id?: string } | null)?.id;
+  if (!id) return { tasks: board, at: Date.now() };
+  if (!board.some((t) => t.id === id)) throw new Error(`没有 ${id}`);
+  // The task, the requirement it is in, and everything in that requirement
+  const root = (board.find((t) => t.id === id) as any)?.in ?? id;
+  return { tasks: board.filter((t: any) => t.id === root || t.in === root || t.id === id), at: Date.now() };
 }
 
 /**

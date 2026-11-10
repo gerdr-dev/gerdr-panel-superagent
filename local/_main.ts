@@ -91,8 +91,10 @@ type State = {
   items: Item[];
   /** Messages sent since its reply was last taken: what the turn was for (the strongest reason wins). */
   awaiting?: { why: Why; /** when the last message went in */ sent: number };
-  /** What was told to the secretary as needing the user (notice): task id → the line, so each is told once. */
+  /** Before 2026-11-10's status news: what was told as needing the user. Unused now. */
   noticed?: Record<string, string>;
+  /** Each task's status as last told to the secretary (notice): task id → its key, so each change is told once. */
+  states?: Record<string, string>;
   /** When the last briefing was asked for: the next one covers what happened since. */
   briefAt?: number;
   /**
@@ -296,10 +298,11 @@ function talkText(ctx: Ctx) {
   return [
     `## 和用户说话\n` +
       `- 你收到的消息有几种：[用户] 是用户在秘书页上对你说的话；[任务 tN] / [消息 cN] / [重新安排 tN] 是要派的活（见下面）；` +
-      `[动态] 是任务上出了要用户知道或拍板的事；[简报] 是到了写简报的时间。\n` +
+      `[动态] 是任务的状态变了（开始做、等用户、待验收、做完、放弃、接着做；中途的进展不会来）；[简报] 是到了写简报的时间。\n` +
       `- **你这一轮最后的回复就是用户看到的话**（工具调用和中间过程他看不到）。没有要告诉他的（派活、分拣、不急的动态），整条回复只写「${SILENT}」。\n` +
       `- 用户问到的、你要说的，先查事实再说：\`gerdr panel run secretary.status\` 给出等他的事（带问题的 id 和选项）、在做的、待验收的、最近完成的。` +
-      `不要凭记忆说「做完了」。\n` +
+      `不要凭记忆说「做完了」。问到某一件事的细节（做到哪、动态里写了什么、开了哪个 MR、它最后说了什么）：` +
+      `\`gerdr panel run tasks.list '${ex({ id: "t12" })}'\` 只给这一件（和它的成员），别不带 id 拉整块看板。\n` +
       `- 用户交给你一件事：是活就派（\`tasks.add\` 带 \`"start": true\`，你知道去哪个仓库就给 \`repo\`，不知道就不给，交给下面的派活）；` +
       `他要亲手做的步骤记成人工任务（\`tasks.add\` 带 \`"owner": "human"\`）。派完一句话告诉他交给了谁。\n` +
       `- 替用户回答 worker：问题 \`tasks.answerQuestion ${ex({ id: "t5", q: "1", value: "选项或他的原话" })}\`；` +
@@ -445,36 +448,62 @@ export async function capture(ctx: Ctx, beforeSend = false) {
   append(ctx, { who: "agent", text, kind: why === "user" ? "reply" : why === "brief" ? "brief" : "notice", session: m.id });
 }
 
+/** Where a task stands, for news: what changes it is a change of status; progress within one isn't. */
+const STATUS: Record<string, string> = { todo: "待办", active: "在做", you: "等你", review: "待验收", done: "做完了", dropped: "放弃了" };
+
 /**
- * News for the secretary (DESIGN.md「秘书」「什么时候打扰」): a task that newly needs the user — a question, a step of
- * theirs, a worker stopped or asking for approval, a result to review. Each is told once (state.noticed, keyed by what
- * it waits on, so a reworded line isn't news); the secretary decides whether to tell the user now or keep it for the
- * briefing. The first time there's no record yet, so what's already waiting is taken as known, not sent as a flood.
+ * News for the secretary (DESIGN.md「秘书」「什么时候打扰」): every change of a task's status — started, waiting on
+ * the user (a question, a step of theirs, stopped, an approval, an error: a new question counts too), a result to
+ * review, done, dropped, going on again. Progress within a status (activity, a new summary) isn't news: the user asked
+ * for status changes only. One message per sync with every change in it; the secretary decides whether to tell the
+ * user now, keep it for the briefing or say nothing. A task first seen still waiting to be started isn't news (it was
+ * just added). The first time there's no record, so where everything stands is taken as known, not sent as a flood.
  * `tasks` is tasks.list's view (columns, questions, live sessions).
  */
 export async function notice(ctx: Ctx, tasks: any[]) {
-  const lines = new Map<string, { key: string; line: string }>();
-  for (const l of waitingLines(tasks)) {
-    const t = tasks.find((x) => x.id === l.id);
-    const open = (t?.questions ?? []).filter((q: any) => !q.dropped && !q.answer).map((q: any) => q.id);
-    lines.set(l.id, { key: `you|${t?.question ?? ""}|${t?.stopped ? "stopped" : ""}|${open.join(",")}`, line: `${l.title}${l.body ? `\n  ${l.body.replace(/\n/g, "\n  ")}` : ""}` });
-  }
-  for (const t of tasks) {
-    if (t.status === "dropped" || t.status === "done" || lines.has(t.id)) continue;
-    if (t.column === "you" && (t.live?.status === "waiting" || t.live?.status === "error"))
-      lines.set(t.id, { key: `live|${t.live.status}`, line: `${t.id}「${t.title}」的 worker ${t.live.status === "error" ? "出错了" : `在等你批准：${t.live.waiting ?? ""}`}` });
-    else if (t.column === "review") lines.set(t.id, { key: "review", line: `${t.id}「${t.title}」交了结果，等你验收：${t.summary ?? ""}` });
-  }
+  const waiting = new Map(waitingLines(tasks).map((l) => [l.id, l]));
   const now: Record<string, string> = {};
-  for (const [id, v] of lines) now[id] = v.key;
+  const lines: Record<string, string> = {};
+  for (const t of tasks) {
+    const head = `${t.id}「${t.title}」`;
+    if (t.status === "dropped") {
+      now[t.id] = "dropped";
+      lines[t.id] = `${head} 放弃了${t.dropReason ? `：${t.dropReason}` : ""}`;
+    } else if (t.status === "done") {
+      now[t.id] = "done";
+      const link = (t.links ?? []).at(-1);
+      lines[t.id] = `${head} 做完了${t.summary ? `：${t.summary}` : t.handedBack && t.handBack?.kind !== "secret" ? `：${t.handedBack}` : ""}${link ? `（${link.label}：${link.url}）` : ""}`;
+    } else if (t.column === "you") {
+      const open = (t.questions ?? []).filter((q: any) => !q.dropped && !q.answer).map((q: any) => q.id);
+      now[t.id] = `you|${t.question ?? ""}|${t.stopped ? "stopped" : ""}|${t.live?.status === "waiting" || t.live?.status === "error" ? t.live.status : ""}|${open.join(",")}`;
+      const l = waiting.get(t.id);
+      lines[t.id] = l
+        ? `${l.title}${l.body ? `\n  ${l.body.replace(/\n/g, "\n  ")}` : ""}`
+        : `${head} 的 worker ${t.live?.status === "error" ? "出错了" : `在等你批准：${t.live?.waiting ?? ""}`}`;
+    } else if (t.column === "review") {
+      now[t.id] = "review";
+      lines[t.id] = `${head} 交了结果，等你验收：${t.summary ?? ""}`;
+    } else if (t.session || t.status === "running" || t.status === "delivering") {
+      now[t.id] = "active";
+      lines[t.id] = `${head} `;
+    } else now[t.id] = "todo";
+  }
   const fresh = updateState(ctx, (s) => {
-    const was = s.noticed;
-    s.noticed = now;
+    const was = s.states;
+    s.states = now;
     if (!was) return [];
-    return [...lines].filter(([id, v]) => was[id] !== v.key).map(([, v]) => v.line);
+    const out: string[] = [];
+    for (const [id, key] of Object.entries(now)) {
+      const before = was[id];
+      if (before === key || key === "todo") continue;
+      const from = before ? STATUS[before.split("|")[0]] : "";
+      if (key === "active") lines[id] += from === "等你" || from === "待验收" ? "接着做了" : "开始做了";
+      out.push(`${lines[id]}${from && key !== "active" ? `（之前：${from}）` : ""}`);
+    }
+    return out;
   });
   if (!fresh.length) return;
-  await toMain(ctx, [`[动态] 这些事要用户知道或拍板（细节用 secretary.status 查）：\n${fresh.map((l) => `- ${l}`).join("\n")}`], "notice");
+  await toMain(ctx, [`[动态] 这些任务的状态变了（细节用 secretary.status 查）：\n${fresh.map((l) => `- ${l}`).join("\n")}`], "notice");
 }
 
 function taskBlock(t: Task, agents: { id: string; name: string }[]) {
