@@ -13,7 +13,8 @@ type Step = { status: string; handedBack?: string; title?: string; kind?: string
  * right there; once it's done or taken back on the board, a one-line record of how it ended instead of a card that
  * still looks open. The board is asked again every 30s while the card is on screen.
  */
-function TaskStep({ card }: CardProps) {
+/** Also drawn on the secretary's page for a step it showed that is answered now (board.tsx NeedRow). */
+export function TaskStep({ card }: CardProps) {
   const id = String(card.ref ?? "");
   // Which board it belongs to: one person can have this panel in several projects, each with its own t4. Not the page's
   // project — this runs in Gerdr's own page. Older cards only carried it in their answer button (choose.project);

@@ -7,6 +7,7 @@ import { Sheet, SheetContent, SheetTitle } from "../components/ui/sheet";
 import { AttachmentBar, useAttach, type Attachment } from "../components/Attachments";
 import { askSecret, secretNames } from "../lib/bridge";
 import { ChatDrawer, type ChatAction, type ChatItem } from "../components/ChatDrawer";
+import { TaskStep } from "../cards";
 import { Trail } from "../components/Trail";
 import { Linger } from "../lib/linger";
 import { SettingsSheet, TABS, type SettingsTab } from "../components/SettingsSheet";
@@ -1680,6 +1681,28 @@ export function NeedRow({ x, lead, activity, byId, act, onGo, nobody }: { x: Exc
     </div>
   );
   const t = { id: lead, activity };
+  if (x.type === "ask" && (x.h.status === "done" || x.h.status === "dropped")) {
+    // Answered (or taken back) where it was asked, as the card in a chat turns into its one-line record (TaskStep:
+    // 已处理：the answer, with 改答案). The secretary's page keeps these; it used to drop them the moment they were
+    // answered, so a click made the question vanish with nothing to show for it.
+    const m = who(x.h.askedBy) ?? ms.find((y) => y.blockedBy?.includes(x.h.id));
+    const cards = askCards({ ...x.h, expiresAt: undefined }) ?? [];
+    return (
+      <div className="flex gap-2">
+        {!m && nobody ? nobody.face : <Avatar m={m} lead={m?.id === lead} />}
+        <div className="min-w-0 flex-1 space-y-1">
+          {head(m, x.h.status === "done" ? "问过你" : "撤回了", x.at)}
+          {cards.length ? (
+            cards.map((c) => <TaskStep key={String(c.ref)} card={{ ...c, project } as any} />)
+          ) : (
+            <p className="rounded-lg border border-l-2 border-l-ok bg-card px-3 py-2 text-[12px] text-muted-foreground">
+              {x.h.id} {x.h.title} · {x.h.status === "done" ? "已处理" : "已撤回"}
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
   if (x.type === "ask") {
     const m = who(x.h.askedBy) ?? ms.find((y) => y.blockedBy?.includes(x.h.id));
     const cards = askCards(x.h);

@@ -77,7 +77,9 @@ export default function SecretaryPage() {
   usePhoneMenu(TABS.map((x) => ({ id: x.id, label: x.label, icon: <x.icon className="size-4" />, onSelect: () => setSettings(x.id) })));
 
   const byId = useMemo(() => Object.fromEntries((tasks ?? []).map((t) => [t.id, t])), [tasks]);
-  const needs = useMemo(() => needsOf(tasks), [tasks]);
+  // Only from where the conversation shown starts: older answered steps belong to before it
+  const from = feed?.entries[0]?.at ?? Infinity;
+  const needs = useMemo(() => needsOf(tasks, from), [tasks, from]);
   const rows = useMemo(() => toRows(feed, main, needs), [feed, main, needs]);
   const send = useCallback(
     async (m: { text: string; files: File[] }) => {
@@ -118,7 +120,7 @@ export default function SecretaryPage() {
           </Button>
         </div>
       </header>
-      <Waiting needs={needs} onJump={(key) => setJump((j) => ({ key, seq: (j?.seq ?? 0) + 1 }))} />
+      <Waiting needs={needs.filter((x) => x.type !== "ask" || (x.h.status !== "done" && x.h.status !== "dropped"))} onJump={(key) => setJump((j) => ({ key, seq: (j?.seq ?? 0) + 1 }))} />
       {error && <p role="alert" className="px-4 pt-3 text-[13px] text-bad">读取失败：{error}</p>}
       {/* Full width, so the whole page scrolls the conversation and its scrollbar sits at the right edge; the chat
           itself keeps the text in a centred column (800px, like every Gerdr chat) */}
@@ -147,10 +149,13 @@ export default function SecretaryPage() {
  * What waits on the user across the board, as a requirement's feed has it (board.tsx teamNeeds): the steps and
  * decisions workers asked, and workers stuck on the user.
  */
-function needsOf(tasks: Task[] | null): Need[] {
+function needsOf(tasks: Task[] | null, from: number): Need[] {
   const live = (tasks ?? []).filter((t) => t.status !== "done" && t.status !== "dropped");
+  // What was asked here and is answered (or taken back) now: kept where it was asked, as its record (NeedRow)
+  const over = (tasks ?? []).filter((t) => t.owner === "human" && (t.status === "done" || t.status === "dropped") && askedAt(t) >= from);
   return [
     ...live.filter((t) => t.owner === "human" && t.ready).map((h): Need => ({ at: askedAt(h), key: `h${h.id}`, type: "ask", h })),
+    ...over.map((h): Need => ({ at: askedAt(h), key: `h${h.id}`, type: "ask", h })),
     ...live.filter((t) => t.owner === "agent" && t.column === "you").map((m): Need => ({ at: waitedSince(m), key: `s${m.id}`, type: "stuck", m })),
   ];
 }
