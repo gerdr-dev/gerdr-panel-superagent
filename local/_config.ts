@@ -80,7 +80,6 @@ function migrate(ctx: Ctx) {
     worker: { agent: v("干活 agent", "worker agent"), model: v("干活模型", "worker model"), effort: v("干活思考强度", "worker effort") },
     // 直推仓库 named repositories by path or by group/name: matched on the path's last part
     repos: list(v("仓库", "repos")).map((path) => ({ path, direct: direct.some((d) => path === d || path.endsWith(`/${d.split("/").pop()}`)) })),
-    gitlab: { host: v("GitLab", "gitlab") },
     proactive: said(v("主动工作", "proactive"), { off: ["关", "off"], observe: ["只记录", "observe"], on: ["照做", "on"] }),
   };
   ctx.fs.write(FILE, JSON.stringify(diff(normalize(raw)), null, 2) + "\n");

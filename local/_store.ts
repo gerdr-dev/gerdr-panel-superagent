@@ -1,8 +1,8 @@
-// The task board's data, shared by tasks.ts (the board, the panel's agent) and the watchers (mrwatch.ts). Kept as one
+// The task board's data, shared by tasks.ts (the board, the panel's agent) and the watchers (waits.ts). Kept as one
 // file per part in user/data/reqs/ (_parts.ts; this person's, never shared — _user.ts). A helper file (leading _):
 // nothing here is callable from a page.
 
-import { addWait, askUser, open, question, sync, type Wait } from "./_waits";
+import { addWait, askUser, mrConversation, open, question, sync, type Wait } from "./_waits";
 import { migrate } from "./_user";
 import { readAll, split, writeChanged } from "./_parts";
 
@@ -190,7 +190,7 @@ function upgrade(s: Store): Store {
       t.status = "running";
       const d = t.delivery;
       if (d?.url) {
-        const on = { source: "gitlab", key: `${d.project}!${d.iid}` };
+        const on = { source: "gitlab", key: mrConversation(d.url)?.key ?? `${d.project}!${d.iid}` };
         if (!open(t).some((w) => w.on?.key === on.key)) addWait(t, { kind: "reply", what: `MR !${d.iid}：review、流水线、合并`, on, where: `MR !${d.iid}`, url: d.url, since: d.since });
       }
     }

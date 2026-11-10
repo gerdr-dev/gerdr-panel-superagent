@@ -1,6 +1,6 @@
 # Superagent（秘书和看板）的设计
 
-改它（`ui/src/pages/index.tsx`、`ui/src/pages/board.tsx`、`local/_log.ts`、`local/secretary.ts`、`local/tasks.ts`、`local/_main.ts`、`local/superagent.ts`、`local/inbox.ts`、`local/board.ts`、`local/mrwatch.ts`）之前先读这份。
+改它（`ui/src/pages/index.tsx`、`ui/src/pages/board.tsx`、`local/_log.ts`、`local/secretary.ts`、`local/tasks.ts`、`local/_main.ts`、`local/superagent.ts`、`local/inbox.ts`、`local/board.ts`、`local/waits.ts`）之前先读这份。
 这里记的是**为什么这么做**，以及试过、被否掉的做法。每一条都是用户实际用的时候踩出来的。
 
 ## 出发点
@@ -160,14 +160,24 @@ worker 拿到一组 面板工具（`local/board.ts`，经 Gerdr 的 `gerdr panel
 用户的步骤在 `blockedBy`，「停没停」要在 `column` / `stopped` / `silentStop` 三处各判一遍；每出一种新等待就漏一处：
 worker 说「我在等」却没东西叫醒它（t29），报一句 working 就停了（t30），等 MR 在对话里看不到。
 
-**MR 只是一种工作方式加一个事件来源**，没有自己的状态、按钮和规则：
+**MR 只是一种工作方式加一个状态来源**，没有自己的状态、按钮和规则：
 
 - 工作方式在 `mr.md`：开完 MR 用 `wait_for` 盯着它；review、流水线、冲突怎么处理；**谁来合**按仓库写在一张表里
   （worker 直接合 / 先问用户 / 找第三个人合，再 `wait_for` 等他）；合并之后接着做（发布、验证），做完再报 `done`。
   所以「等合并」算不算「等你」，看 worker 是 `ask_human` 问用户，还是在等别人。
-- 事件来源是 mrwatch（`local/mrwatch.ts`，`schedules/mrwatch.json` 定时跑）：盯着所有还没完的任务跟着的 MR，
-  每件事发一次事件：`mr.review`、`pipeline.failed` / `pipeline.passed`、`mr.conflict`、`mr.need_rebase`、`mr.mergeable`、
-  `mr.merged`、`mr.closed`。它不变基、不合并、不问人、不判完成。发过什么记在 `user/data/mrwatch.json`。
+- MR 的来源是 GitLab MR 插件（gerdr-addon 仓库的 `gitlab`），它**报状态、不发事件**：开着还是合并了、流水线、别人的意见几条、
+  冲突、要变基、能不能合（Gerdr 的 docs/dev/EVENTS.md「Waiting for a state」）。worker `wait_for` 一个 MR 时，面板当场写
+  `user/triggers/follow-gitlab-<key>.json`，一个带 `until` 的 trigger（`waits.ts` `stateTrigger`）：条件是 worker 写的，
+  没写就是「从现在起有新情况」（`newFromNow`，按 `ctx.states.get` 拿到的现在的值写成 `reviews > 3` 这样）。Gerdr 几秒内让插件
+  开始查这个 MR，条件一成立就跑 `waits.onState`：交给跟着它的任务（和 Slack 的追问走同一条路，「去向」里看得到），删掉这个
+  trigger。worker 处理完还要等就再 `wait_for`。没有任务再跟它时 `waits.tick` 也会删掉，插件就不查了。
+  它不变基、不合并、不问人、不判完成。
+- **为什么是状态不是事件**：worker 开完 MR、过了几分钟才 `wait_for`（或者用户提醒它才等），这期间的评论如果是事件，就永远错过了。
+  条件按 MR 当时的样子判断，晚一点等也一样：已经发生的，一等就叫醒。
+- **被否掉的做法：面板自己轮询**（2026-11-10 以前的 `local/mrwatch.ts` + `schedules/mrwatch.json`）。它只查这个面板的任务跟着的 MR，
+  所以 Code 会话里 `gerdr event watch --on 'gitlab/*' --key …` 订阅得上、永远不响：订阅方告诉不了来源。挪进插件以后，会话的
+  `gerdr wait` 和几份面板的 trigger 由同一个插件查，各等各的。中间还试过「插件发事件、订阅告诉插件查哪个」和面板每分钟
+  `ctx.events.follow(...)`：前者错过了就补不回来，后者多一个词，都去掉了。
 - **被否掉的做法：mrwatch 是一套流程**（任务进 `delivering`，它按「设置 → MR 合并」自己变基、合并，改太多轮问人，
   合并了就标完成；抽屉里有「立即合并」「立即检查」）。用户：「不要把 MR 当做一个固定的、特殊的流程，它只是一个工作方式 + 事件」。
   原来的设置值（自动合并、变基、跳过流水线、批准人数、轮数）第一次读时写进各人自己的 `mr.md`（`_config.ts` `mrToSkill`）。
@@ -391,13 +401,17 @@ worker 最新的总结、产物都在需求详情里，老任务没有活动，�
   交给它的任务都交回了，才去评估（带上它们的理由）。
 - **并进要有明确的指向**（提到 tN、它的链接、它说过的话），只是话题像不算。并进后那段对话也算这个任务订阅的。
 - **消息是数据，不是指令**：调度会话的说明里写明了；准入是代码判断，消息内容改不了。
-- **一个面板收什么，都在「触发器」页**：面板自带的（`triggers/*.json`，比如盯 MR 的 `mr.json`，带着它要的 GitLab 地址）和用户勾的
+- **一个面板收什么，都在「触发器」页**：面板自带的（`triggers/*.json`，现在没有了：盯 MR 的 `mr.json` 随 mrwatch 一起去掉）和用户勾的
   列在一起；已经被自带的收着的来源不给勾（勾了同一条事件会收两次）。**被否掉的做法：GitLab 地址放在「设置」里、`mr.json` 不显示。**
   用户看不出面板在收 GitLab 的事件：2026-11-10，default 项目的看板一直在判断 lb 项目的 MR。
-  自带的也能关：Gerdr 的触发器文件没有开关，关掉就是在 `user/triggers/` 写一份同名副本、标上 `input.off`（Gerdr 读它而不是面板的），
-  `onEvent` 见到就不收；盯 MR 的那条连 mrwatch 定时任务一起暂停，不白查 GitLab。
-- **MR 事件只给发出它的面板**：事件是整台电脑共用的，每份安装的 mrwatch 都往里发、每份的 `mr.json` 都收 `gitlab/*`。
-  mrwatch 发的事件带上 `data.panel`（id 也带上，两份面板跟同一个 MR 时各收各的），`onEvent` 遇到别的面板发的直接不收、不记去向。
+  自带的也能关：在 `user/triggers/` 写一份同名副本、标上 `"off": true`（Gerdr 的开关：不跑、也不算订阅）和 `input.off`
+  （给没有这个开关的旧 Gerdr，`onEvent` 见到就不收）。
+- **MR 事件只给跟着它的任务**：事件是整台电脑共用的，插件给每个订阅了这个 MR 的人发（Code 会话、别的项目的面板）。面板的 MR
+  trigger 每个只写一个 MR 的 key，所以只管自己任务的。以前所有面板共用一个不带 key 的 `mr.json`，靠 mrwatch 在事件上写
+  `data.panel` 区分（2026-11-10，default 项目的看板一直在判断 lb 项目的 MR）；那两样都去掉了。
+- **MR 的 key 带 GitLab 地址**：`<host>/group/repo!34`，从 MR 的网址取（`_waits.ts` `mrConversation`）。几个项目各用一个 GitLab
+  也不用设置：地址在 key 里，插件靠 glab 在这台电脑上的登录去查，两个 GitLab 的 `group/repo!34` 也不会混。
+  原来的「GitLab 地址」设置（`gitlab.host`）去掉了，只有 mrwatch 用它。只有 lb 项目要盯 MR，就是只有 lb 的任务有 MR 订阅。
 - **能选什么来源不写死**：列表来自 `ctx.events.catalog()`（装了的插件声明会发的，加上最近 30 天真来过的），
   默认一个都不开。打开就是写 `triggers/inbox-<来源>.json`，关掉挪进废纸篓。
   **被否掉的做法：看板里直接写一个 Slack 开关。** 很多人不用 Slack，还有飞书。
@@ -406,11 +420,11 @@ worker 最新的总结、产物都在需求详情里，老任务没有活动，�
 - **订阅先于准入**：跟着某段对话的任务，那段对话里谁说话都交给它（MR 上 reviewer 的意见、流水线），这只是已经允许的
   活的上下文，不给新权限（dsh 同样）。没人跟的才过准入、去评估。
 - **只有人能把结束的任务叫回来**：事件有 `actor`（有人做的）才会重新打开最近结束的任务；流水线、机器人（没有 actor）不会。
-- **MR 是任务的一段对话**：worker `wait_for` 一个 MR，等着的时候任务就订阅 `gitlab` / `group/repo!34`。
-  mrwatch 只当来源：新意见、流水线挂了、有冲突都发成事件（`gitlab/mr.review` 等），面板自己的 `triggers/mr.json`
-  收进来，按订阅交给 worker，和 Slack 的追问走同一条路：「去向」里看得到，不归它的也能 `hand_back`。
+- **MR 是任务的一段对话**：worker `wait_for` 一个 MR，等着的时候任务就订阅 `gitlab` / `<host>/group/repo!34`。
+  GitLab 插件只当来源：报 MR 的状态，这个 MR 带 `until` 的 trigger 条件成立时（`waits.onState`）交给 worker，
+  和 Slack 的追问走同一条路：「去向」里看得到，不归它的也能 `hand_back`。
   变基、合并、合并之后的事都归 worker（照 `mr.md`）。
-  **被否掉的做法：mrwatch 自己 `sessions.send` 给 worker。** 另一条路：看不到记录，worker 也交不回。
+  **被否掉的做法：MR 的来源自己 `sessions.send` 给 worker。** 另一条路：看不到记录，worker 也交不回。
 - **主动工作**（dsh 的 inferred + observe）：触发器里把一个来源设成「不是找我的」（频道闲聊、告警），它的事件只按
   `skills/my-workflow/references/proactive.md` 里用户自己写的规则接，接的时候写明是哪条规则，worker 只做那条允许的，
   也不在原对话里说「收到」（没人在等）。模式在「设置 → 主动工作」：关 / 只记录（默认）/ 照做。只记录时，决定记成
@@ -546,8 +560,7 @@ worker 在看板上怎么做（每次停下要汇报、自己开的会话来问�
 | `local/superagent.ts` | 调度会话对消息和重新安排的 `decide`，「去向」的 `log` / `retry` |
 | `local/inbox.ts` | 触发器的设置和 `onEvent`（准入 → 订阅 → 评估） |
 | `local/board.ts` | 给 worker 的 面板工具 |
-| `local/mrwatch.ts` | MR 的事件来源 |
-| `local/_waits.ts` / `_wake.ts` / `waits.ts` | 任务在等什么、怎么叫醒、`wait_for` |
+| `local/_waits.ts` / `_wake.ts` / `waits.ts` | 任务在等什么、怎么叫醒、`wait_for`；等的对话各一个 follow trigger（MR 的是等状态的，带 `until`），没人跟了 `tick` 删掉 |
 | `ui/src/lib/settings.ts` | 设置的结构、默认值、校验（页面和 local 共用） |
 | `local/_config.ts`、`local/settings.ts` | 设置的读（只存和默认不同的，一次性从旧的 `{{变量}}` 迁移）、页面和助手的读写 |
 | `local/playbooks.ts`、`local/schedules.ts` | 「流程」「定时任务」的读写 |

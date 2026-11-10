@@ -10,7 +10,7 @@
 // registered by the worker's own calls (wait_for: news in a conversation — a colleague's DM, an MR — or a time; a
 // question for the user); two are kept in step with what they mirror (sync): the user's board items it's blocked by,
 // the sessions it handed work to. An MR is no kind of its own: a way of working (the worker's skill) plus a source of
-// events (mrwatch.ts), waited on like any conversation. The board reads only this:
+// events (the GitLab add-on, subscribed to by the wait's follow trigger, waits.ts), waited on like any conversation. The board reads only this:
 //
 //   有直接等你的（问题、批准）→ 等你（等你在看板上做的那一项，是那一项的卡片在等你）
 //   worker 在跑，或者还有等待 → 进行中
@@ -151,10 +151,13 @@ export function waitOn(t: Task, what: string, on: WakeOn[]): Wait[] {
   });
 }
 
-/** The conversation an MR is, as the MR watcher (mrwatch.ts) emits its events: gitlab, group/repo!34. */
+/**
+ * The conversation an MR is, as the GitLab add-on emits its events: gitlab, <host>/group/repo!34. The host is in the
+ * key so one add-on serves every GitLab (projects on different ones) and two GitLabs' group/repo!34 never mix.
+ */
 export function mrConversation(url: string): { source: string; key: string; where: string; url: string } | null {
-  const m = /^(https?:\/\/[^/]+)\/(.+?)\/-\/merge_requests\/(\d+)/.exec(url.trim());
-  return m ? { source: "gitlab", key: `${m[2]}!${m[3]}`, where: `MR !${m[3]}`, url: m[0] } : null;
+  const m = /^https?:\/\/([^/]+)\/(.+?)\/-\/merge_requests\/(\d+)/.exec(url.trim());
+  return m ? { source: "gitlab", key: `${m[1]}/${m[2]}!${m[3]}`, where: `MR !${m[3]}`, url: m[0] } : null;
 }
 
 // ---- kept in step with what they mirror ----

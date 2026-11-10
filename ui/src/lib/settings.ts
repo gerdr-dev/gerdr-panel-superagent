@@ -26,7 +26,6 @@ export type Settings = {
   /** Workers' defaults; a task's own agent / model wins, and these models only go with this agent. */
   worker: Who;
   repos: Repo[];
-  gitlab: { host: string };
   /** Work nobody asked for: off, observe (judged and recorded, not done: dsh's observe mode) or on. */
   proactive: "off" | "observe" | "on";
 };
@@ -35,7 +34,6 @@ export const DEFAULTS: Settings = {
   router: { agent: "", model: "", effort: "", mode: "" },
   worker: { agent: "", model: "", effort: "", mode: "" },
   repos: [],
-  gitlab: { host: "gitlab.com" },
   proactive: "observe",
 };
 
@@ -58,7 +56,6 @@ export function normalize(raw: any): Settings {
     router: who(r.router, d.router),
     worker: who(r.worker, d.worker),
     repos,
-    gitlab: { host: str(r.gitlab?.host, "") || d.gitlab.host },
     proactive: oneOf(r.proactive, ["off", "observe", "on"] as const, d.proactive),
   };
 }

@@ -15,8 +15,6 @@ type Source = { on: string; title?: string; description?: string; addon?: string
 /** One of the panel's own triggers (triggers/*.json): always on. */
 type Builtin = { id: string; on: string; name?: string; key?: string; off?: boolean };
 
-/** The schedule that feeds one of the panel's own triggers: switched off with it, so it doesn't poll for nothing. */
-const FEEDS: Record<string, string> = { mr: "mrwatch" };
 type TriggerInfo = { id: string; on: string; runs: number; last?: { startedAt: string; ok: boolean; error?: string } };
 
 export default function TriggersPage() {
@@ -46,6 +44,12 @@ export default function TriggersPage() {
         </p>
       </header>
       {err && <p role="alert" className="text-[13px] text-bad">{err}</p>}
+      {list && !list.some((s) => s.on.startsWith("gitlab/") && !!s.addon) && (
+        <p className="rounded-xl border border-dashed p-3 text-[12px] text-muted-foreground">
+          任务开的 MR（worker 用 wait_for 等着的）有了新情况才会叫醒它，要装 GitLab MR 插件（设置 → 扩展 → 商店，或 gerdr addon install gitlab），
+          并且 glab 在这台电脑上登录过那个 GitLab。
+        </p>
+      )}
       {own.length > 0 && (
         <section className="space-y-3">
           <h2 className="text-[13px] font-medium text-muted-foreground">面板自带：默认开着</h2>
@@ -70,10 +74,7 @@ export default function TriggersPage() {
   );
 }
 
-/**
- * One of the panel's own triggers. The MR one (triggers/mr.json) carries what it needs: the GitLab the MR watcher
- * (schedules/mrwatch) asks, a setting (gitlab.host), shown here so everything about what comes in is on one page.
- */
+/** One of the panel's own triggers (triggers/*.json): on unless this person switched it off. */
 function OwnRow({ b, info, onSaved }: { b: Builtin; info?: TriggerInfo; onSaved: () => void }) {
   const last = info?.last;
   const [busy, setBusy] = useState(false);
@@ -83,15 +84,6 @@ function OwnRow({ b, info, onSaved }: { b: Builtin; info?: TriggerInfo; onSaved:
     setErr("");
     try {
       await run("inbox.setBuiltin", { id: b.id, on });
-      // Its feeding schedule follows (Gerdr's pause is this machine's, like the 定时任务 page's)
-      const feed = FEEDS[b.id];
-      if (feed)
-        await fetch(`/api/work/schedules/${encodeURIComponent(feed)}/${on ? "resume" : "pause"}?project=${encodeURIComponent(project)}`, {
-          method: "POST",
-          credentials: "same-origin",
-          headers: { "X-Gerdr": "1", "Content-Type": "application/json" },
-          body: "{}",
-        }).catch(() => {});
       onSaved();
     } catch (e: any) {
       setErr(String(e.message || e));
@@ -123,54 +115,8 @@ function OwnRow({ b, info, onSaved }: { b: Builtin; info?: TriggerInfo; onSaved:
           收进来
         </label>
       </div>
-      {b.id === "mr" && (b.off ? <p className="text-[12px] text-muted-foreground">关着：mrwatch 也停了，任务开的 MR 有了新情况，worker 不会被叫醒。</p> : <GitLab />)}
       {err && <p className="text-[12px] text-bad">{err}</p>}
     </article>
-  );
-}
-
-function GitLab() {
-  const [host, setHost] = useState<string | null>(null);
-  const [cur, setCur] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-  usePoll(
-    () =>
-      run<{ settings: { gitlab: { host: string } } }>("settings.get").then(
-        (r) => (setCur(r.settings.gitlab.host), setHost((h) => h ?? r.settings.gitlab.host)),
-        () => {},
-      ),
-    60_000,
-  );
-  const save = async () => {
-    setBusy(true);
-    setErr("");
-    try {
-      await run("settings.set", { gitlab: { host: (host ?? "").trim() } });
-      setCur((host ?? "").trim());
-    } catch (e: any) {
-      setErr(String(e.message || e));
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <div className="space-y-1 text-[12px] text-muted-foreground">
-      <p>
-        这个面板的任务在跟的 MR（worker 开的、在等的），由定时任务 mrwatch 去 GitLab 查：新的 review 意见、流水线、能合了、合并了，交给跟着它的任务。
-        别的项目的面板发出的 MR 消息不收。
-      </p>
-      <div className="flex flex-wrap items-center gap-2">
-        <span>GitLab 地址（glab 要先在这台电脑上登录过它）</span>
-        <input className="h-7 w-56 rounded-md border bg-background px-2 font-mono text-[12px] text-foreground" value={host ?? ""} placeholder="gitlab.com" onChange={(e) => setHost(e.target.value)} onKeyDown={(e) => e.key === "Enter" && host !== cur && save()} />
-        {host !== null && host.trim() !== cur && (
-          <Button disabled={busy} onClick={save}>
-            保存
-          </Button>
-        )}
-      </div>
-      {err && <p className="text-bad">{err}</p>}
-    </div>
   );
 }
 

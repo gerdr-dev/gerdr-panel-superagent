@@ -8,6 +8,8 @@
 //   pipeline / merge — goes to the worker as a follow-up (_main.ts followUp). Gerdr only runs this panel for events a
 //   trigger names, and the user may never have turned the source on in 触发器 — so a trigger of its own
 //   (user/triggers/follow-*.json → onFollowed) brings that one conversation in, and goes when no live task follows it.
+//   For an MR that trigger is also the subscription the GitLab add-on polls by (gerdr docs/dev/EVENTS.md, "Sources,
+//   subscriptions and Gerdr"): written here, the add-on starts on it within seconds; swept (tick), it stops.
 //   Followed while waiting only (_waits.ts waitingOn), not added to the task's threads: a colleague's next DM, days
 //   later and about something else, is not this task's news.
 // - check: a command the worker wrote that says whether it has happened (a publish approved, a job done), run here every
@@ -23,13 +25,15 @@ import { isOutside, mrConversation, open, waitOn, wakeItem, wakeText, type Wait,
 
 const sessionTitle = (w: Wait) => w.what.replace(/^它派出的「(.*?)」.*$/, "$1");
 import { wake } from "./_wake";
-import { followUp, follows, record, subscribers, compact } from "./_main";
+import { followUp, follows, record, subscribers, compact, type Ev } from "./_main";
 import { mine, staleAsks } from "./board";
 import { USER } from "./_user";
 
 const DIR = `${USER}/triggers`;
 const PREFIX = "follow-";
 const FN = "waits.onFollowed";
+/** An MR's trigger: it waits for the MR's state (a condition on it), not for events — see onState. */
+const STATE_FN = "waits.onState";
 const DAY = 86_400_000;
 
 export const tools = {
@@ -58,6 +62,11 @@ export const tools = {
               type: { type: "string", enum: ["message", "check", "time", "teammate"] },
               who: { type: "string", description: "teammate: the member's task id (t7)" },
               conversation: { type: "string", description: "message: a Slack channel / DM id, a Slack message link, or an MR URL" },
+              until: {
+                type: "string",
+                description:
+                  "message with an MR URL, optional: the condition on the MR's state that wakes you, one JavaScript expression over its fields, e.g. `state != 'opened' || pipeline == 'failed' || reviews > 3`, or `notes.some(n => n.author != me && n.resolvable && !n.resolved)` (fields: state, pipeline, pipeline_id, reviews, unresolved, last_note, conflict, need_rebase, mergeable, approvals, head, me, notes; `gerdr wait sources` says what each means). Left out: anything new from now on — merged / closed, more comments by others, a pipeline finishing, a conflict, a rebase needed, mergeable. Checked against the MR as it is, so what already happened wakes you at once",
+              },
               command: { type: "string", description: "check: run with sh -c, 60 s at most; exit 0 = it has happened, or things left the step you wait in (any change from it, not only the hoped-for end). Use the tools you already use for this work" },
               every: { type: "number", description: "check: minutes between runs (1 – 60, default 2)" },
               cwd: { type: "string", description: "check: absolute directory to run it in (default: the task's repository)" },
@@ -75,7 +84,7 @@ export const tools = {
 /** Which conversation a worker means, as events name it: { source, key }, from what has come from it lately. */
 function resolve(ctx: Ctx, conv: string): { source: string; key: string; where: string; url?: string } {
   const c = conv.trim();
-  // An MR: its events come from the MR watcher (mrwatch.ts) as gitlab, group/repo!34 — review, pipeline, merge…
+  // An MR: its events come from the GitLab add-on as gitlab, <host>/group/repo!34 — review, pipeline, merge…
   const asMr = mrConversation(c);
   if (asMr) return asMr;
   const keys = new Set<string>([c]);
@@ -98,7 +107,7 @@ function resolve(ctx: Ctx, conv: string): { source: string; key: string; where: 
   );
 }
 
-type WakeIn = { type?: string; conversation?: string; command?: string; every?: number; cwd?: string; minutes?: number; who?: string };
+type WakeIn = { type?: string; conversation?: string; until?: string; command?: string; every?: number; cwd?: string; minutes?: number; who?: string };
 
 /**
  * { what, wake: [{ type: message | check | time, … }] }. Workers given the tool before the list (2026-11-04) send
@@ -120,7 +129,9 @@ export function wait_for(
     const at = `wake[${i}]`;
     if (x.type === "message") {
       if (!x.conversation?.trim()) throw new Error(`${at}：message 要给 conversation`);
-      return { type: "message" as const, conv: resolve(ctx, x.conversation) };
+      const conv = resolve(ctx, x.conversation);
+      if (x.until?.trim() && conv.source !== "gitlab") throw new Error(`${at}：until 只用在 MR 上（conversation 写 MR 的网址）`);
+      return { type: "message" as const, conv, until: x.until?.trim() || undefined };
     }
     if (x.type === "check") {
       const command = x.command?.trim();
@@ -176,8 +187,13 @@ export function wait_for(
     Object.assign(t, { viaTools: true, reportedAt: now, nudges: 0, updatedAt: now });
     return { t, ws, stale: staleAsks(s, t) };
   });
-  // The MR watcher's events come in through triggers/mr.json; anything else may need a trigger of its own
-  for (const p of parsed) if (p.type === "message" && p.conv.source !== "gitlab") ensureTrigger(ctx, p.conv);
+  // A trigger of its own for each conversation it waits on. An MR's waits for its state instead (onState): written
+  // here, the GitLab add-on looks at the MR within seconds, and what already happened wakes the worker at once
+  for (const p of parsed) {
+    if (p.type !== "message") continue;
+    if (p.conv.source === "gitlab") stateTrigger(ctx, p.conv, p.until);
+    else ensureTrigger(ctx, p.conv);
+  }
   return {
     id: t.id,
     gerdrCard: waitCard(ctx, t, ws),
@@ -234,6 +250,67 @@ export function status(input: { id: string; waits?: string[]; since?: number; ki
 
 function slug(s: string) {
   return s.replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 80);
+}
+
+/**
+ * An MR waited on: a trigger waiting until a condition on its state holds (Gerdr docs/dev/EVENTS.md, "Waiting for a
+ * state"). Rewritten on every wait_for: the worker's expectation now. Without one: anything new from what the MR is
+ * like now (its last reported state), so a worker woken and waiting again isn't woken at once by what it just handled.
+ */
+function stateTrigger(ctx: Ctx, th: { source: string; key: string }, until?: string) {
+  const p = `${DIR}/${PREFIX}${slug(th.source)}-${slug(th.key)}.json`;
+  ctx.fs.mkdir(DIR);
+  // `on` is for a Gerdr from before triggers could wait for states: it reads this as an event trigger matching
+  // nothing (no source emits gitlab/state), instead of a broken file that would stop all of this panel's triggers
+  ctx.fs.write(p, JSON.stringify({ source: th.source, key: th.key, until: until || newFromNow(ctx, th.key), on: `${th.source}/state`, fn: STATE_FN, name: `任务在等的 MR：${th.key}` }, null, 2) + "\n");
+}
+
+/** "Anything new from now" on an MR, from the values it has now (none known yet: anything at all worth a look). */
+function newFromNow(ctx: Ctx, key: string) {
+  // ctx.states is missing on a Gerdr from before waiting for states: then nothing is known
+  const now = typeof ctx.states?.get === "function" ? ctx.states.get("gitlab", key) : null;
+  const st = now?.state as Record<string, any> | undefined;
+  if (!st) return "state != 'opened' || reviews > 0 || pipeline == 'failed' || conflict || need_rebase || mergeable";
+  const done = ["success", "failed", "canceled"].includes(st.pipeline);
+  const parts = [
+    "state != 'opened'",
+    `reviews > ${Number(st.reviews) || 0}`,
+    // A pipeline finishing: the one running now, or a new one if the current one is finished already
+    done ? `(pipeline_id != ${Number(st.pipeline_id) || 0} && (pipeline == 'success' || pipeline == 'failed'))` : "pipeline == 'success' || pipeline == 'failed'",
+  ];
+  if (!st.conflict) parts.push("conflict");
+  if (!st.need_rebase) parts.push("need_rebase");
+  if (!st.mergeable) parts.push("mergeable");
+  return parts.join(" || ");
+}
+
+/**
+ * An MR's condition holds ({ state, detail, url, source, key, until, trigger }, from Gerdr): the tasks following
+ * it get it as a follow-up, and the trigger goes (it ran once; the worker waits again with wait_for if it must).
+ */
+export async function onState(input: { state: Record<string, unknown>; detail?: string; url?: string; source: string; key: string; until: string; trigger: string }, ctx: Ctx) {
+  if (!input?.key || !input.state) throw new Error("没有状态（这个函数由 user/triggers/follow-*.json 里带 until 的触发器调用）");
+  const own = `${DIR}/${input.trigger}.json`;
+  if (input.trigger && ctx.fs.stat(own)) ctx.fs.trash(own);
+  const iid = /!(\d+)$/.exec(input.key)?.[1];
+  const fields = Object.entries(input.state)
+    .map(([k, v]) => `${k}=${v}`)
+    .join(" ");
+  const ev: Ev = {
+    id: `${input.source}:state:${input.key}:${Date.now()}`,
+    source: input.source,
+    kind: "state",
+    key: input.key,
+    title: `${iid ? `MR !${iid}` : input.key} 等到了：${input.until}`,
+    text: `现在：${fields}\n\n${input.detail ?? ""}\n\n（这次等待结束了。还要接着等，就再调 wait_for：不写 until 就是「从现在起有新情况」）`,
+    url: input.url,
+  };
+  const { store } = load(ctx);
+  const owners = subscribers(store.tasks, ev);
+  if (!owners.length) return { nobody: true };
+  for (const t of owners) await followUp(ctx, t.id, ev);
+  const it = record(ctx, ev, { state: "delivered", tasks: owners.map((t) => t.id) });
+  return { item: it.id, delivered: it.tasks };
 }
 
 function ensureTrigger(ctx: Ctx, th: { source: string; key: string }) {
@@ -394,8 +471,8 @@ function sweepTriggers(ctx: Ctx, tasks: Task[]) {
     if (f.dir || !name.startsWith(PREFIX)) continue;
     try {
       const t = JSON.parse(ctx.fs.read(f.path));
-      if (t.fn !== FN) continue;
-      const source = String(t.on).split("/")[0];
+      if (t.fn !== FN && t.fn !== STATE_FN) continue;
+      const source = t.source || String(t.on).split("/")[0];
       if (live.some((x) => follows(x).some((th) => th.source === source && th.key === t.key))) continue;
     } catch {
       continue;

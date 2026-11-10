@@ -32,7 +32,7 @@
 
 ---
 
-改看板（`ui/src/pages/board.tsx`、`local/tasks.ts` `board.ts` `mrwatch.ts`）之前先读 `DESIGN.md`：为什么这么设计、哪些做法试过被否了。
+改看板（`ui/src/pages/board.tsx`、`local/tasks.ts` `board.ts` `waits.ts`）之前先读 `DESIGN.md`：为什么这么设计、哪些做法试过被否了。
 秘书页和需求动态是一个架构（行的种类、「你的那部分」、画法都共用，只有范围不同）：加任何会出现在这两页上的东西，
 先读 `DESIGN.md` 的「一个架构」，两页都要照着改、都要打开看。
 
@@ -87,8 +87,8 @@
   （只给要改的那部分；`settings.get` 看现在的）；是某个仓库的情况（「这个仓库以后直接推」「发布找 xx 批」）就用 `remember`
   工具记进记忆（`repo` 填仓库路径，对所有仓库都成立的填 `"general"`）。都不改代码。
   worker 交结果分三种：`done`（做完、不用用户看）、`delivering`（开了 MR 在等合并）、`review`（要用户判断结论）。
-  `delivering` 的任务由定时任务 `mrwatch` 盯（「定时任务」页）：新 review 意见、挂掉的流水线交给那个 worker，
-  变基、合并照「设置」自动做；合不了的（MR 被关、改了好几轮还没过）会变成「等你」。
+  worker `wait_for` 等着的 MR 交给 GitLab MR 插件盯（要装它，glab 登录过那个 GitLab）：等的时候面板写一个带 `until` 的 trigger，
+  MR 的状态满足条件（新意见、流水线跑完、能合了、合并了……）就叫醒那个 worker，晚一点等也不会错过；怎么处理照它的 `mr.md`。
 - 回复怎么写、什么时候打扰用户、简报怎么写：用户的 `skills/my-workflow/references/secretary.md`。
 - 用户在对话里说「通过 / 打回 / 那个问题选 A」，就替他调 `tasks.accept` / `tasks.reject {"id","feedback"}` /
   `tasks.answer {"id","answer"}`；人工任务做完是 `tasks.complete {"id","value"}`。改任务内容用 `tasks.edit`。

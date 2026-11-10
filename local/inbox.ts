@@ -53,8 +53,9 @@ type Builtin = { id: string; on: string; name?: string; key?: string; off?: bool
 
 /**
  * The panel's own triggers (triggers/*.json, shipped with it, like mr.json): on unless this person switched one off.
- * Off is their copy in user/triggers/ (Gerdr reads it over the panel's) marked `input.off`, which onEvent takes as
- * "not taking these": Gerdr's trigger files have no switch of their own.
+ * Off is their copy in user/triggers/ (Gerdr reads it over the panel's) marked `"off": true` (Gerdr then neither runs
+ * it nor counts it as a subscription), and `input.off`, which onEvent takes as "not taking these" on a Gerdr from
+ * before triggers had a switch.
  */
 export function builtin(input: unknown, ctx: Ctx): Builtin[] {
   const out: Builtin[] = [];
@@ -64,7 +65,8 @@ export function builtin(input: unknown, ctx: Ctx): Builtin[] {
     try {
       const t = JSON.parse(ctx.fs.read(f.path));
       const own = `${DIR}/${name}`;
-      const off = !!ctx.fs.stat(own) && !!JSON.parse(ctx.fs.read(own)).input?.off;
+      const mineT = ctx.fs.stat(own) ? JSON.parse(ctx.fs.read(own)) : null;
+      const off = !!mineT && (!!mineT.off || !!mineT.input?.off);
       if (t.on) out.push({ id: name.slice(0, -5), on: t.on, name: t.name, key: t.key, ...(off ? { off } : {}) });
     } catch {
       // a broken file is Gerdr's to report (gerdr panel triggers)
@@ -83,6 +85,8 @@ export function setBuiltin(input: { id: string; on: boolean }, ctx: Ctx) {
     return { id, off: false };
   }
   const t = JSON.parse(ctx.fs.read(`triggers/${id}.json`));
+  // Gerdr's own switch (no runs, and no subscription for on-demand sources), and the old one for a Gerdr before it
+  t.off = true;
   t.input = { ...(t.input ?? {}), off: true };
   ctx.fs.mkdir(DIR);
   ctx.fs.write(own, JSON.stringify(t, null, 2) + "\n");
@@ -154,9 +158,6 @@ export async function onEvent(input: { event: GerdrEvent; trigger?: string; allo
   if (!e?.id) throw new Error("没有事件（这个函数由 triggers/*.json 调用）");
   // One of the panel's own triggers this person switched off (setBuiltin)
   if (input.off) return { off: true };
-  // Another panel's own watcher (mrwatch in another project's install): its tasks' news, not this panel's. Not logged:
-  // it never came here (2026-11-10: the default project's board judged the lb project's MRs, one turn each)
-  if (e.data?.panel && e.data.panel !== ctx.workspace.project) return { notMine: true };
   const { store } = load(ctx);
   if (store.tasks.some((t) => t.origin?.id === e.id || t.followups?.includes(e.id)) || state(ctx).items.some((x) => x.event.id === e.id)) return { duplicate: true };
   const ev = compact(e);

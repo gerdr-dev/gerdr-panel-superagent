@@ -5,16 +5,15 @@
 
 ## 开完 MR：盯着它
 
-- 开完 MR 用 `wait_for` 盯着它：`wake` 里加一项 `message`，`conversation` 填 MR 地址，`what` 写现在在等什么（等 review、等流水线、等谁合）。
+- 开完 MR 马上（同一轮里）用 `wait_for` 盯着它：`wake` 里加一项 `message`，`conversation` 填 MR 地址，`what` 写现在在等什么（等 review、等流水线、等谁合）。
   然后结束这一轮。
-- MR 上有新情况会作为消息发给你，每种发一次：
-  - `mr.review`：有新的 review 意见；
-  - `pipeline.failed` / `pipeline.passed`：流水线挂了 / 过了；
-  - `mr.conflict`：有冲突；
-  - `mr.need_rebase`：落后目标分支，要先变基；
-  - `mr.mergeable`：GitLab 说现在可以合了；
-  - `mr.merged` / `mr.closed`：合并了 / 被关了。
-- 处理完一件，还要等的，就再 `wait_for` 一次，`what` 写成新的状态。
+- 不写 `until`，就是「从现在起有新情况就叫醒」：合并了 / 被关了、别人多了新意见、流水线跑完（过了或挂了）、出现冲突、要变基、可以合了。
+  只关心其中几样就写 `until`，它是一个 JS 表达式，字符串要加引号。比如只等合并：`"until": "state != 'opened'"`；
+  只等流水线和意见：`"until": "pipeline == 'failed' || reviews > 3"`（`reviews` 写现在的条数，不然处理完再等会马上又被叫醒）；
+  只等别人还没解决的意见：`"until": "notes.some(n => n.author != me && n.resolvable && !n.resolved)"`。字段见 `gerdr wait sources`。
+- 判断的是 MR 当时的样子，所以晚一点才等也不会错过：已经发生的，一等就叫醒你。
+- 叫醒你的消息里有 MR 现在的各个字段、最近的意见、流水线挂了时失败 job 的日志末尾。这次等待随之结束：
+  处理完还要等的，就再 `wait_for` 一次，`what` 写成新的状态。
 
 ## 有新的 review 意见
 
