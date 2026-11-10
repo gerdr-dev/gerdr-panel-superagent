@@ -49,7 +49,7 @@ export default function SchedulesPage() {
       </header>
       {err && <p role="alert" className="text-[13px] text-bad">{err}</p>}
       {!list && !err && <p className="p-8 text-center text-[13px] text-muted-foreground">正在加载…</p>}
-      {list?.length === 0 && <p className="rounded-xl border border-dashed p-6 text-center text-[13px] text-muted-foreground">还没有定时任务。让右边的助手加一个，比如「每 5 分钟盯一下我的 MR」。</p>}
+      {list?.length === 0 && <p className="rounded-xl border border-dashed p-6 text-center text-[13px] text-muted-foreground">还没有定时任务。让秘书加一个，比如「每 5 分钟盯一下我的 MR」。</p>}
       <div className="space-y-3">
         {list?.map((s) => (
           <Row key={s.id} s={s} onOp={(w) => op(s.id, w)} onSaved={load} />
@@ -88,7 +88,7 @@ function Row({ s, onOp, onSaved }: { s: Item; onOp: (w: "run" | "pause" | "resum
             {s.paused && <span className="rounded-sm bg-muted px-1.5 text-[11px] font-normal text-muted-foreground">已暂停</span>}
             {s.running && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
           </h2>
-          <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{s.fn ? `跑 ${s.fn}` : `交给助手：${s.prompt}`}</p>
+          <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{s.fn ? `跑 ${s.fn}` : `交给面板 agent：${s.prompt}`}</p>
         </div>
         <div className="flex gap-1.5">
           <Button variant="outline" disabled={s.running} onClick={() => onOp("run")}>

@@ -42,7 +42,7 @@ export default function TriggersPage() {
       {!list && !err && <p className="p-8 text-center text-[13px] text-muted-foreground">正在加载…</p>}
       {list?.length === 0 && (
         <p className="rounded-xl border border-dashed p-6 text-center text-[13px] text-muted-foreground">
-          现在还没有可选的事件。装一个会发事件的插件（比如 Slack、飞书），或者让右边的助手写一个定时任务去轮询你关心的东西。
+          现在还没有可选的事件。装一个会发事件的插件（比如 Slack、飞书），或者让秘书写一个定时任务去轮询你关心的东西。
         </p>
       )}
       <div className="space-y-3">

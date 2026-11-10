@@ -6,7 +6,7 @@ import { applyBlock } from "./_apply";
 import { askUser, endQuestions, endWaits, isOutside, open, question, syncAgents, syncSessions, wakeText, type Wait } from "./_waits";
 import { wake } from "./_wake";
 import { allAgents, mentionsIn } from "./_agents";
-import { isMain, rerouteTask, routeTask, sweep } from "./_main";
+import { capture, isMain, notice, rerouteTask, routeTask, sweep } from "./_main";
 
 export type { Task };
 
@@ -192,6 +192,14 @@ export async function list(input: unknown, ctx: Ctx) {
     });
   // What waits on the user, in Gerdr's inbox too (_inbox.ts): each member and step on its own, as before
   tellInbox(ctx, tasks as any);
+  // The secretary's side (_main.ts): its finished reply into the conversation, and news of what newly needs the user.
+  // Here because the board's sync runs every minute with or without the page open; a failure mustn't break the board.
+  try {
+    await capture(ctx);
+    await notice(ctx, tasks);
+  } catch (err: any) {
+    ctx.log(`秘书那边没跟上：${err?.message ?? err}`);
+  }
   return { tasks: teams(s, tasks), at: Date.now() };
 }
 

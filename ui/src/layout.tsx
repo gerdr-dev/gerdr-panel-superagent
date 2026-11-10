@@ -1,7 +1,7 @@
 import { Outlet } from "react-router";
 import "./lib/gerdr";
 
-// One page: the task board. Its workflow (流程) and schedules (定时任务) are in the board's settings (settings/).
+// Two views of the same tasks: the secretary (pages/index.tsx) and the board (pages/board.tsx). Their settings, workflow (流程) and schedules (定时任务) are in the settings sheet (settings/).
 export default function Layout() {
   return (
     // Scrolls on a phone, where the board grows with its content (max-md:h-auto) instead of filling the screen

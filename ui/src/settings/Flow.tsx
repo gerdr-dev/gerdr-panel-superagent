@@ -95,7 +95,7 @@ export default function FlowPage() {
         <div>
           <h1 className="text-[22px] font-semibold tracking-tight">流程</h1>
           <p className="mt-1 text-[13px] text-muted-foreground">
-            你的做事方式，用自己的话写。它是一个 skill：右边的助手和它派出去的 worker 都有，需要时自己翻到对应的参考。改动只存在你这里，不会随面板分享出去（带点的是你改过的）。
+            你的做事方式，用自己的话写。它是一个 skill：秘书和它派出去的 worker 都有，需要时自己翻到对应的参考。改动只存在你这里，不会随面板分享出去（带点的是你改过的）。
             代码照着做的值（用哪个模型、有哪些仓库、MR 自动合不合）在「设置」里，不写在这里。
           </p>
         </div>

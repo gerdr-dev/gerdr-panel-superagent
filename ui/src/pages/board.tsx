@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowRight, ArrowUp, Bot, Users, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ListTodo, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Route, Send, Settings, Undo2, X } from "lucide-react";
+import { AlertTriangle, ArrowRight, ArrowUp, Bot, Users, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Route, Send, Settings, Undo2, X } from "lucide-react";
 import clsx from "clsx";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../components/Button";
@@ -20,6 +20,8 @@ import { Md } from "../lib/markdown";
 import { usePhone, useSwipePages } from "../lib/swipe";
 import { convo, parseConvo } from "../lib/convo";
 import { usePanelChange, useRefresh, useSessions } from "../lib/visible";
+import { Views } from "../components/Views";
+import { useLocation } from "react-router";
 
 // The task board: columns left to right (to do, running, needs you, to review, done), small cards, details in a side
 // panel. Columns are worked out from facts (task status, the worker session's state, blockers), never dragged: a
@@ -96,6 +98,12 @@ export default function BoardPage() {
   // On a phone Gerdr's ☰ drawer holds what the header has no room for: the settings sheet's pages, one row each
   usePhoneMenu(TABS.map((x) => ({ id: x.id, label: x.label, icon: <x.icon className="size-4" />, onSelect: () => setSettings(x.id) })))
   const [open, setOpen] = useState("");
+  // The secretary's page links here with ?open=tN (a thing waiting on the user): open that task's drawer
+  const { search } = useLocation();
+  useEffect(() => {
+    const id = new URLSearchParams(search).get("open");
+    if (id) setOpen(id);
+  }, [search]);
   const [doneLimit, setDoneLimit] = useState(20);
   const byId = Object.fromEntries((tasks ?? []).map((t) => [t.id, t]));
   const list = (c: Col) => {
@@ -140,7 +148,7 @@ export default function BoardPage() {
       ? viewing !== primary
         ? view?.sub
           ? { label: `${sel.id} 的 worker 开的子 agent（只读）：它自己的活，做完会叫醒 worker`, actions: [] }
-          : { label: viewing === sel.router ? `Superagent 的调度会话：它派 ${sel.id} 时怎么判断的。以后都不想这样派，就改「设置」里的仓库、模型，或「流程」里的派活规则` : `${sel.id} 背后的另一个对话`, actions: [] }
+          : { label: viewing === sel.router ? `秘书派 ${sel.id} 时怎么判断的。以后都不想这样派，就改「设置」里的仓库、模型，或「流程」里的派活规则` : `${sel.id} 背后的另一个对话`, actions: [] }
         : routingNow
           ? { label: `Superagent 正在派 ${sel.id}：挑仓库、agent 和模型。看到不对直接在下面纠正`, actions: [{ id: "drop", label: "放弃", confirm: "确定放弃？" } as ChatAction] }
           : chatPanel(sel, byId)
@@ -226,10 +234,7 @@ export default function BoardPage() {
           the title into a column of letters); the counts stay */}
       <header className="flex min-w-0 items-center justify-between gap-3 border-b px-4 py-2.5 max-md:gap-1 max-md:px-3">
         <div className="flex shrink-0 items-center gap-3">
-          <h1 className="flex items-center gap-2 text-[14px] font-medium whitespace-nowrap">
-            <ListTodo className="size-4 text-muted-foreground" />
-            Superagent
-          </h1>
+          <Views />
         </div>
         <div className="flex min-w-0 items-center gap-1 max-md:gap-0">
           <MainButton onOpen={(id) => (setOpen(""), setPeek({ session: id }))} />
@@ -337,7 +342,7 @@ function Alerts({ onLog }: { onLog: () => void }) {
   const observed = items.filter((x) => x.state === "observed" && x.at > day).length;
   const problems: { text: string; label: string; go: () => void }[] = [];
   if (m?.status === "waiting") problems.push({ text: `Superagent 在问你：${m.waiting ?? "去它的对话里看看"}`, label: "去回答", go: () => openChat(m.id) });
-  if (m?.status === "error") problems.push({ text: "Superagent 的调度会话出错了：下一件事来时会换一个新的", label: "看看", go: () => openChat(m.id) });
+  if (m?.status === "error") problems.push({ text: "秘书的会话出错了：下一件事来时会换一个新的", label: "看看", go: () => openChat(m.id) });
   if (unavailable) problems.push({ text: `${unavailable} 条消息 Superagent 没给决定`, label: "去向", go: onLog });
   if (observed) problems.push({ text: `主动工作今天记了 ${observed} 条「本来会接」：看对不对，对的点照做`, label: "去向", go: onLog });
   if (!problems.length) return null;
@@ -373,9 +378,9 @@ function MainButton({ onOpen }: { onOpen: (id: string) => void }) {
   if (!m || m.status === "gone") return null;
   const label = m.status === "running" ? "在判断" : m.status === "waiting" ? "等你回答" : m.status === "error" ? "出错了" : "空闲";
   return (
-    <Button variant="ghost" size="sm" title={`Superagent 的调度会话（${label}）：它怎么判断、派给谁，都在这里`} onClick={() => onOpen(m.id)}>
+    <Button variant="ghost" size="sm" title={`秘书的会话（${label}）：它怎么判断、派给谁、在想什么，都在这里`} onClick={() => onOpen(m.id)}>
       <span className={clsx("size-1.5 rounded-full", m.status === "running" ? "bg-ok" : m.status === "waiting" || m.status === "error" ? "bg-warn" : "bg-muted-foreground/40")} />
-      <span className="max-md:hidden">调度</span>
+      <span className="max-md:hidden">秘书在想</span>
       {m.status !== "idle" && <span className="text-[11px] text-muted-foreground max-md:hidden">{label}</span>}
     </Button>
   );
@@ -1578,7 +1583,7 @@ function TeamCard({ t, tasks, active, onOpen }: { t: Task; tasks: Task[]; active
           {first}
         </p>
       )}
-      {t.reroute && <p className="text-[12px] text-brand">调度在按你的意见重新安排…</p>}
+      {t.reroute && <p className="text-[12px] text-brand">秘书在按你的意见重新安排…</p>}
       {last && last !== waitLine && (
         <p className="line-clamp-2 text-[12px] text-muted-foreground">
           {last.by && byId[last.by] && <span className="text-foreground/80">{memberLabel(byId[last.by])}</span>}
@@ -2047,7 +2052,7 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
   const people: AgentInfo[] = live.map((m) => ({ id: m.id, name: memberLabel(m) }));
   const send = async ({ text, files }: { text: string; files: { path: string; name?: string }[] }) => {
     if (t.status === "dropped") throw new Error("这个需求已经放弃了");
-    if (!live.length) throw new Error("还没有成员在做：等调度派出去再发");
+    if (!live.length) throw new Error("还没有成员在做：等秘书派出去再发");
     const to = mentionsOf(text, people);
     if (live.length > 1 && !to.length) throw new Error("有几个成员：@ 选发给谁（可以 @ 几个）");
     const o = { key: `sending:${Date.now()}`, at: Date.now(), text, files };
@@ -2079,7 +2084,7 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
       return (
         <p className="flex items-center justify-center gap-1.5 px-6 text-center text-[11px] text-muted-foreground">
           <Loader2 className="size-3 shrink-0 animate-spin" />
-          调度在重新安排
+          秘书在重新安排
           {t.reroute?.router && (
             <button className="text-brand hover:underline" onClick={() => openChat(t.reroute!.router!)}>
               看它怎么想
@@ -2239,7 +2244,7 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
             {t.reroute && (
               <p className="flex items-center justify-center gap-1.5 px-6 text-center text-[11px] text-muted-foreground">
                 <Loader2 className="size-3 shrink-0 animate-spin" />
-                调度在重新安排
+                秘书在重新安排
                 {t.reroute.router && (
                   <button className="text-brand hover:underline" onClick={() => openChat(t.reroute!.router!)}>
                     看它怎么想
@@ -2269,9 +2274,9 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
           )}
           {rerouting && (
             <div className="flex w-full gap-2">
-              <input autoFocus value={why} onChange={(e) => setWhy(e.target.value)} placeholder="跟调度说哪里不对，比如：仓库错了，应该在 operation" className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]" />
+              <input autoFocus value={why} onChange={(e) => setWhy(e.target.value)} placeholder="跟秘书说哪里不对，比如：仓库错了，应该在 operation" className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]" />
               <Button disabled={!why.trim() || !!busy} onClick={async () => (await go("reroute", "reroute", { id: t.id, feedback: why })) && (setWhy(""), setRerouting(false))}>
-                {busy === "reroute" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}发给调度
+                {busy === "reroute" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}发给秘书
               </Button>
               <Button variant="ghost" size="icon" aria-label="取消" onClick={() => setRerouting(false)}>
                 <X className="size-4" />
@@ -2279,7 +2284,7 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
             </div>
           )}
           {!over && !t.reroute && !rerouting && !rejecting && (
-            <Button variant="ghost" className="mr-auto" disabled={!!busy} title="派得不对（仓库、agent、该几个人做）：告诉调度，它来重新安排" onClick={() => setRerouting(true)}>
+            <Button variant="ghost" className="mr-auto" disabled={!!busy} title="派得不对（仓库、agent、该几个人做）：告诉秘书，它来重新安排" onClick={() => setRerouting(true)}>
               <Route className="size-3.5" />
               重新安排
             </Button>

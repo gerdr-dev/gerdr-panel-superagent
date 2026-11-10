@@ -90,7 +90,7 @@ export default function MemoryPage() {
         <h1 className="text-[22px] font-semibold tracking-tight">记忆</h1>
         <p className="mt-1 text-[13px] text-muted-foreground">
           每个仓库的具体情况：走不走 MR、谁来合、发布找谁批。worker 做事时从你的话里学到、你确认过的，会一条条记在这里，以后派到这个仓库的 worker 一开始就带着。
-          「通用」是对所有仓库都成立的，调度会话派活时也看。错了直接改，一行一条；只存在你这里，不随面板分享。
+          「通用」是对所有仓库都成立的，秘书派活时也看。错了直接改，一行一条；只存在你这里，不随面板分享。
         </p>
       </header>
       {err && (

@@ -17,10 +17,11 @@ type Listed = Task & {
 
 const cut = (s: string, n = 120) => ([...s].length > n ? [...s].slice(0, n).join("") + "…" : s);
 
-export function tellInbox(ctx: Ctx, tasks: Listed[]) {
-  const inbox = (ctx as any).inbox as { set(items: { id: string; title: string; body?: string; session?: string }[]): void } | undefined;
-  if (!inbox?.set) return; // a Gerdr from before ctx.inbox
-  const items: { id: string; title: string; body?: string; session?: string }[] = [];
+type Line = { id: string; title: string; body?: string; session?: string };
+
+/** What waits on the user, one line per task: for Gerdr's inbox, and for the secretary's news (_main.ts notice). */
+export function waitingLines(tasks: Listed[]): Line[] {
+  const items: Line[] = [];
   for (const t of tasks) {
     if (t.column !== "you") continue;
     if (t.owner === "human") {
@@ -42,8 +43,14 @@ export function tellInbox(ctx: Ctx, tasks: Listed[]) {
           : "在等你";
     items.push({ id: t.id, title: `${t.id} ${cut(line)}`, body: t.title, session: t.session });
   }
+  return items;
+}
+
+export function tellInbox(ctx: Ctx, tasks: Listed[]) {
+  const inbox = (ctx as any).inbox as { set(items: Line[]): void } | undefined;
+  if (!inbox?.set) return; // a Gerdr from before ctx.inbox
   try {
-    inbox.set(items);
+    inbox.set(waitingLines(tasks));
   } catch (err: any) {
     ctx.log(`收件箱没更新：${err?.message ?? err}`);
   }

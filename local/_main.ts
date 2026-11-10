@@ -5,10 +5,13 @@
 //                           └─ otherwise → Eval: the main session decides accept / attach / stop / ignore
 //   a task typed on the board → already accepted, the main session only picks repository / agent / model
 //
-// The main session is one long-lived conversation that only routes: it never waits, never does the work, and gets
-// everything as messages (a batch arriving while it decides waits for its next pause). It replaced a one-off router
-// per task: no conversation to start per task, and one place that has seen every decision. Every event is logged
-// with where it went (user/data/superagent.json items), so "what happened to that message" always has an answer.
+// The main session is the secretary (DESIGN.md「秘书」): the one agent the user talks to, and the one that routes. It
+// never waits and never does the work itself, and gets everything as messages (a batch arriving while it decides
+// waits for its next pause): the user's words from the page (secretary.ts say), board tasks and outside messages to
+// route, news about tasks that need the user (notice), and the briefing on its schedule. What it says back is taken
+// from its reply at the end of each turn (capture) into the conversation the page shows (_log.ts). It replaced a
+// one-off router per task and the panel's own chat on the right. Every event is logged with where it went
+// (user/data/superagent.json items), so "what happened to that message" always has an answer.
 
 import { workflow } from "./_config";
 import { forRouter } from "./memory";
@@ -17,11 +20,21 @@ import { textOf } from "./playbooks";
 import { DATA, migrate } from "./_user";
 import { activity, find, load as loadTasks, note, update as updateTasks, type Task } from "./_store";
 import { wake } from "./_wake";
+import { append, windowText } from "./_log";
+import { waitingLines } from "./_inbox";
 import { isOutside, waitingOn } from "./_waits";
 
 const STATE = `${DATA}/superagent.json`;
-/** A fresh main session after this many items: its context stays small, so it stays fast. */
-const ROTATE = 30;
+/**
+ * A fresh session once the current one has been idle this long: the model's prompt cache is gone by then, so going on
+ * would re-read its whole context at full price anyway, and a new one re-reads less (the brief, the last 7 days of the
+ * conversation). DESIGN.md「秘书」「一个对话框，后面换会话」.
+ */
+const COLD = 3600_000;
+/** And after this many messages without ever going cold (a busy inbox): its context mustn't grow without end. */
+const ROTATE = 150;
+/** What the secretary replies when there's nothing to tell the user (a turn about routing, news it keeps for later). */
+export const SILENT = "（无）";
 /** Items kept in the log. */
 const KEEP = 300;
 
@@ -66,7 +79,23 @@ export type Item = {
   decidedAt?: number;
 };
 
-type State = { main?: string; mains: string[]; brief?: string; handled: number; next: number; items: Item[] };
+/** Why the secretary is having a turn, for what its reply is (capture): an answer to the user, a briefing, its own news. */
+export type Why = "user" | "brief" | "notice" | "route";
+
+type State = {
+  main?: string;
+  mains: string[];
+  brief?: string;
+  handled: number;
+  next: number;
+  items: Item[];
+  /** Messages sent since its reply was last taken: what the turn was for (the strongest reason wins). */
+  awaiting?: { why: Why; /** when the last message went in */ sent: number };
+  /** What was told to the secretary as needing the user (notice): task id → the line, so each is told once. */
+  noticed?: Record<string, string>;
+  /** When the last briefing was asked for: the next one covers what happened since. */
+  briefAt?: number;
+};
 
 function load(ctx: Ctx): { s: State; etag?: string } {
   migrate(ctx);
@@ -214,7 +243,9 @@ async function brief(ctx: Ctx): Promise<string> {
   const rules = textOf(ctx, ROUTING);
   const ex = (o: unknown) => JSON.stringify(o);
   return [
-    `你是 Superagent 的调度会话。要派的活都先到你这里：用户在看板上建的任务，和外面来的消息（私信、@、告警……）。`,
+    `你是用户的秘书（Superagent）。用户只跟你一个人说话：什么事都交给你，问进度、要日报也找你。你不亲手做事，把活派给 worker，` +
+      `跟着它们，替用户记着每一件事，该他知道、该他拍板的时候告诉他。要派的活也都先到你这里：用户交给你的、看板上建的任务，和外面来的消息（私信、@、告警……）。`,
+    talkText(ctx),
     // How it judges is the user's prose (流程 → my-workflow/references/dispatch.md), theirs to read and change; only the
     // command and the facts below are the code's
     textOf(ctx, DISPATCH) || `判断规则（用户的 dispatch.md）不见了：只分派，不自己动手、不等待；拿不准就问用户。`,
@@ -245,9 +276,39 @@ async function brief(ctx: Ctx): Promise<string> {
 }
 
 /** The skill files the brief carries whole (the router doesn't read skills: DESIGN.md, 「派活要快」). */
+const SECRETARY = "my-workflow/references/secretary.md";
 const ROUTING = "my-workflow/references/routing.md";
 const DISPATCH = "my-workflow/references/dispatch.md";
 const PROACTIVE = "my-workflow/references/proactive.md";
+
+/**
+ * How it talks with the user: the mechanism (what each kind of message is, how its reply reaches the user, the
+ * commands for the user's matters) is the code's; how it should talk, when to interrupt and what a briefing says are
+ * the user's prose (secretary.md).
+ */
+function talkText(ctx: Ctx) {
+  const ex = (o: unknown) => JSON.stringify(o);
+  return [
+    `## 和用户说话\n` +
+      `- 你收到的消息有几种：[用户] 是用户在秘书页上对你说的话；[任务 tN] / [消息 cN] / [重新安排 tN] 是要派的活（见下面）；` +
+      `[动态] 是任务上出了要用户知道或拍板的事；[简报] 是到了写简报的时间。\n` +
+      `- **你这一轮最后的回复就是用户看到的话**（工具调用和中间过程他看不到）。没有要告诉他的（派活、分拣、不急的动态），整条回复只写「${SILENT}」。\n` +
+      `- 用户问到的、你要说的，先查事实再说：\`gerdr panel run secretary.status\` 给出等他的事（带问题的 id 和选项）、在做的、待验收的、最近完成的。` +
+      `不要凭记忆说「做完了」。\n` +
+      `- 用户交给你一件事：是活就派（\`tasks.add\` 带 \`"start": true\`，你知道去哪个仓库就给 \`repo\`，不知道就不给，交给下面的派活）；` +
+      `他要亲手做的步骤记成人工任务（\`tasks.add\` 带 \`"owner": "human"\`）。派完一句话告诉他交给了谁。\n` +
+      `- 替用户回答 worker：问题 \`tasks.answerQuestion ${ex({ id: "t5", q: "1", value: "选项或他的原话" })}\`；` +
+      `验收 \`tasks.accept ${ex({ id: "t5" })}\` / 打回 \`tasks.reject ${ex({ id: "t5", feedback: "…" })}\`；` +
+      `他做完了自己的步骤 \`tasks.complete ${ex({ id: "t5", value: "要交回的值（没有就不写）" })}\`；` +
+      `转告 worker \`tasks.say ${ex({ id: "t5", text: "…" })}\`；不做了 \`tasks.drop ${ex({ id: "t5", reason: "…" })}\`。\n` +
+      `- 不要用你自带的提问工具（AskUserQuestion）：有要问用户的，直接在回复里问，他会在秘书页上答你。\n` +
+      `- 你的对话每隔一阵会换成新的会话，只带最近 7 天的聊天：要长期记住的事当场记下 —— 用户交代的活进看板（任务），` +
+      `他的偏好和规矩用 \`remember\` 记进记忆，做事方式写进流程（skill）。只留在聊天里的，过几天就忘了。`,
+    textOf(ctx, SECRETARY),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
 
 /** The proactive rules for the brief, when proactive work is on at all. */
 function proactiveText(ctx: Ctx) {
@@ -282,44 +343,132 @@ export function isMain(ctx: Ctx, id?: string) {
   return !!id && (state(ctx).mains ?? []).includes(id);
 }
 
+/** Which reason for a turn wins when several messages go into one: the user's question is answered first. */
+const RANK: Record<Why, number> = { route: 0, notice: 1, brief: 2, user: 3 };
+
 /**
- * Hands the main session a batch: `blocks` are items in the format the brief describes. Starts one (the brief,
- * then the batch) when there's none, it failed, or it has handled ROTATE items; otherwise it's a message, which a
- * running main session reads at its next pause. When the user's rules changed since it was told them (repositories,
- * models, roles), the new brief goes first.
+ * Hands the secretary messages: `blocks` are items in the formats the brief describes, `why` what they are (what its
+ * reply will be taken as). Starts a session (the brief, the last 7 days of the conversation, then the messages) when
+ * there's none, it failed, or it is idle and cold (COLD) or long (ROTATE); otherwise it's a message, which a running
+ * session reads at its next pause. When the user's rules changed since it was told them (repositories, models,
+ * roles), the new brief goes first.
  */
-async function toMain(ctx: Ctx, blocks: string[]): Promise<string> {
+export async function toMain(ctx: Ctx, blocks: string[], why: Why = "route", attachments?: string[]): Promise<string> {
+  // What it said since the last message, before this one resets that (a reply in the middle of its turn included)
+  await capture(ctx, true);
   const b = await brief(ctx);
   const h = hash(b);
   const s = state(ctx);
   const cur = s.main ? ctx.sessions.get(s.main) : null;
   const body = blocks.join("\n\n");
-  if (!cur || cur.status === "error" || s.handled >= ROTATE) {
+  const idle = cur?.status === "idle";
+  const cold = !!cur && idle && Date.now() - cur.updatedAt > COLD;
+  let id: string;
+  if (!cur || cur.status === "error" || cold || (idle && s.handled >= ROTATE)) {
     const r = workflow(ctx).router;
+    const past = windowText(ctx);
     const sess = await ctx.sessions.start({
       cwd: ctx.workspace.dir,
       agent: r.agent || undefined,
       model: r.model || undefined,
       effort: r.effort || undefined,
-      title: "Superagent 调度",
-      prompt: `${b}\n\n---\n\n${body}`,
+      title: "Superagent 秘书",
+      prompt: [b, past && `## 最近 7 天你和用户的对话（之前的会话里说的，现在接着）\n\n${past}`, body].filter(Boolean).join("\n\n---\n\n"),
       tags: { superagent: "main" },
       workspace: "none",
+      attachments,
     });
     updateState(ctx, (x) => {
       Object.assign(x, { main: sess.id, mains: [...(x.mains ?? []), sess.id], brief: h, handled: blocks.length });
     });
-    // The one it replaces finished its last decision: let it go (still readable, as every router before it)
+    // The one it replaces finished its last turn: let it go (still readable, as every one before it)
     if (cur && cur.status === "idle") await ctx.sessions.close(cur.id).catch(() => {});
-    return sess.id;
+    id = sess.id;
+  } else {
+    const text = h !== s.brief ? `（用户的规则有更新，以这份为准）\n\n${b}\n\n---\n\n${body}` : body;
+    await ctx.sessions.send(cur.id, text, attachments?.length ? { attachments } : undefined);
+    updateState(ctx, (x) => {
+      x.handled = (x.handled ?? 0) + blocks.length;
+      x.brief = h;
+    });
+    id = cur.id;
   }
-  const text = h !== s.brief ? `（用户的规则有更新，以这份为准）\n\n${b}\n\n---\n\n${body}` : body;
-  await ctx.sessions.send(cur.id, text);
   updateState(ctx, (x) => {
-    x.handled = (x.handled ?? 0) + blocks.length;
-    x.brief = h;
+    const was = x.awaiting;
+    x.awaiting = { why: was && RANK[was.why] > RANK[why] ? was.why : why, sent: Date.now() };
   });
-  return cur.id;
+  return id;
+}
+
+/** 「（无）」, give or take brackets and a full stop. */
+const silent = (text: string) => text.replace(/[（）()。.\s]/g, "") === "无";
+
+/** Gerdr's note at the end of a reply on how the turn ended (lastReply in its workhost.go): not the secretary's words. */
+const ENDING = /^(这一轮结束：|Turn ended: |出错：|Error: )/;
+
+/**
+ * Takes what the secretary said since it was last sent something into the conversation the page shows (_log.ts),
+ * once: when its turn is over, or right before another message goes to it (a reply in the middle of a turn, which
+ * that message would otherwise reset). Its 「（无）」 is nothing to show. Called from the page's refreshes, the
+ * board's (tasks.list, also on a schedule) and toMain, so a reply lands whether or not anyone has the page open.
+ */
+export async function capture(ctx: Ctx, beforeSend = false) {
+  const s = state(ctx);
+  if (!s.main || !s.awaiting) return;
+  const m = ctx.sessions.get(s.main);
+  if (!m) return;
+  const text = m.reply
+    .split(/\n\s*\n/)
+    .filter((p) => !ENDING.test(p.trim()))
+    .join("\n\n")
+    .trim();
+  // Over: idle or failed (waiting for an approval isn't: the turn goes on after it). Right after a message went in it
+  // can still read idle with nothing said yet, before the turn starts: that isn't over until a while has passed.
+  const ended = m.status === "idle" || m.status === "error";
+  const over = ended && (!!text || Date.now() - s.awaiting.sent > 30_000);
+  // Mid-turn, only right before a message goes in (it resets the reply), and only when it has said something
+  if (!over && !(beforeSend && text)) return;
+  const why = updateState(ctx, (x) => {
+    if (!x.awaiting || x.main !== m.id) return null;
+    const w = x.awaiting.why;
+    // Mid-turn: the turn goes on, and so does what it is for
+    if (over) x.awaiting = undefined;
+    return w;
+  });
+  if (!why || !text || silent(text)) return;
+  append(ctx, { who: "agent", text, kind: why === "user" ? "reply" : why === "brief" ? "brief" : "notice", session: m.id });
+}
+
+/**
+ * News for the secretary (DESIGN.md「秘书」「什么时候打扰」): a task that newly needs the user — a question, a step of
+ * theirs, a worker stopped or asking for approval, a result to review. Each is told once (state.noticed, keyed by what
+ * it waits on, so a reworded line isn't news); the secretary decides whether to tell the user now or keep it for the
+ * briefing. The first time there's no record yet, so what's already waiting is taken as known, not sent as a flood.
+ * `tasks` is tasks.list's view (columns, questions, live sessions).
+ */
+export async function notice(ctx: Ctx, tasks: any[]) {
+  const lines = new Map<string, { key: string; line: string }>();
+  for (const l of waitingLines(tasks)) {
+    const t = tasks.find((x) => x.id === l.id);
+    const open = (t?.questions ?? []).filter((q: any) => !q.dropped && !q.answer).map((q: any) => q.id);
+    lines.set(l.id, { key: `you|${t?.question ?? ""}|${t?.stopped ? "stopped" : ""}|${open.join(",")}`, line: `${l.title}${l.body ? `\n  ${l.body.replace(/\n/g, "\n  ")}` : ""}` });
+  }
+  for (const t of tasks) {
+    if (t.status === "dropped" || t.status === "done" || lines.has(t.id)) continue;
+    if (t.column === "you" && (t.live?.status === "waiting" || t.live?.status === "error"))
+      lines.set(t.id, { key: `live|${t.live.status}`, line: `${t.id}「${t.title}」的 worker ${t.live.status === "error" ? "出错了" : `在等你批准：${t.live.waiting ?? ""}`}` });
+    else if (t.column === "review") lines.set(t.id, { key: "review", line: `${t.id}「${t.title}」交了结果，等你验收：${t.summary ?? ""}` });
+  }
+  const now: Record<string, string> = {};
+  for (const [id, v] of lines) now[id] = v.key;
+  const fresh = updateState(ctx, (s) => {
+    const was = s.noticed;
+    s.noticed = now;
+    if (!was) return [];
+    return [...lines].filter(([id, v]) => was[id] !== v.key).map(([, v]) => v.line);
+  });
+  if (!fresh.length) return;
+  await toMain(ctx, [`[动态] 这些事要用户知道或拍板（细节用 secretary.status 查）：\n${fresh.map((l) => `- ${l}`).join("\n")}`], "notice");
 }
 
 function taskBlock(t: Task, agents: { id: string; name: string }[]) {
