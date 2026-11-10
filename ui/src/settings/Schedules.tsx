@@ -49,7 +49,7 @@ export default function SchedulesPage() {
       </header>
       {err && <p role="alert" className="text-[13px] text-bad">{err}</p>}
       {!list && !err && <p className="p-8 text-center text-[13px] text-muted-foreground">正在加载…</p>}
-      {list?.length === 0 && <p className="rounded-xl border border-dashed p-6 text-center text-[13px] text-muted-foreground">还没有定时任务。让秘书加一个，比如「每 5 分钟盯一下我的 MR」。</p>}
+      {list?.length === 0 && <p className="rounded-xl border border-dashed p-6 text-center text-[13px] text-muted-foreground">还没有定时任务。让右边的面板助手加一个，比如「每 5 分钟盯一下我的 MR」。</p>}
       <div className="space-y-3">
         {list?.map((s) => (
           <Row key={s.id} s={s} onOp={(w) => op(s.id, w)} onSaved={load} />
