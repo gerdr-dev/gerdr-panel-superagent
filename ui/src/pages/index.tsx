@@ -7,7 +7,7 @@ import { Button } from "../components/Button";
 import { ChatDrawer } from "../components/ChatDrawer";
 import { SettingsSheet, TABS, type SettingsTab } from "../components/SettingsSheet";
 import { Views } from "../components/Views";
-import { run } from "../lib/gerdr";
+import { project, run } from "../lib/gerdr";
 import { Linger } from "../lib/linger";
 import { Md } from "../lib/markdown";
 import { phoneMenu, usePhoneMenu } from "../lib/phoneMenu";
@@ -117,7 +117,7 @@ export default function SecretaryPage() {
           ) : !feed ? (
             !error && <p className="p-8 text-center text-[13px] text-muted-foreground">正在加载…</p>
           ) : (
-            <FeedChat id="secretary" entries={rows} render={render} onSend={send} jump={jump} placeholder="什么事都可以交给秘书，也可以问它进度" />
+            <FeedChat id={`${project}.secretary`} entries={rows} render={render} onSend={send} jump={jump} placeholder="什么事都可以交给秘书，也可以问它进度" />
           )}
         </div>
       </div>

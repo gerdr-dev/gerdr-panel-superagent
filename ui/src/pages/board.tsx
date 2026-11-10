@@ -2224,7 +2224,9 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
           // box writing to the members (one without @, several by @)
           <div ref={box} className="relative min-h-0 flex-1">
             <FeedChat
-              id={`drawer.${t.id}`}
+              // With the panel's name: a Gerdr before d3437e0 kept every panel's feeds in one place by id, so the same task
+              // number in two installs (t35 in each) showed one's feed in the other
+              id={`${project}.drawer.${t.id}`}
               entries={entries}
               render={(r: FeedRow) => <div className="px-1 py-1.5">{feedRow(r)}</div>}
               onSend={send}
