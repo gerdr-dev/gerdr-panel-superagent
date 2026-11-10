@@ -34,7 +34,12 @@ const COLD = 3600_000;
 /** And after this many messages without ever going cold (a busy inbox): its context mustn't grow without end. */
 const ROTATE = 150;
 /** What the secretary replies when there's nothing to tell the user (a turn about routing, news it keeps for later). */
-export const SILENT = "（无）";
+/**
+ * A machine marker, not a word: it reads the same whatever language the secretary is told in or answers in, and
+ * never turns up in a real sentence. 「（无）」 was the word before (2026-11-10): an English reply would have said
+ * "(none)" and shown, and 「附件：（无）」 would have lost it.
+ */
+export const SILENT = "<silent/>";
 /** Items kept in the log. */
 const KEEP = 300;
 
@@ -419,10 +424,14 @@ export async function toMain(ctx: Ctx, blocks: string[], why: Why = "route", att
 }
 
 /**
- * What's left to show once its 「（无）」 are taken out: several messages answered in one turn come back as
- * 「（无）（无）」, and it sometimes ends a real sentence with one ("t46 和 t47 还在做。（无）").
+ * What's left to show once its silence markers are taken out: several messages answered in one turn come back with
+ * one each, and it sometimes ends a real sentence with one. A whole reply that is only 「（无）」 (the old word, from
+ * sessions told before the marker) counts too, until those sessions are replaced.
  */
-const unsilenced = (text: string) => text.replace(/[（(]\s*无\s*[）)]/g, "").trim();
+const unsilenced = (text: string) => {
+  const t = text.replace(/<\s*silent\s*\/?\s*>/gi, "").trim();
+  return /^([（(]\s*无\s*[）)][。.\s]*)+$/.test(t) ? "" : t;
+};
 const silent = (text: string) => !unsilenced(text).replace(/[。.\s]/g, "");
 
 /** Gerdr's note at the end of a reply on how the turn ended (lastReply in its workhost.go): not the secretary's words. */
@@ -431,7 +440,7 @@ const ENDING = /^(这一轮结束：|Turn ended: |出错：|Error: )/;
 /**
  * Takes what the secretary said since it was last sent something into the conversation the page shows (_log.ts),
  * once: when its turn is over, or right before another message goes to it (a reply in the middle of a turn, which
- * that message would otherwise reset). Its 「（无）」 is nothing to show. Called from the page's refreshes, the
+ * that message would otherwise reset). Its silence marker (SILENT) is nothing to show. Called from the page's refreshes, the
  * board's (tasks.list, also on a schedule) and toMain, so a reply lands whether or not anyone has the page open.
  */
 export async function capture(ctx: Ctx, beforeSend = false) {
