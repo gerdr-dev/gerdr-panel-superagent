@@ -98,8 +98,10 @@ export default function SecretaryPage() {
       </header>
       <Waiting tasks={tasks} onTask={toTask} />
       {error && <p role="alert" className="px-4 pt-3 text-[13px] text-bad">读取失败：{error}</p>}
-      <div className="flex min-h-0 flex-1 justify-center">
-        <div className="h-full w-full max-w-3xl">
+      {/* Full width, so the whole page scrolls the conversation and its scrollbar sits at the right edge; the chat
+          itself keeps the text in a centred column (800px, like every Gerdr chat) */}
+      <div className="min-h-0 flex-1">
+        <div className="h-full w-full">
           {!FeedChat ? (
             <p className="p-8 text-center text-[13px] text-muted-foreground">这个 Gerdr 太旧，画不了秘书的对话：升级 Gerdr，或先用「看板」。</p>
           ) : !feed ? (
@@ -139,7 +141,7 @@ function toRows(feed: Feed | null, main: Main | null): Row[] {
 function RowView({ r, onPeek, onTask }: { r: Row; onPeek: (id: string) => void; onTask: (id: string) => void }) {
   if (r.type === "hello")
     return (
-      <div className="px-4 py-10 text-center text-[13px] leading-relaxed text-muted-foreground">
+      <div className="py-10 text-center text-[13px] leading-relaxed text-muted-foreground">
         <p className="text-[15px] font-medium text-foreground">我是你的秘书</p>
         <p className="mt-2">什么事都可以交给我：我派给合适的 agent 去做，替你记着、跟着。</p>
         <p>要你拍板的我会来问你；进度、日报随时问我，到点我也会给你写简报。</p>
@@ -147,14 +149,14 @@ function RowView({ r, onPeek, onTask }: { r: Row; onPeek: (id: string) => void; 
     );
   if (r.type === "busy")
     return (
-      <div className="flex items-center gap-2 px-4 py-2 text-[13px] text-muted-foreground">
+      <div className="flex items-center gap-2 py-2 text-[13px] text-muted-foreground">
         {PixelLoader && <PixelLoader />}
         秘书在处理…
       </div>
     );
   if (r.type === "waiting")
     return (
-      <div className="mx-4 my-2 flex items-center gap-2 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-[13px]">
+      <div className="my-2 flex items-center gap-2 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-[13px]">
         <Hand className="size-4 shrink-0 text-warn" />
         <span className="min-w-0 flex-1">秘书在等你{r.m.waitingKind === "ask" ? "回答" : "批准"}：{r.m.waiting ?? ""}</span>
         <Button variant="outline" size="sm" onClick={() => onPeek(r.m.id)}>
@@ -164,7 +166,7 @@ function RowView({ r, onPeek, onTask }: { r: Row; onPeek: (id: string) => void; 
     );
   if (r.type === "notes")
     return (
-      <details className="group px-4 py-1 text-[12px] text-muted-foreground">
+      <details className="group py-1 text-[12px] text-muted-foreground">
         <summary className="flex cursor-pointer list-none items-center gap-1 hover:text-foreground">
           <ChevronRight className="size-3 transition-transform group-open:rotate-90" />
           {r.notes.length === 1 ? r.notes[0].text : `处理了 ${r.notes.length} 条外面来的消息`}
@@ -187,7 +189,7 @@ function RowView({ r, onPeek, onTask }: { r: Row; onPeek: (id: string) => void; 
   // The user's own messages are FeedChat's to draw (r.user)
   if (e.who === "user") return null;
   return (
-    <div className={clsx("px-4 py-2", e.kind === "brief" && "py-3")}>
+    <div className={clsx("py-2", e.kind === "brief" && "py-3")}>
       <div className={clsx(e.kind === "brief" && "rounded-xl border bg-muted/40 px-4 py-3")}>
         <p className="mb-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
           <span className="font-medium">{e.kind === "brief" ? "简报" : "秘书"}</span>
