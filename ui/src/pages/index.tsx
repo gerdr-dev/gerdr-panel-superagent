@@ -26,7 +26,7 @@ type Main = { id: string; status: string; waiting?: string; waitingKind?: string
 type Feed = { entries: (Entry | Note)[]; main: Main | null; busy: boolean };
 
 type FeedEntry = { key: string; at: number; user?: { text: string; files?: File[] } };
-type Row = FeedEntry & ({ type: "msg"; e: Entry } | { type: "notes"; notes: Note[] } | { type: "busy" } | { type: "waiting"; m: Main } | { type: "hello" });
+type Row = FeedEntry & ({ type: "msg"; e: Entry } | { type: "notes"; notes: Note[] } | { type: "busy"; session?: string } | { type: "waiting"; m: Main } | { type: "hello" });
 
 // Gerdr's FeedChat and PixelLoader, through the namespace: a Gerdr from before them says so instead of breaking
 const FeedChat = (core as unknown as {
@@ -134,8 +134,22 @@ function toRows(feed: Feed | null, main: Main | null): Row[] {
   }
   if (!out.length) out.push({ key: "hello", at: 0, type: "hello" });
   if (main?.status === "waiting") out.push({ key: "waiting", at: Date.now(), type: "waiting", m: main });
-  else if (feed?.busy && main && main.status !== "error") out.push({ key: "busy", at: Date.now(), type: "busy" });
+  else if (feed?.busy && main && main.status !== "error") out.push({ key: "busy", at: Date.now(), type: "busy", session: main.id });
   return out;
+}
+
+/**
+ * The secretary's face beside what it says and while it works, like a member's in a requirement's feed: a tap opens
+ * its conversation (what it looked up, the commands it ran). Without a session (an old entry) it's just a face.
+ */
+function Face({ session, onPeek }: { session?: string; onPeek: (id: string) => void }) {
+  const face = <span className="grid size-7 shrink-0 place-items-center rounded-full bg-brand/15 text-[11px] font-medium text-brand ring-1 ring-brand/40">秘</span>;
+  if (!session) return face;
+  return (
+    <button title="打开秘书的对话：它查了什么、调了哪些命令" aria-label="打开秘书的对话" onClick={() => onPeek(session)} className="shrink-0 rounded-full hover:opacity-80">
+      {face}
+    </button>
+  );
 }
 
 function RowView({ r, onPeek, onTask }: { r: Row; onPeek: (id: string) => void; onTask: (id: string) => void }) {
@@ -149,7 +163,8 @@ function RowView({ r, onPeek, onTask }: { r: Row; onPeek: (id: string) => void; 
     );
   if (r.type === "busy")
     return (
-      <div className="flex items-center gap-2 py-2 text-[13px] text-muted-foreground">
+      <div className="flex items-center gap-2.5 py-2 text-[13px] text-muted-foreground">
+        <Face session={r.session} onPeek={onPeek} />
         {PixelLoader && <PixelLoader />}
         秘书在处理…
       </div>
@@ -189,17 +204,13 @@ function RowView({ r, onPeek, onTask }: { r: Row; onPeek: (id: string) => void; 
   // The user's own messages are FeedChat's to draw (r.user)
   if (e.who === "user") return null;
   return (
-    <div className={clsx("py-2", e.kind === "brief" && "py-3")}>
-      <div className={clsx(e.kind === "brief" && "rounded-xl border bg-muted/40 px-4 py-3")}>
+    <div className={clsx("flex items-start gap-2.5 py-2", e.kind === "brief" && "py-3")}>
+      <Face session={e.session} onPeek={onPeek} />
+      <div className={clsx("min-w-0 flex-1", e.kind === "brief" && "rounded-xl border bg-muted/40 px-4 py-3")}>
         <p className="mb-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
           <span className="font-medium">{e.kind === "brief" ? "简报" : "秘书"}</span>
           <span>{time(e.at)}</span>
           {e.kind === "notice" && <span>· 主动告诉你</span>}
-          {e.session && (
-            <button className="hover:text-foreground hover:underline" title="打开它当时的会话：它查了什么、调了哪些命令" onClick={() => onPeek(e.session!)}>
-              · 过程
-            </button>
-          )}
         </p>
         <Md>{e.text}</Md>
       </div>
