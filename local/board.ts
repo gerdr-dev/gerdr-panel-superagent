@@ -123,7 +123,7 @@ export const tools = {
   },
   message_user: {
     description:
-      "Says something to the user: a line in the feed they follow (your requirement's, or the secretary's page if you are the secretary), shown in your chat too. Your reply text and your chat are not what they read: whenever they spoke to you, answer with this; whatever you want them to know, say it with this. Short, in their language, Markdown; a file to look at as ![](/absolute/path). Not for asking them to decide or do something (ask_human) or for reporting a state (task_update).",
+      "Says something to the user: a line in the feed they follow (your requirement's, or the secretary's page if you are the secretary), shown in your chat too. Your reply text and your chat are not what they read. Whenever they spoke to you, answer with this; and it is your one way to tell them anything — a result, where things stand when you stop. What deserves a line, and what never does, is the user's own rule: the my-workflow skill, references/activity.md — read it before writing one. Finishing (task_update done / review), asking the user (ask_human), waiting (wait_for) and pulling in a teammate add their own lines; don't repeat them here. Short, in their language, Markdown; a file to look at as ![](/absolute/path).",
     input: {
       type: "object",
       properties: {
@@ -134,9 +134,10 @@ export const tools = {
       required: ["text"],
     },
   },
+  // The old name, kept so a worker started before the two were one (2026-11-10) doesn't fail mid-turn: drop it once
+  // none of those is left
   post_progress: {
-    description:
-      "A line in your requirement's activity feed, which the user follows instead of your chat. What deserves a line, and what never does, is the user's own rule: the my-workflow skill, references/activity.md — read it before writing one. Finishing (task_update done / review), asking the user and pulling in a teammate add their own lines; don't repeat them here.",
+    description: "Old name of message_user: use message_user.",
     input: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
   },
 };
@@ -191,7 +192,7 @@ export async function task_update(input: { state: string; summary?: string; link
     // line "有结论了，等你看" next to the choice it was really waiting on). The choice is what's next.
     const asking = s.tasks.filter((h) => h.owner === "human" && h.status === "todo" && (h.askedBy === t.id || t.blockedBy?.includes(h.id)));
     if ((state === "review" || state === "done") && asking.length)
-      throw new Error(`你还有要用户决定 / 做的 ${asking.map((h) => h.id).join("、")}：等他答了再报${state === "review" ? "验收" : "完成"}（答案会发给你）。只是说进展就用 working 或 post_progress`);
+      throw new Error(`你还有要用户决定 / 做的 ${asking.map((h) => h.id).join("、")}：等他答了再报${state === "review" ? "验收" : "完成"}（答案会发给你）。只是说进展就用 working 或 message_user`);
     // Answering the user's own question in the chat: they read it there; don't move the task to "come and look"
     if (state === "review" && sess?.byPerson && t.status === "running") state = undefined;
     const before = new Set((t.waits ?? []).map((w) => w.id));
@@ -499,9 +500,11 @@ export async function tell(input: { to: string; text: string; summary?: string }
 }
 
 /**
- * A message to the user (DESIGN.md「消息」): a feed line of its own kind, drawn in the caller's chat too, so the feed
- * stays a part of the chat. From the secretary it goes on the secretary's page. Answers the user's words in the feed
- * (asked is cleared).
+ * A message to the user (DESIGN.md「消息」): the one way an agent says anything to the user — an answer, a result,
+ * where things stand — a feed line drawn in its chat too, so the feed stays a part of the chat. From the secretary it
+ * goes on the secretary's page. Answers the user's words in the feed (asked is cleared). It was two tools until
+ * 2026-11-10 (post_progress for progress, this for answers); to the user both were the agent talking, and the agent
+ * had to pick one each time.
  */
 export function message_user(input: { text: string; files?: { path: string; name?: string }[]; brief?: boolean }, ctx: Ctx) {
   const text = input?.text?.trim();
@@ -515,27 +518,15 @@ export function message_user(input: { text: string; files?: { path: string; name
     const t = mine(s, ctx);
     activity(s, t, { by: t.id, kind: "message", text, ...(files.length ? { files } : {}) });
     Object.assign(t, { asked: undefined, viaTools: true, reportedAt: Date.now() });
-    return { ok: true, gerdrCard: eventCard(ctx, t.id, "message", text) };
+    const stale = staleAsks(s, t);
+    const gerdrCard = eventCard(ctx, t.id, "message", text);
+    return stale ? { ok: true, reminder: stale, gerdrCard } : { ok: true, gerdrCard };
   });
 }
 
+/** The old name of message_user (see tools). */
 export function post_progress(input: { text: string }, ctx: Ctx) {
-  const text = input?.text?.trim();
-  if (!text) throw new Error("text 是空的");
-  return update(ctx, (s) => {
-    const t = mine(s, ctx);
-    const root = teamOf(s, t) ?? t;
-    // A feed, not a log: a member's line a minute after its last one replaces it
-    const last = root.activity?.[root.activity.length - 1];
-    if (last && last.by === t.id && last.kind === "progress" && Date.now() - last.at < 2 * 60_000) root.activity!.pop();
-    activity(s, t, { by: t.id, kind: "progress", text });
-    Object.assign(t, { viaTools: true, reportedAt: Date.now() });
-    const stale = staleAsks(s, t);
-    // gerdrCard: the line it put on the board, drawn in its chat too — a folded "called post_progress" row hid what
-    // the user would read on the board
-    const gerdrCard = eventCard(ctx, t.id, "progress", text);
-    return stale ? { ok: true, reminder: stale, gerdrCard } : { ok: true, gerdrCard };
-  });
+  return message_user(input, ctx);
 }
 export async function hand_back(input: { event: string; reason: string }, ctx: Ctx) {
   const { store } = load(ctx);

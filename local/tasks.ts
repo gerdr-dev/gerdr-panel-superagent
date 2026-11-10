@@ -632,7 +632,7 @@ export async function refreshAsk(input: { id: string }, ctx: Ctx) {
       `[看板] 用户请你把还在问他的 ${ids} 按现在的情况更新：这些是在你们后来的对话之前问的。\n` +
       `- 还要问但问法变了：ask_human 带 replaces（写上旧的 id）重新问，写清现在的情况和选项；\n` +
       `- 已经不用问了：cancel_human，说明原因；\n` +
-      `- 还是原样要问：不用改，用 post_progress 说一句「这个问题还是要你定」。\n做完就结束这一轮。`,
+      `- 还是原样要问：不用改，用 message_user 说一句「这个问题还是要你定」。\n做完就结束这一轮。`,
     resume: true,
     feed: `你请 ${w.repo?.split("/").pop() || w.id} 按最新情况更新 ${h.id}`,
   });
