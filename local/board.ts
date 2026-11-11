@@ -124,13 +124,15 @@ export const tools = {
   },
   message_user: {
     description:
-      "Says something to the user: a line in the feed they follow (your requirement's, or the secretary's page if you are the secretary), shown in your chat too. Your reply text and your chat are not what they read. Whenever they spoke to you, answer with this; and it is your one way to tell them anything — a result, where things stand when you stop. What deserves a line, and what never does, is the user's own rule: the my-workflow skill, references/activity.md — read it before writing one. Finishing (task_update done / review), asking the user (ask_human), waiting (wait_for) and pulling in a teammate add their own lines; don't repeat them here. Short, in their language, Markdown; a file to look at as ![](/absolute/path).",
+      "Says something to the user: a line in the feed they follow (your requirement's, or the secretary's page if you are the secretary), shown in your chat too. Your reply text and your chat are not what they read. Whenever they spoke to you, answer with this; and it is your one way to tell them anything — a result, where things stand when you stop. What deserves a line, and what never does, is the user's own rule: the my-workflow skill, references/activity.md — read it before writing one. Finishing (task_update done / review), asking the user (ask_human), waiting (wait_for) and pulling in a teammate add their own lines; don't repeat them here. Progress in a line; a result, plan or findings in full, as you'd write them in your chat (the feed folds long ones), and then your chat reply only says it's on the board. Questions for the user go in ask_human, not here. In their language, Markdown; a file to look at as ![](/absolute/path).",
     input: {
       type: "object",
       properties: {
         text: { type: "string" },
         files: { type: "array", items: { type: "object", properties: { path: { type: "string" }, name: { type: "string" } }, required: ["path"] }, description: "Files that go with it (absolute paths)" },
         brief: { type: "boolean", description: "The secretary's briefing (only the secretary)" },
+        quote: { type: "string", description: "Only the secretary: a requirement's id (t12). Its worker's latest line (a result, a plan) is shown under your message as the worker wrote it; your text says why it matters / what the user has to do, not the content again" },
+        follow: { type: "string", description: "Only the secretary: the member task you passed the user's question to with tasks.message. Its answer shows under your message on the secretary's page" },
       },
       required: ["text"],
     },
@@ -194,6 +196,11 @@ export async function task_update(input: { state: string; summary?: string; link
     const asking = s.tasks.filter((h) => h.owner === "human" && h.status === "todo" && (h.askedBy === t.id || t.blockedBy?.includes(h.id)));
     if ((state === "review" || state === "done") && asking.length)
       throw new Error(`你还有要用户决定 / 做的 ${asking.map((h) => h.id).join("、")}：等他答了再报${state === "review" ? "验收" : "完成"}（答案会发给你）。只是说进展就用 working 或 message_user`);
+    if ((state === "review" || state === "done") && input.summary && questionsIn(input.summary))
+      throw new Error(
+        `summary 里有要用户回答的问题：写在结论里他没法答，也容易漏。要他定的用 ask_human（每个问题一项，带 options），结论和方案用 message_user 写全；` +
+          `等他答完再报${state === "review" ? "验收" : "完成"}。如果那些只是陈述、不是问他，改成不带问号的写法再报。`,
+      );
     // Answering the user's own question in the chat: they read it there; don't move the task to "come and look"
     if (state === "review" && sess?.byPerson && t.status === "running") state = undefined;
     const before = new Set((t.waits ?? []).map((w) => w.id));
@@ -507,14 +514,18 @@ export async function tell(input: { to: string; text: string; summary?: string }
  * 2026-11-10 (post_progress for progress, this for answers); to the user both were the agent talking, and the agent
  * had to pick one each time.
  */
-export function message_user(input: { text: string; files?: { path: string; name?: string }[]; brief?: boolean }, ctx: Ctx) {
+export function message_user(input: { text: string; files?: { path: string; name?: string }[]; brief?: boolean; quote?: string; follow?: string }, ctx: Ctx) {
   const text = input?.text?.trim();
   if (!text) throw new Error("text 是空的");
   const files = (input.files ?? []).filter((f) => f?.path);
   if (isMain(ctx, ctx.caller.session)) {
-    secretaryMessage(ctx, { text, files, brief: !!input.brief });
+    const { store } = load(ctx);
+    const quote = input.quote ? quoteOf(store, input.quote) : undefined;
+    const follow = input.follow ? find(store, input.follow).id : undefined;
+    secretaryMessage(ctx, { text, files, brief: !!input.brief, quote, follow });
     return { ok: true, gerdrCard: eventCard(ctx, undefined, "message", text) };
   }
+  if (input.quote || input.follow) throw new Error("quote / follow 只给秘书用");
   return update(ctx, (s) => {
     const t = mine(s, ctx);
     activity(s, t, { by: t.id, kind: "message", text, ...(files.length ? { files } : {}) });
@@ -523,6 +534,28 @@ export function message_user(input: { text: string; files?: { path: string; name
     const gerdrCard = eventCard(ctx, t.id, "message", text);
     return stale ? { ok: true, reminder: stale, gerdrCard } : { ok: true, gerdrCard };
   });
+}
+
+/** What a worker's line can be that the secretary quotes: what it said, not the board's own notes. */
+const SAID = new Set(["message", "review", "done", "stuck", "progress"]);
+
+/** The latest line a member of `id`'s requirement wrote itself, as { task: the requirement, at }. */
+function quoteOf(s: Store, id: string) {
+  const root = reqOf(s, find(s, id));
+  if (!root) throw new Error(`${id} 不是 agent 的需求`);
+  const ids = new Set(members(s, root).map((m) => m.id));
+  const a = [...(root.activity ?? [])].reverse().find((x) => x.by && ids.has(x.by) && SAID.has(x.kind));
+  if (!a) throw new Error(`${root.id} 的动态里还没有 worker 说的话可以附上`);
+  return { task: root.id, at: a.at };
+}
+
+/**
+ * Questions for the user in a result's summary (t74, 2026-11-11: "要你定的四件事", four questions as prose under
+ * review): they get lost there, unanswerable. Two or more question marks outside links and code are counted as that.
+ */
+function questionsIn(text: string) {
+  const plain = text.replace(/`[^`]*`/g, "").replace(/https?:\/\/\S+/g, "");
+  return (plain.match(/[?？]/g) ?? []).length >= 2;
 }
 
 /** The old name of message_user (see tools). */

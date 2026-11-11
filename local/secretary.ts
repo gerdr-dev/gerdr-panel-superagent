@@ -1,7 +1,7 @@
 // The secretary (DESIGN.md「秘书」): what the 秘书 page calls (feed, say) and what the secretary itself and its
 // briefing schedule call (status, briefing). The session behind it, and how its replies are taken, are _main.ts.
 
-import { list } from "./tasks";
+import { list, message } from "./tasks";
 import { append, entries, type Entry } from "./_log";
 import { askText, mainId, settle, state, toMain, updateState, type Item } from "./_main";
 
@@ -70,6 +70,20 @@ export async function say(input: { text: string; files?: { path: string; name?: 
   const e = append(ctx, { kind: "user", text, ...(files.length ? { files } : {}) });
   await toMain(ctx, [`[用户] ${text}`], "user", files.map((f) => f.path));
   return e;
+}
+
+/**
+ * The user replies to a worker's line on the secretary's page: { to: the member task, text, files? }. It goes to that
+ * worker as words from its requirement's feed (tasks.message: the feed has them, it owes a message_user back), not
+ * through the secretary, and the page keeps it with `follow` so the worker's answer is drawn under it there too.
+ */
+export async function reply(input: { to: string; text: string; files?: { path: string; name?: string; mime?: string }[] }, ctx: Ctx) {
+  const text = (input?.text ?? "").trim();
+  const files = (input?.files ?? []).filter((f) => f?.path);
+  if (!input?.to) throw new Error("回复给谁？");
+  if (!text && !files.length) throw new Error("说点什么");
+  await message({ id: input.to, to: [input.to], text, attachments: files }, ctx);
+  return append(ctx, { kind: "user", text, follow: input.to, ...(files.length ? { files } : {}) });
 }
 
 function when(ms?: number) {

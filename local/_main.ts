@@ -310,6 +310,12 @@ function talkText(ctx: Ctx) {
       `- 用户问到的、你要说的，先查事实再说：\`gerdr panel run secretary.status\` 给出等他的事（带问题的 id 和选项）、在做的、待验收的、最近完成的。` +
       `不要凭记忆说「做完了」。问到某一件事的细节（做到哪、动态里写了什么、开了哪个 MR、它最后说了什么）：` +
       `\`gerdr panel run tasks.list '${ex({ id: "t12" })}'\` 只给这一件（和它的成员），别不带 id 拉整块看板。\n` +
+      `- **说到某个需求的结果、方案、结论时，附上 worker 的原话**：message_user 带 \`"quote": "t12"\`，它最新说的那段会原样显示在你的消息下面，` +
+      `用户能展开、能直接回它。你只说一句为什么要他看、要他做什么，不要把内容再缩写一遍（缩写会丢掉他要的细节）。\n` +
+      `- **用户追问某个需求里的细节**（方案里为什么这样、某个数字哪来的、它具体改了什么）：别凭你看到的摘要答，转给做它的 worker —— ` +
+      `\`gerdr panel run tasks.message '${ex({ id: "t12", to: ["t12"], text: "用户的原话" })}'\`（to 是那个成员的任务号），` +
+      `再用 message_user 带 \`"follow": "t12"\` 说一句「问了 t12，它的回答会接在下面」。它的回答会显示在秘书页上，你不用转述。` +
+      `跨需求的、要汇总的（哪些在等他、进度、日报）才由你自己答。\n` +
       `- 用户交给你一件事：是活就派（\`tasks.add\` 带 \`"start": true\`，你知道去哪个仓库就给 \`repo\`，不知道就不给，交给下面的派活）；` +
       `他要亲手做的步骤记成人工任务（\`tasks.add\` 带 \`"owner": "human"\`）。派完一句话告诉他交给了谁。\n` +
       `- 替用户回答 worker：问题 \`tasks.answerQuestion ${ex({ id: "t5", q: "1", value: "选项或他的原话" })}\`；` +
@@ -422,8 +428,16 @@ export async function toMain(ctx: Ctx, blocks: string[], why: Why = "route", att
 }
 
 /** Its message to the user (board.ts message_user, called from the secretary's session): a line on the secretary's page. */
-export function secretaryMessage(ctx: Ctx, input: { text: string; files?: { path: string; name?: string }[]; brief?: boolean }) {
-  const e = append(ctx, { kind: input.brief ? "brief" : "message", by: SECRETARY_ID, text: input.text, ...(input.files?.length ? { files: input.files } : {}), session: ctx.caller.session || undefined });
+export function secretaryMessage(ctx: Ctx, input: { text: string; files?: { path: string; name?: string }[]; brief?: boolean; quote?: { task: string; at: number }; follow?: string }) {
+  const e = append(ctx, {
+    kind: input.brief ? "brief" : "message",
+    by: SECRETARY_ID,
+    text: input.text,
+    ...(input.files?.length ? { files: input.files } : {}),
+    ...(input.quote ? { quote: input.quote } : {}),
+    ...(input.follow ? { follow: input.follow } : {}),
+    session: ctx.caller.session || undefined,
+  });
   updateState(ctx, (s) => {
     s.messageAt = e.at;
   });

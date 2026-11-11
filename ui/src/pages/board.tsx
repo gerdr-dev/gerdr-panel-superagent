@@ -1,6 +1,6 @@
 import { AlertTriangle, ArrowRight, ArrowUp, Bot, Users, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Route, Send, Settings, Undo2, X } from "lucide-react";
 import clsx from "clsx";
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../components/Button";
 import { Dialog, DialogContent, DialogTitle } from "../components/ui/dialog";
 import { Sheet, SheetContent, SheetTitle } from "../components/ui/sheet";
@@ -99,11 +99,14 @@ export default function BoardPage() {
   // On a phone Gerdr's ☰ drawer holds what the header has no room for: the settings sheet's pages, one row each
   usePhoneMenu(TABS.map((x) => ({ id: x.id, label: x.label, icon: <x.icon className="size-4" />, onSelect: () => setSettings(x.id) })))
   const [open, setOpen] = useState("");
-  // The secretary's page links here with ?open=tN (a thing waiting on the user): open that task's drawer
+  // The secretary's page links here with ?open=tN (a thing waiting on the user), and &line=<at> for a line of its feed
+  // (a worker's words it quoted): open that task's drawer there
   const { search } = useLocation();
+  const [line, setLine] = useState<number>();
   useEffect(() => {
-    const id = new URLSearchParams(search).get("open");
-    if (id) setOpen(id);
+    const q = new URLSearchParams(search);
+    const id = q.get("open");
+    if (id) (setOpen(id), setLine(Number(q.get("line")) || undefined));
   }, [search]);
   const [doneLimit, setDoneLimit] = useState(20);
   const byId = Object.fromEntries((tasks ?? []).map((t) => [t.id, t]));
@@ -275,7 +278,7 @@ export default function BoardPage() {
         )}
         </>
       )}
-      <Linger>{sel && isTeam(sel) && <TeamDrawer t={sel} tasks={tasks ?? []} byId={byId} act={act} onClose={() => setOpen("")} onGo={setOpen} />}</Linger>
+      <Linger>{sel && isTeam(sel) && <TeamDrawer t={sel} tasks={tasks ?? []} byId={byId} act={act} line={sel.id === open ? line : undefined} onClose={() => (setOpen(""), setLine(undefined))} onGo={(id) => (setOpen(id), setLine(undefined))} />}</Linger>
       <Linger>{sel && !inChat && !isTeam(sel) && <Drawer t={sel} byId={byId} act={act} onClose={() => setOpen("")} onGo={setOpen} />}</Linger>
       <Linger>{panel && sel && viewing && view && (
         <ChatDrawer
@@ -1871,6 +1874,49 @@ export function NeedRow({ x, lead, activity, byId, act, onGo, nobody }: { x: Exc
   return null;
 }
 
+/** Lines the user opened in full, by line (who and when): kept across a list that unmounts rows scrolled away. */
+const unfolded = new Set<string>();
+
+/**
+ * A long line shown as its first part, 展开全文 for the rest (2026-11-11: workers write results and plans in full now,
+ * so the feed holds what used to be only in their chats; folded, it still reads at a glance). `fade` is the bubble's
+ * colour, so the cut fades into it.
+ */
+export function Fold({ id, fade, children, max = 260 }: { id: string; fade: string; children: React.ReactNode; max?: number }) {
+  const inner = useRef<HTMLDivElement>(null);
+  const [tall, setTall] = useState(false);
+  const [open, setOpen] = useState(unfolded.has(id));
+  // Markdown grows after it mounts (images, code): measured as it changes, not once
+  useLayoutEffect(() => {
+    const el = inner.current;
+    if (!el) return;
+    const check = () => setTall(el.scrollHeight > max + 60);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [max]);
+  const toggle = () => {
+    if (open) unfolded.delete(id);
+    else unfolded.add(id);
+    setOpen(!open);
+  };
+  const cut = tall && !open;
+  return (
+    <>
+      <div className={clsx("relative", cut && "overflow-hidden")} style={cut ? { maxHeight: max } : undefined}>
+        <div ref={inner}>{children}</div>
+        {cut && <div className={clsx("pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t to-transparent", fade)} />}
+      </div>
+      {tall && (
+        <button className="mt-1 text-[12px] text-brand hover:underline" onClick={toggle}>
+          {open ? "收起" : "展开全文"}
+        </button>
+      )}
+    </>
+  );
+}
+
 /** For a page other than the board (the secretary's): where Avatar, 去对话 and the cards' links open a conversation. */
 export function setOpenChat(fn: (session: string, task?: string) => void) {
   openChat = fn;
@@ -1945,7 +1991,10 @@ export function LineRow({ a, lead, activity, byId, speaker }: { a: NonNullable<T
         {head(m, `${KIND[a.kind] ?? a.kind}${to ? ` → ${memberLabel(to)}` : ""}`, a.at, a.kind === "done" ? "text-ok" : a.kind === "review" ? "text-warn" : waiting ? "shimmer text-foreground/80" : undefined)}
         {/* What members write is Markdown (code, lists, paths, links): drawn as the chat draws it */}
         <div className={clsx("w-fit max-w-full rounded-lg rounded-tl-sm px-3 py-2", a.kind === "done" ? "bg-ok/10" : a.kind === "brief" ? "border bg-card" : "bg-muted")}>
-          <Md>{a.text}</Md>
+          {/* bg-ok/10 over the page reads as the page's colour faded: the cut fades into the page there */}
+          <Fold id={`${a.by}:${a.at}`} fade={a.kind === "done" ? "from-background" : a.kind === "brief" ? "from-card" : "from-muted"}>
+            <Md>{a.text}</Md>
+          </Fold>
         </div>
       </div>
     </div>
@@ -2067,7 +2116,7 @@ type Tab = "feed" | "info";
 
 type FeedRow = FeedEntry & ({ type: "item"; x: FeedItem } | { type: "working"; ms: Task[] } | { type: "reroute" } | { type: "empty" } | { type: "sending" });
 
-function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Task[]; byId: Record<string, Task>; act: Act; onClose: () => void; onGo: (id: string) => void }) {
+function TeamDrawer({ t, tasks, byId, act, line, onClose, onGo }: { t: Task; tasks: Task[]; byId: Record<string, Task>; act: Act; /** A feed line to open at (its `at`) */ line?: number; onClose: () => void; onGo: (id: string) => void }) {
   const { busy, err, go } = useAction(act);
   const [rejecting, setRejecting] = useState(false);
   const [feedback, setFeedback] = useState("");
@@ -2152,16 +2201,18 @@ function TeamDrawer({ t, tasks, byId, act, onClose, onGo }: { t: Task; tasks: Ta
   const away = pending.filter((x) => where[x.key] && where[x.key] !== "in");
   const jump = (key: string, smooth = true) =>
     FeedChat ? setJumpTo((j) => ({ key, seq: (j?.seq ?? 0) + 1 })) : scroller.current?.querySelector(`[data-feed="${key}"]`)?.scrollIntoView({ block: "center", behavior: smooth ? "smooth" : "auto" });
-  // Once per opening, not on every refresh: the latest thing waiting on the user, else the newest line
+  // Once per opening, not on every refresh: the line asked for, else the latest thing waiting on the user, else the newest line
   useEffect(() => {
     const id = requestAnimationFrame(() => {
       const last = pending[pending.length - 1];
-      if (last) jump(last.key, false);
+      const at = line ? (t.activity ?? []).findIndex((a) => a.at === line) : -1;
+      if (at >= 0) jump(`a${at}`, false);
+      else if (last) jump(last.key, false);
       else if (scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight;
     });
     return () => cancelAnimationFrame(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [t.id]);
+  }, [t.id, line]);
   const when = (ms: number) => new Date(ms).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
   const who = (id?: string) => (id ? byId[id] : undefined);
   const head = (m: Task | undefined, label: string, at: number, tone?: string) => (

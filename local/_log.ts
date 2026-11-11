@@ -33,6 +33,18 @@ export type Entry = {
   text: string;
   files?: { path: string; name?: string; mime?: string }[];
   session?: string;
+  /**
+   * A worker's own line the secretary's message points at (a result, a plan): the page draws it under the message,
+   * as the worker wrote it, with a way into the requirement and to reply. The secretary says why it matters, never
+   * the content again in fewer words (the user lost what a long plan said that way, 2026-11-11).
+   */
+  quote?: { task: string; at: number };
+  /**
+   * The member a question went to from this page: the user's reply to a worker's line (secretary.reply), or what the
+   * secretary passed on for them (tasks.message). The page draws that member's answers from its requirement's feed
+   * under it, so the answer reaches the page it was asked on.
+   */
+  follow?: string;
 };
 
 type Log = { next: number; entries: Entry[] };
@@ -85,7 +97,7 @@ export function windowText(ctx: Ctx): string {
   let size = 0;
   for (const e of [...entries(ctx)].reverse()) {
     if (e.at < from) break;
-    const who = e.kind === "user" ? "用户" : e.kind === "brief" ? "你（简报）" : "你";
+    const who = e.kind === "user" ? (e.follow ? `用户（在秘书页上直接对 ${e.follow} 说）` : "用户") : e.kind === "brief" ? "你（简报）" : e.quote ? `你（附上了 ${e.quote.task} 的原话）` : e.follow ? `你（转给了 ${e.follow}）` : "你";
     const files = e.files?.length ? `\n（附件：${e.files.map((f) => f.path).join("、")}）` : "";
     const line = `[${stamp(e.at)}] ${who}：${e.text}${files}`;
     if (size + line.length > WINDOW_CHARS) break;
