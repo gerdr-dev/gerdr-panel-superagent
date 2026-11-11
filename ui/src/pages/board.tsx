@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowRight, ArrowUp, Bot, Users, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Route, Send, Settings, Undo2, X } from "lucide-react";
+import { AlertTriangle, ArrowRight, ArrowUp, Bot, Users, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Pencil, Plus, Route, Send, Settings, Undo2, X } from "lucide-react";
 import clsx from "clsx";
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../components/Button";
@@ -721,10 +721,27 @@ function liveText(t: Task) {
   return `停下 · ${ago(l.updatedAt)}`;
 }
 
+/** A title as a new task gets one from what to do (local/tasks.ts firstLine): its first line, cut short. */
+function firstLine(text: string) {
+  const line = text.trim().split("\n")[0].trim();
+  return [...line].length > 40 ? [...line].slice(0, 40).join("") + "…" : line;
+}
+
 function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act: Act }) {
   const { busy, err, go } = useAction(act);
   const [text, setText] = useState("");
   const [rejecting, setRejecting] = useState(false);
+  // 编辑: a task not sent out yet is still the user's words — what to do and its title, changed before 派出去
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState({ title: "", prompt: "" });
+  const editable = t.status === "todo" && !t.routing && !t.session;
+  const save = async () => {
+    const prompt = draft.prompt.trim();
+    // A title that was only the old first line follows the new one; one the user wrote stays
+    const auto = !draft.title.trim() || (draft.title === t.title && t.title === firstLine(t.prompt ?? ""));
+    const title = auto ? firstLine(prompt) || t.title : draft.title.trim();
+    if (await go("edit", "edit", { id: t.id, title, prompt })) setEditing(false);
+  };
   const l = t.live;
   const stale = l?.status === "running" && l.turnStartedAt && Date.now() - l.turnStartedAt > 40 * 60000;
   const tone = l?.status === "waiting" || l?.status === "error" || stale ? "text-warn" : l?.status === "running" ? "text-ok" : "text-muted-foreground";
@@ -743,11 +760,42 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
       {l?.status === "waiting" && l.waiting && <p className="rounded-md bg-warn/10 px-3 py-2 text-[12px] text-warn">在等：{l.waiting}（去会话里处理）</p>}
       {t.summary && <Md>{t.summary}</Md>}
       <Links t={t} />
-      {t.prompt && (
-        <details className="text-[12px] text-muted-foreground" open={!t.summary}>
-          <summary className="cursor-pointer">派活时的说明</summary>
-          <p className="mt-1 whitespace-pre-wrap">{t.prompt}</p>
-        </details>
+      {editing ? (
+        <div className="space-y-2">
+          <input
+            value={draft.title}
+            onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+            placeholder="标题（不写就用说明的第一行）"
+            className="h-8 w-full rounded-md border bg-background px-2 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]"
+          />
+          <textarea
+            autoFocus
+            rows={8}
+            value={draft.prompt}
+            onChange={(e) => setDraft({ ...draft, prompt: e.target.value })}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void save();
+              if (e.key === "Escape") (e.stopPropagation(), setEditing(false));
+            }}
+            placeholder="要 agent 做什么"
+            className="w-full resize-y rounded-md border bg-background px-2 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]"
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setEditing(false)}>
+              取消
+            </Button>
+            <Button disabled={!draft.prompt.trim() || !!busy} onClick={save}>
+              {busy === "edit" ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}保存
+            </Button>
+          </div>
+        </div>
+      ) : (
+        t.prompt && (
+          <details className="text-[12px] text-muted-foreground" open={!t.summary}>
+            <summary className="cursor-pointer">派活时的说明</summary>
+            <p className="mt-1 whitespace-pre-wrap">{t.prompt}</p>
+          </details>
+        )
       )}
       {t.question && (
         <div className="space-y-2 rounded-md border border-warn/40 bg-warn/5 p-3">
@@ -785,7 +833,13 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
       )}
       {err && <p role="alert" className="text-[12px] text-bad">{err}</p>}
       <div className="flex flex-wrap justify-end gap-2">
-        {t.status === "todo" && !t.routing && (
+        {editable && !editing && (
+          <Button variant="ghost" disabled={!!busy} onClick={() => (setDraft({ title: t.title, prompt: t.prompt ?? "" }), setEditing(true))}>
+            <Pencil className="size-3.5" />
+            编辑
+          </Button>
+        )}
+        {t.status === "todo" && !t.routing && !editing && (
           <Button disabled={!!busy} onClick={() => go("start", "start", { id: t.id })}>
             {busy === "start" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}派出去
           </Button>
