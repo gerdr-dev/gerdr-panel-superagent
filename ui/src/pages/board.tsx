@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowRight, ArrowUp, Bot, Users, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Pencil, Plus, Route, Send, Settings, Undo2, X } from "lucide-react";
+import { AlertTriangle, ArrowRight, ArrowUp, Bot, Users, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Route, Send, Settings, Undo2, X } from "lucide-react";
 import clsx from "clsx";
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../components/Button";
@@ -731,14 +731,16 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
   const { busy, err, go } = useAction(act);
   const [text, setText] = useState("");
   const [rejecting, setRejecting] = useState(false);
-  // 编辑: a task not sent out yet is still the user's words, changed before 派出去 the way it was written (新任务 asks
-  // only what to do; the title is its first line, here too)
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState("");
+  // A task not sent out yet is still the user's words: its text is an input box right away (no 编辑 to press), the way
+  // it was written (新任务 asks only what to do; the title is its first line, here too). Saved when the box is left,
+  // and before 派出去
   const editable = t.status === "todo" && !t.routing && !t.session;
+  const [draft, setDraft] = useState(t.prompt ?? t.title);
+  const dirty = editable && draft.trim() !== (t.prompt ?? t.title).trim();
   const save = async () => {
     const prompt = draft.trim();
-    if (await go("edit", "edit", { id: t.id, title: firstLine(prompt) || t.title, prompt })) setEditing(false);
+    if (!dirty || !prompt) return true;
+    return !!(await go("edit", "edit", { id: t.id, title: firstLine(prompt) || t.title, prompt }));
   };
   const l = t.live;
   const stale = l?.status === "running" && l.turnStartedAt && Date.now() - l.turnStartedAt > 40 * 60000;
@@ -758,29 +760,15 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
       {l?.status === "waiting" && l.waiting && <p className="rounded-md bg-warn/10 px-3 py-2 text-[12px] text-warn">在等：{l.waiting}（去会话里处理）</p>}
       {t.summary && <Md>{t.summary}</Md>}
       <Links t={t} />
-      {editing ? (
-        <div className="space-y-2">
-          <textarea
-            autoFocus
-            rows={8}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void save();
-              if (e.key === "Escape") (e.stopPropagation(), setEditing(false));
-            }}
-            placeholder="要 agent 做什么"
-            className="w-full resize-y rounded-md border bg-background px-2 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]"
-          />
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setEditing(false)}>
-              取消
-            </Button>
-            <Button disabled={!draft.trim() || !!busy} onClick={save}>
-              {busy === "edit" ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}保存
-            </Button>
-          </div>
-        </div>
+      {editable ? (
+        <textarea
+          rows={6}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => void save()}
+          placeholder="要 agent 做什么"
+          className="w-full resize-y rounded-md border bg-background px-2 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]"
+        />
       ) : (
         t.prompt && (
           <details className="text-[12px] text-muted-foreground" open={!t.summary}>
@@ -825,14 +813,8 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
       )}
       {err && <p role="alert" className="text-[12px] text-bad">{err}</p>}
       <div className="flex flex-wrap justify-end gap-2">
-        {editable && !editing && (
-          <Button variant="ghost" disabled={!!busy} onClick={() => (setDraft(t.prompt ?? t.title), setEditing(true))}>
-            <Pencil className="size-3.5" />
-            编辑
-          </Button>
-        )}
-        {t.status === "todo" && !t.routing && !editing && (
-          <Button disabled={!!busy} onClick={() => go("start", "start", { id: t.id })}>
+        {t.status === "todo" && !t.routing && (
+          <Button disabled={!!busy || (editable && !draft.trim())} onClick={async () => (await save()) && go("start", "start", { id: t.id })}>
             {busy === "start" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}派出去
           </Button>
         )}
