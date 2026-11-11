@@ -273,7 +273,10 @@ async function brief(ctx: Ctx): Promise<string> {
     `## 外面来的消息 [消息 cN]：一条命令给出这一批的决定\n` +
       `gerdr panel run superagent.decide '${ex({ decisions: [{ item: "c3", decision: "accept", title: "十几个字的标题", parts: [{ repo: "/绝对路径" }] }, { item: "c4", decision: "ignore", reason: "道谢" }] })}'\n\n` +
       `- attach：${ex({ item: "c5", decision: "attach", task: "t9" })}；stop：${ex({ item: "c6", decision: "stop", task: "t9", reason: "…" })}\n` +
-      `- decide 会替你建任务、派出去、回原对话一句、记下这条消息的去向。\n\n` +
+      (workflow(ctx).inboxWork === "review"
+        ? `- decide 的 accept 会替你建任务，但**不派出去**：放进看板的「待办」，用户看过、改好再派（他的设置）。parts 照常写，会成为卡片上的仓库和 agent；拆成几份就是几张卡。` +
+          `记下这条消息的去向；回不回原对话、什么时候回，按他的设置自动处理，你不用另外回。\n\n`
+        : `- decide 会替你建任务、派出去、记下这条消息的去向；回不回原对话按用户的设置自动处理。\n\n`) +
       `## 看板任务 [任务 tN]：用看板的命令（和用户点按钮是同一套）\n` +
       `- 派出去：gerdr panel run tasks.dispatch '${ex({ id: "t12", parts: [{ repo: "/绝对路径" }] })}'（可加 title）\n` +
       `- 它是在管别的任务：停掉 tasks.drop '${ex({ id: "t9", reason: "…" })}'；转告 tasks.say '${ex({ id: "t9", text: "…" })}'；` +

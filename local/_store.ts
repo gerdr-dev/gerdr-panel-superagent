@@ -126,6 +126,8 @@ export type Task = {
    * secretary no longer watches tasks to send it out itself).
    */
   startWhenFree?: boolean;
+  /** The person who sent its message hears back when it's sent out (设置 → 外面来的消息 → 回复对方: 派出去时). */
+  ackOnStart?: boolean;
   /** @deprecated a question for the user: now a user wait (_waits.ts askUser). */
   question?: string;
   /** The latest result in a line or a paragraph, and where to look (MR, doc). */

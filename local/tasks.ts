@@ -501,7 +501,7 @@ export async function start(
     // No reportTo: the user follows the board, not the panel's agent, and the worker updates the board itself (panel
     // tools). A report would only have the panel's agent repeat the worker's reply to nobody, a turn each time.
   });
-  return update(ctx, (s) => {
+  const out = update(ctx, (s) => {
     const x = find(s, t.id);
     Object.assign(x, { status: "running", routing: undefined, prompt, repo, session: sess.id, sessions: [...(x.sessions ?? []), sess.id], updatedAt: Date.now() });
     endQuestions(x, "重新派出去了");
@@ -510,6 +510,23 @@ export async function start(
     if (input.effort) x.effort = input.effort;
     return x;
   });
+  // Its message's sender hears back now that it's out (设置: 回复对方 → 派出去时)
+  if (out.ackOnStart) {
+    ackOrigin(ctx, out);
+    return edit({ id: out.id, ackOnStart: undefined }, ctx);
+  }
+  return out;
+}
+
+/** Tells the person whose message a task came from that it's taken, in the words of 设置 → 回复对方. */
+export function ackOrigin(ctx: Ctx, t: Task) {
+  if (!t.origin?.reply) return;
+  const text = workflow(ctx).ackText.split("{id}").join(t.id).split("{title}").join(t.title);
+  try {
+    (ctx as any).events.reply({ ...t.origin, at: 0 }, text);
+  } catch (err: any) {
+    ctx.log(`回复 ${t.origin.source}/${t.origin.kind} 失败：${err?.message ?? err}`);
+  }
 }
 
 /**

@@ -28,13 +28,34 @@ export type Settings = {
   repos: Repo[];
   /** Work nobody asked for: off, observe (judged and recorded, not done: dsh's observe mode) or on. */
   proactive: "off" | "observe" | "on";
+  /**
+   * An outside message the secretary takes as work: "review" = a 待办 card (a card per part) the user looks at, edits
+   * and sends out; "dispatch" = sent out right away (2026-11-11: the user wants to see it first, and fix what the
+   * secretary made of it).
+   */
+  inboxWork: "review" | "dispatch";
+  /**
+   * A message in a conversation a task follows: "worker" = straight to that task's worker; "secretary" = judged first,
+   * so it can be left alone or go to another task.
+   */
+  followUps: "worker" | "secretary";
+  /** When the person who sent it hears back: "accept" = when it's taken, "dispatch" = when it's sent out, "never". */
+  ack: "accept" | "dispatch" | "never";
+  /** What they hear: {id} and {title} are the task's. */
+  ackText: string;
 };
+
+export const ACK_TEXT = "收到，建了任务 {id}「{title}」，有结果会在这里说。";
 
 export const DEFAULTS: Settings = {
   router: { agent: "", model: "", effort: "", mode: "" },
   worker: { agent: "", model: "", effort: "", mode: "" },
   repos: [],
   proactive: "observe",
+  inboxWork: "review",
+  followUps: "worker",
+  ack: "dispatch",
+  ackText: ACK_TEXT,
 };
 
 const str = (v: unknown, d: string) => (typeof v === "string" ? v.trim() : d);
@@ -57,5 +78,9 @@ export function normalize(raw: any): Settings {
     worker: who(r.worker, d.worker),
     repos,
     proactive: oneOf(r.proactive, ["off", "observe", "on"] as const, d.proactive),
+    inboxWork: oneOf(r.inboxWork, ["review", "dispatch"] as const, d.inboxWork),
+    followUps: oneOf(r.followUps, ["worker", "secretary"] as const, d.followUps),
+    ack: oneOf(r.ack, ["accept", "dispatch", "never"] as const, d.ack),
+    ackText: str(r.ackText, "") || d.ackText,
   };
 }

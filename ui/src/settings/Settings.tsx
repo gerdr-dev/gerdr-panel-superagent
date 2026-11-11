@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Button } from "../components/Button";
 import { AgentPick, input, PathPick } from "../components/pickers";
 import { run } from "../lib/gerdr";
-import { normalize, type Repo, type Settings, type Who } from "../lib/settings";
+import { ACK_TEXT, normalize, type Repo, type Settings, type Who } from "../lib/settings";
 import { SaveBar } from "../components/SaveBar";
 
 // 设置: the values the code acts on (lib/settings.ts says why they're settings and not prose in the skill). Each field
@@ -97,6 +97,35 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
             note="新任务的仓库下拉和秘书都只看这份。说明写给秘书看（这是哪个服务、哪个产品），它靠这个挑仓库。空着时，看板拿最近用过的目录当建议。"
           >
             <Repos repos={s.repos} onChange={(v) => put("repos", v)} />
+          </Section>
+
+          <Section
+            title="外面来的消息"
+            note="触发器收进来、找你的消息（私信、@ 你）。闲聊、道谢这类秘书不接，只记在「去向」里。"
+          >
+            <Field
+              label="像是活的"
+              hint={{ review: "秘书在「待办」里建好卡片，不派出去：你看过、改好再点「派出去」，不要就放弃", dispatch: "秘书接了就直接派出去" }[s.inboxWork]}
+            >
+              <Choice value={s.inboxWork} options={[["review", "放进待办等我过目"], ["dispatch", "直接派出去"]]} onChange={(v) => put("inboxWork", v)} />
+            </Field>
+            <Field
+              label="任务对话里的后续"
+              hint={{ worker: "已有任务那段对话里又来的消息，直接交给那个任务的 worker", secretary: "先交给秘书判断：可以不理，交给这个任务，或者交给别的任务" }[s.followUps]}
+            >
+              <Choice value={s.followUps} options={[["worker", "交给那个 worker"], ["secretary", "先给秘书判断"]]} onChange={(v) => put("followUps", v)} />
+            </Field>
+            <Field
+              label="回复对方"
+              hint={{ accept: "秘书一接下就回", dispatch: "任务派出去时才回：没过目之前不替你说话", never: "不替你回" }[s.ack]}
+            >
+              <Choice value={s.ack} options={[["accept", "接下时"], ["dispatch", "派出去时"], ["never", "不回"]]} onChange={(v) => put("ack", v)} />
+            </Field>
+            {s.ack !== "never" && (
+              <Field label="回复内容" hint="{id} {title} 会换成任务号和标题">
+                <input className={input} value={s.ackText} placeholder={ACK_TEXT} onChange={(e) => put("ackText", e.target.value)} />
+              </Field>
+            )}
           </Section>
 
           <Section

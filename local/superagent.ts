@@ -1,7 +1,7 @@
 // The Superagent's decisions and its log: what the main session calls (decide) and what the page reads (log,
 // retry). How it works is in _main.ts; why, in DESIGN.md「Superagent」.
 
-import { add, dispatch, drop, edit, lastWords, say, start } from "./tasks";
+import { ackOrigin, add, dispatch, drop, edit, lastWords, say, start } from "./tasks";
 import { activity, find, load, memberName, members, note, update, type Task } from "./_store";
 import { evaluate, findItem, followUp, mainId, state, updateState, type Item } from "./_main";
 import { workflow } from "./_config";
@@ -215,22 +215,40 @@ async function rearrange(d: Decision, self: Task, ctx: Ctx) {
  */
 async function accept(ctx: Ctx, it: Item, title: string | undefined, parts: Part[], rule?: string) {
   const e = it.event;
+  const w = workflow(ctx);
   const settle = (patch: Partial<Item>) => updateState(ctx, (s) => Object.assign(findItem(s, it.id), { decidedAt: Date.now(), ...patch }));
   const text = (e.text ?? "").trim() || e.title || "";
   const from = [e.who && `来自 ${e.who}`, `${e.source}/${e.kind}`].filter(Boolean).join("，");
+  const source = `（${from}${e.url ? `：${e.url}` : ""}）`;
   const scope = it.inferred && rule ? `\n\n这件事没人找你做，是按主动工作的规则接的：「${rule}」。只做这条规则允许的，超出的用 ask_human 问用户。` : "";
+  // Taken under a proactive rule nobody asked: no one to tell. Otherwise when 设置 → 回复对方 says
+  const ack = it.inferred ? "never" : w.ack;
+  const review = w.inboxWork === "review";
+  const [first, ...rest] = parts;
+  const split = parts.length > 1;
   const t = (await add(
     {
-      title: title || firstLine(text) || e.title || `${e.source}/${e.kind}`,
-      prompt: `${text}\n\n（${from}${e.url ? `：${e.url}` : ""}）${scope}`,
+      title: (split ? first?.title : undefined) || title || firstLine(text) || e.title || `${e.source}/${e.kind}`,
+      prompt: `${split && first?.prompt?.trim() ? first.prompt.trim() : text}\n\n${source}${scope}`,
       attachments: e.files,
       origin: { id: e.id, source: e.source, kind: e.kind, key: e.key, title: e.title, url: e.url, reply: it.inferred ? undefined : e.reply },
       threads: e.key ? [{ source: e.source, key: e.key }] : undefined,
       router: mainId(ctx),
-    },
+      // To review (设置 → 外面来的消息): where the secretary would send it, already on the card for 派出去
+      ...(review && first ? { repo: first.repo, agent: first.agent, model: first.model, effort: first.effort, worktree: first.worktree } : {}),
+      ...(review && ack === "dispatch" ? { ackOnStart: true } : {}),
+    } as any,
     ctx,
   )) as Task;
   let ids = [t.id];
+  if (review) {
+    // A card per part, each to look at, change and send out on its own
+    for (const p of rest)
+      ids.push(((await add({ title: p.title, prompt: `${p.prompt?.trim() || text}\n\n${source}${scope}`, repo: p.repo, agent: p.agent, model: p.model, effort: p.effort, worktree: p.worktree, attachments: e.files, from: t.id, router: mainId(ctx) } as any, ctx)) as Task).id);
+    settle({ state: "accepted", tasks: ids, rule, reason: "放进待办，等你过目再派" });
+    if (ack === "accept") ackOrigin(ctx, find(load(ctx).store, t.id));
+    return { item: it.id, tasks: ids, review: "放进了待办，用户看过、改好再派出去" };
+  }
   try {
     ids = ((await dispatch({ id: t.id, parts }, ctx)) as Task[]).map((x) => x.id);
   } catch (err: any) {
@@ -239,7 +257,7 @@ async function accept(ctx: Ctx, it: Item, title: string | undefined, parts: Part
     throw new Error(`建了任务 ${t.id}，但没派出去：${err?.message ?? err}。改了用 tasks.dispatch {"id":"${t.id}","parts":[…]} 再派`);
   }
   settle({ state: "accepted", tasks: ids, rule, reason: undefined });
-  if (!it.inferred) answer(ctx, it, `收到，建了任务 ${t.id}「${find(load(ctx).store, t.id).title}」，有结果会在这里说。`);
+  if (ack !== "never") ackOrigin(ctx, find(load(ctx).store, t.id));
   return { item: it.id, tasks: ids };
 }
 

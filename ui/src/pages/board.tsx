@@ -511,6 +511,8 @@ function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, T
           {asked && <span>{asked}</span>}
           {(t.agent || t.model) && <span>· {[t.agent, t.model].filter(Boolean).join(" / ")}</span>}
         {t.from && <span>· 拆自 {t.from}</span>}
+          {/* An outside message it came from (a chat, an MR): which, so a card waiting under 待办 to be looked at says so */}
+          {t.origin && <span className="text-brand">· 来自 {t.origin.source}</span>}
           {live && t.status !== "done" && t.status !== "dropped" && <span className={clsx("inline-flex items-center gap-1", liveTone(t))}>· {live}</span>}
           {outside(t)
             .filter((w) => w.url)

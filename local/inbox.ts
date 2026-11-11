@@ -162,6 +162,13 @@ export async function onEvent(input: { event: GerdrEvent; trigger?: string; allo
   if (store.tasks.some((t) => t.origin?.id === e.id || t.followups?.includes(e.id)) || state(ctx).items.some((x) => x.event.id === e.id)) return { duplicate: true };
   const ev = compact(e);
   const owners = subscribers(store.tasks, ev);
+  // 设置 → 任务对话里的后续: straight to the task's worker, or judged by the secretary first (it sees the tasks of this
+  // conversation, and can attach it to one, leave it, or make it something new)
+  if (owners.length && workflow(ctx).followUps === "secretary") {
+    const it = record(ctx, ev, { state: "pending", sentAt: Date.now() });
+    await evaluate(ctx, [it.id], store.tasks);
+    return { item: it.id, pending: true, followUpOf: owners.map((t) => t.id) };
+  }
   if (owners.length) {
     for (const t of owners) await followUp(ctx, t.id, ev);
     const it = record(ctx, ev, { state: "delivered", tasks: owners.map((t) => t.id) });
