@@ -110,11 +110,12 @@ type State = {
   since?: number;
 };
 
-function load(ctx: Ctx): { s: State; etag?: string } {
+function load(ctx: Ctx): { s: State; etag?: string; text?: string } {
   migrate(ctx);
   const st = ctx.fs.stat(STATE);
   if (!st) return { s: { mains: [], handled: 0, next: 1, items: [] } };
-  return { s: JSON.parse(ctx.fs.read(STATE)), etag: st.etag };
+  const text = ctx.fs.read(STATE);
+  return { s: JSON.parse(text), etag: st.etag, text };
 }
 
 export function state(ctx: Ctx): State {
@@ -123,11 +124,17 @@ export function state(ctx: Ctx): State {
 
 export function updateState<T>(ctx: Ctx, fn: (s: State) => T): T {
   for (let i = 0; ; i++) {
-    const { s, etag } = load(ctx);
+    const { s, etag, text } = load(ctx);
     const out = fn(s);
     if (s.items.length > KEEP) s.items = s.items.slice(-KEEP);
+    // Nothing changed (tasks.list noting task states that are as they were, mostly): no write. A write tells the
+    // board's page to reload (usePanelChange("user/data")), and that reload runs tasks.list again: writing anyway
+    // looped once a second for as long as the board was on screen (2026-11-11: ~1 tasks.list and ~2 superagent.log
+    // runs a second, about 2 GB allocated a minute in Gerdr's backend).
+    const next = JSON.stringify(s, null, 2);
+    if (next === text) return out;
     try {
-      ctx.fs.write(STATE, JSON.stringify(s, null, 2), etag ? { etag } : undefined);
+      ctx.fs.write(STATE, next, etag ? { etag } : undefined);
       return out;
     } catch (e) {
       if (i >= 4) throw e;
