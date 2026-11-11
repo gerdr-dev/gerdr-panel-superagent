@@ -44,10 +44,9 @@ export const tools = {
       "{type: message, conversation}: news where a person will answer — the Slack channel / DM id you wrote to (D09…, C0…), a Slack message link, or an MR URL (its reviews, pipelines, merge come too); " +
       "{type: check, command, every?, cwd?}: a command that tells whether what you wait for has happened (a publish approved, a job finished, a page live) — the board runs it every `every` minutes, exit 0 = it has (you're woken with its output), any other exit = not yet; exit 0 as soon as things leave the step you wait in, not only on the end you hope for ([ \"$s\" != pending_approval ], not [ \"$s\" = success ]) — rejected, stuck halfway or failed must wake you too; waiting on a person (approve, merge), check that act itself, don't assume what should follow it happens by itself; print one line saying where things stand, it shows on your card; " +
       "{type: time, minutes}: the timeout, required: woken after that long if nothing else came; " +
-      "{type: teammate, who}: a member of your requirement (its task id, see my_task) tells you something — their tell wakes you. " +
-      "Every wait needs a time item as its timeout (how long it should take): whoever you wait on may never answer — stuck, offline, forgot; a wait without one is refused. Handed work to a session you started (gerdr session new, here or on another computer) or to a teammate? You are the one who waits for it, the same way: its report wakes you first; past the timeout, go and see where it's stuck. " +
+      "Every wait needs a time item as its timeout (how long it should take): whoever you wait on may never answer — stuck, offline, forgot; a wait without one is refused. Handed work to a session you started (gerdr session new, here or on another computer)? You are the one who waits for it, the same way: its report wakes you first; past the timeout, go and see where it's stuck. " +
       "Waiting on a person to do something you can see (approve, merge, deploy)? Give both a message and a check. " +
-      "Your card stays in progress meanwhile, showing `what`. When the last thing you waited on came and you got something done with it (it went live, a check passed), message_user that result first: the feed already shows \"等到了\", not what came of it. Then end your turn; when woken and still waiting, call it again (it replaces the last one). When to use: the my-workflow skill, references/board.md.",
+      "Your card stays in progress meanwhile, showing `what`. When the last thing you waited on came and you got something done with it (it went live, a check passed), say that result in your reply first. Then end your turn; when woken and still waiting, call it again (it replaces the last one). When to use: the my-workflow skill, references/board.md.",
     input: {
       type: "object",
       properties: {
@@ -59,8 +58,7 @@ export const tools = {
           items: {
             type: "object",
             properties: {
-              type: { type: "string", enum: ["message", "check", "time", "teammate"] },
-              who: { type: "string", description: "teammate: the member's task id (t7)" },
+              type: { type: "string", enum: ["message", "check", "time"] },
               conversation: { type: "string", description: "message: a Slack channel / DM id, a Slack message link, or an MR URL" },
               until: {
                 type: "string",
@@ -145,11 +143,7 @@ export function wait_for(
       if (!(m >= 1 && m <= 1440)) throw new Error(`${at}：time 的 minutes 是 1 到 1440`);
       return { type: "time" as const, minutes: m };
     }
-    if (x.type === "teammate") {
-      if (!x.who?.trim()) throw new Error(`${at}：teammate 要给 who（队友的任务号，my_task 里有）`);
-      return { type: "teammate" as const, who: x.who.trim() };
-    }
-    throw new Error(`${at}：type 是 message / check / time / teammate 之一，不是「${x.type ?? ""}」`);
+    throw new Error(`${at}：type 是 message / check / time 之一，不是「${x.type ?? ""}」`);
   });
   const { t, ws, stale } = update(ctx, (s) => {
     const t = mine(s, ctx);
@@ -158,12 +152,6 @@ export function wait_for(
     const on: WakeOn[] = parsed.map((p) => {
       if (p.type === "message") return { type: "message", conv: p.conv };
       if (p.type === "time") return { type: "time", at: now + p.minutes * 60_000 };
-      if (p.type === "teammate") {
-        const root = teamOf(s, t);
-        const m = root && members(s, root).find((x) => x.id === p.who);
-        if (!m || m.id === t.id) throw new Error(`${p.who} 不是你这个需求的队友${root ? `（队友：${members(s, root).filter((x) => x.id !== t.id).map(memberName).join("、")}）` : "：你没有队友"}`);
-        return { type: "teammate", id: m.id, name: memberName(m) };
-      }
       const cwd = p.cwd || t.repo || "";
       if (!cwd.startsWith("/")) throw new Error("check 的 cwd 要是绝对路径（任务没有仓库时必须给）");
       return { type: "check", command: p.command, every: p.every, cwd };

@@ -34,11 +34,11 @@ export type Entry = {
   files?: { path: string; name?: string; mime?: string }[];
   session?: string;
   /**
-   * A worker's own line the secretary's message points at (a result, a plan): the page draws it under the message,
-   * as the worker wrote it, with a way into the requirement and to reply. The secretary says why it matters, never
+   * A worker's own words the secretary's message points at (a result, a plan): its last reply when quoted (`text`;
+   * older entries point at a feed line by `at`). The page draws it under the message, as the worker wrote it, with a way into the requirement and to reply. The secretary says why it matters, never
    * the content again in fewer words (the user lost what a long plan said that way, 2026-11-11).
    */
-  quote?: { task: string; at: number };
+  quote?: { task: string; at: number; text?: string };
   /**
    * The member a question went to from this page: the user's reply to a worker's line (secretary.reply), or what the
    * secretary passed on for them (tasks.message). The page draws that member's answers from its requirement's feed

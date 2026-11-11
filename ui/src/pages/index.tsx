@@ -22,7 +22,7 @@ import { sessionsKey, usePanelChange, useRefresh, useSessions } from "../lib/vis
 
 type File = { path: string; name?: string; mime?: string };
 /** A line of the secretary's page: a feed line (Activity) with an id and the session it was said in. */
-type Entry = { id: string; at: number; kind: "user" | "message" | "brief"; by?: string; text: string; files?: File[]; session?: string; quote?: { task: string; at: number }; follow?: string };
+type Entry = { id: string; at: number; kind: "user" | "message" | "brief"; by?: string; text: string; files?: File[]; session?: string; quote?: { task: string; at: number; text?: string }; follow?: string };
 type Note = { id: string; at: number; who: "note"; text: string; state: string; tasks?: string[] };
 type Main = { id: string; status: string; waiting?: string; waitingKind?: string; error?: string; turnStartedAt?: number };
 type Feed = { entries: (Entry | Note)[]; main: Main | null; busy: boolean };
@@ -113,7 +113,7 @@ export default function SecretaryPage() {
       ) : null,
     [replyTo, byId],
   );
-  const toTask = useCallback((id: string, line?: number) => navigate(`/board?open=${id}${line ? `&line=${line}` : ""}`), [navigate]);
+  const toTask = useCallback((id: string) => navigate(`/board?open=${id}`), [navigate]);
   // Each row padded as a requirement's feed pads its rows
   const render = useCallback(
     (r: Row) => <div className="px-1 py-1.5">{rowOf(r)}</div>,
@@ -189,7 +189,8 @@ function toRows(feed: Feed | null, main: Main | null, needs: Need[], byId: Recor
     const text = e.kind === "user" && e.follow ? `@${label(byId[e.follow])} ${e.text}` : e.text;
     out.push(e.kind === "user" ? { key: e.id, at: e.at, user: { text, files: e.files }, type: "line", e } : { key: e.id, at: e.at, type: "line", e });
     // The worker's words the secretary pointed at: right under its message, as written
-    const q = e.quote && byId[e.quote.task]?.activity?.find((a) => a.at === e.quote!.at);
+    // Its last reply as it was when quoted (text), or, in older entries, a line of its feed
+    const q: Activity | undefined = e.quote && (e.quote.text ? { at: e.quote.at, by: e.quote.task, kind: "message", text: e.quote.text } : byId[e.quote.task]?.activity?.find((a) => a.at === e.quote!.at));
     if (q && !shown.has(`${e.quote!.task}:${q.at}`)) {
       shown.add(`${e.quote!.task}:${q.at}`);
       out.push({ key: `${e.id}-q`, at: e.at, type: "quoted", a: q, root: e.quote!.task, under: true });
@@ -251,20 +252,20 @@ function answers(member: string, at: number, byId: Record<string, Task>) {
  * an answer to what was asked from here. Drawn as its requirement's feed draws it (LineRow, long ones folded), with
  * the ways on: its place in the requirement, and replying to that worker straight from here.
  */
-function Quoted({ a, root, under, byId, onTask, onReply }: { a: Activity; root: string; under: boolean; byId: Record<string, Task>; onTask: (id: string, line?: number) => void; onReply: (id: string) => void }) {
+function Quoted({ a, root, under, byId, onTask, onReply }: { a: Activity; root: string; under: boolean; byId: Record<string, Task>; onTask: (id: string) => void; onReply: (id: string) => void }) {
   const live = a.by && byId[a.by]?.session && byId[a.by]?.status !== "dropped" && byId[root]?.status !== "dropped";
   return (
     <div className={clsx("space-y-1", under && "ml-10 border-l-2 border-brand/30 pl-3")}>
       {under && (
         <p className="flex items-center gap-1 text-[11px] text-muted-foreground">
           <CornerDownRight className="size-3" />
-          {root} 的原话
+          {root} 的 worker 原话
         </p>
       )}
       <LineRow a={a} lead={root} activity={byId[root]?.activity ?? []} byId={byId} />
       <div className="flex items-center gap-3 pl-10 text-[12px]">
-        <button className="text-muted-foreground hover:text-foreground hover:underline" onClick={() => onTask(root, a.at)}>
-          在需求里看
+        <button className="text-muted-foreground hover:text-foreground hover:underline" onClick={() => onTask(root)}>
+          打开 {root} 的对话
         </button>
         {live && (
           <button className="inline-flex items-center gap-1 text-brand hover:underline" onClick={() => onReply(a.by!)}>

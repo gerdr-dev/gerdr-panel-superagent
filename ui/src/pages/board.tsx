@@ -83,14 +83,6 @@ function colOf(t: Task): Col {
   return c;
 }
 
-/**
- * An agent task sent out: a requirement card, its feed in a drawer of its own (TeamDrawer), alone or with members.
- * Not one still to dispatch (no member, no feed yet: it opens as the router's chat or with 派出去), nor a member of
- * another (folded into that card; opened from it, it's its own chat).
- */
-function isTeam(t?: Task) {
-  return !!t && t.owner === "agent" && !t.in && t.status !== "todo";
-}
 
 export default function BoardPage() {
   const { tasks, error, act } = useTasks();
@@ -99,14 +91,11 @@ export default function BoardPage() {
   // On a phone Gerdr's ☰ drawer holds what the header has no room for: the settings sheet's pages, one row each
   usePhoneMenu(TABS.map((x) => ({ id: x.id, label: x.label, icon: <x.icon className="size-4" />, onSelect: () => setSettings(x.id) })))
   const [open, setOpen] = useState("");
-  // The secretary's page links here with ?open=tN (a thing waiting on the user), and &line=<at> for a line of its feed
-  // (a worker's words it quoted): open that task's drawer there
+  // The secretary's page links here with ?open=tN (a thing waiting on the user, a worker it quoted): open that task
   const { search } = useLocation();
-  const [line, setLine] = useState<number>();
   useEffect(() => {
-    const q = new URLSearchParams(search);
-    const id = q.get("open");
-    if (id) (setOpen(id), setLine(Number(q.get("line")) || undefined));
+    const id = new URLSearchParams(search).get("open");
+    if (id) setOpen(id);
   }, [search]);
   const [doneLimit, setDoneLimit] = useState(20);
   const byId = Object.fromEntries((tasks ?? []).map((t) => [t.id, t]));
@@ -134,8 +123,9 @@ export default function BoardPage() {
   // Still being handed out: it opens as the routing conversation, live, so the user sees how it's deciding and can
   // put it right
   const routingNow = !!sel && sel.owner === "agent" && sel.status === "todo" && !!sel.routing && !!sel.router;
-  // A requirement with members opens as its activity feed; each member's chat is one click from there
-  const inChat = !!sel && !isTeam(sel) && sel.owner === "agent" && ((!!sel.session && sel.status !== "done" && sel.status !== "dropped") || routingNow);
+  // Every agent task with a worker opens as its conversation, finished ones too: that is where everything it said is
+  // (2026-11-11: a feed of summaries next to it left the user going board → requirement → chat for the real answer)
+  const inChat = !!sel && sel.owner === "agent" && (!!sel.session || routingNow);
   // A session its worker handed work to is asking the user something: that's where the answer goes, so it opens
   // first (the 链路 above leads back to the worker)
   const asking = sel?.status === "running" ? sel.helpers?.find((k) => k.status === "waiting" && k.left) : undefined;
@@ -188,6 +178,7 @@ export default function BoardPage() {
     if (!t) return;
     // Done with it either way: close the chat rather than flip to the finished task's summary
     if (action === "accept" || action === "drop") void act(action, { id: t.id }).then(() => setOpen(""));
+    if (action === "restore") void act("restore", { id: t.id });
     // A human step it's waiting for: leave the chat for that task's own panel (its steps, what to hand back)
     if (action.startsWith("human:")) return setOpen(action.slice(6));
   };
@@ -220,7 +211,7 @@ export default function BoardPage() {
             one sideways too) made every touch on the column look like one on something that scrolls sideways, so the
             swipe between columns left it alone (lib/swipe.ts skip) */}
         <div className="min-h-0 flex-1 space-y-2 px-2 pb-2 md:overflow-y-auto">
-          {shown.length ? shown.map((t) => isTeam(t) ? <TeamCard key={t.id} t={t} tasks={tasks ?? []} active={t.id === open} onOpen={() => (setPeek(null), setOpen(t.id))} /> : <MiniCard key={t.id} t={t} byId={byId} active={t.id === open} onOpen={() => (setPeek(null), setOpen(t.id))} />) : <p className="py-6 text-center text-[12px] text-muted-foreground">无任务</p>}
+          {shown.length ? shown.map((t) => <MiniCard key={t.id} t={t} byId={byId} active={t.id === open} onOpen={() => (setPeek(null), setOpen(t.id))} />) : <p className="py-6 text-center text-[12px] text-muted-foreground">无任务</p>}
           {all.length > shown.length && (
             <button className="w-full py-2 text-[12px] text-muted-foreground hover:text-foreground" onClick={() => setDoneLimit(doneLimit + 50)}>
               再显示 {Math.min(50, all.length - shown.length)} 个
@@ -278,8 +269,7 @@ export default function BoardPage() {
         )}
         </>
       )}
-      <Linger>{sel && isTeam(sel) && <TeamDrawer t={sel} tasks={tasks ?? []} byId={byId} act={act} line={sel.id === open ? line : undefined} onClose={() => (setOpen(""), setLine(undefined))} onGo={(id) => (setOpen(id), setLine(undefined))} />}</Linger>
-      <Linger>{sel && !inChat && !isTeam(sel) && <Drawer t={sel} byId={byId} act={act} onClose={() => setOpen("")} onGo={setOpen} />}</Linger>
+      <Linger>{sel && !inChat && <Drawer t={sel} byId={byId} act={act} onClose={() => setOpen("")} onGo={setOpen} />}</Linger>
       <Linger>{panel && sel && viewing && view && (
         <ChatDrawer
           session={view.session}
@@ -404,6 +394,9 @@ function chatPanel(t: Task, byId: Record<string, Task>): { label: string; action
   const drop: ChatAction = { id: "drop", label: "放弃", confirm: "确定放弃？" };
   // The user finished it themselves, or it's good enough as it is: done, whatever the worker last reported
   const done: ChatAction = { id: "accept", label: "标为完成", confirm: "确定完成？" };
+  // Over: what it came to, above the conversation it came out of
+  if (t.status === "done") return { label: `${t.id} · ${day(t.doneAt ?? t.updatedAt)} 完成${t.summary ? `：${t.summary}` : ""}`, actions: [] };
+  if (t.status === "dropped") return { label: `${t.id} · 已放弃${t.summary ? `：${t.summary}` : ""}`, actions: [{ id: "restore", label: "恢复这个任务", kind: "primary" }] };
   const c = colOf(t);
   // Steps only the user can do that hold this task up: shown here, where they are, with a way to go and do them
   const mine = (t.blockedBy ?? []).map((id) => byId[id]).filter((h) => h && h.owner === "human" && h.status !== "done" && h.status !== "dropped");
@@ -489,6 +482,8 @@ function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, T
       <p className={clsx("line-clamp-2 text-[13px] font-medium", t.status === "dropped" && "text-muted-foreground line-through")}>{t.title}</p>
       {t.question && colOf(t) === "you" && <p className="line-clamp-2 text-[12px] text-warn">{t.question}</p>}
       {!t.question && t.stopped && <p className="line-clamp-2 text-[12px] text-warn">{t.stopWhy ?? "停下了"}{t.said ? `：${t.said}` : ""}</p>}
+      {/* Where it stands in its worker's words (task_update's summary): the one line a card has for it */}
+      {t.owner === "agent" && t.summary && !t.question && !t.stopped && <p className="line-clamp-2 text-[12px] text-muted-foreground">{t.summary}</p>}
       {!t.question && t.status === "running" && outside(t)[0] && <p className="line-clamp-2 text-[12px] text-muted-foreground">等：{outside(t)[0].what}</p>}
       {!t.question &&
         t.helpers
@@ -1447,13 +1442,6 @@ function memberLabel(m?: Task) {
   return m ? m.repo?.split("/").pop() || m.id : "";
 }
 
-/** Who and what in a requirement waits on the user: the steps / decisions its members asked, members stuck on them. */
-function teamNeeds(t: Task, tasks: Task[]) {
-  const mine = tasks.filter((x) => x.id === t.id || x.in === t.id);
-  const steps = mine.filter((x) => x.owner === "human" && x.status !== "done" && x.status !== "dropped" && x.ready);
-  const stuck = mine.filter((x) => x.owner === "agent" && x.column === "you" && x.status !== "done" && x.status !== "dropped");
-  return { steps, stuck };
-}
 
 export type Need = Exclude<FeedItem, { type: "act" }>;
 
@@ -1586,73 +1574,6 @@ function memberDot(x: Task) {
   return "bg-muted-foreground/40";
 }
 
-/** The card: what the user scans — the latest activity, who's on it, and what waits on them. */
-function TeamCard({ t, tasks, active, onOpen }: { t: Task; tasks: Task[]; active: boolean; onOpen: () => void }) {
-  const byId = Object.fromEntries(tasks.map((x) => [x.id, x]));
-  const ms = (t.members ?? []).map((id) => byId[id]).filter(Boolean);
-  const last = t.activity?.[t.activity.length - 1];
-  // What it's waiting on right now, if anything: the latest 在等 line still in effect, whoever's it is
-  const waitLine = [...(t.activity ?? [])].reverse().find((a) => a.kind === "wait" && stillWaiting(t, a, a.by ? byId[a.by] : undefined));
-  const { steps, stuck } = teamNeeds(t, tasks);
-  const first = steps[0] ? `${steps[0].handBack?.kind === "choice" || steps[0].questions ? "待你决定" : "要你做"}：${steps[0].title}` : stuck[0] ? `${memberLabel(stuck[0])} ${stuckText(stuck[0])}` : "";
-  const n = steps.length + stuck.length;
-  const alone = ms.length <= 1;
-  // Nothing in its feed yet (a task from before feeds, or one just sent out): what its worker last reported, or is doing
-  const fallback = !last ? t.summary || (t.status !== "done" && t.status !== "dropped" ? liveText(t) : "") : "";
-  return (
-    <button data-task-card="" onClick={onOpen} className={clsx("block w-full space-y-1.5 rounded-lg border bg-card p-3 text-left shadow-xs transition-[border-color,box-shadow,transform] duration-150 hover:border-ring/50 hover:shadow-sm active:scale-[0.99]", active && "border-ring")}>
-      <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
-        {alone ? <Bot className="size-3 shrink-0" /> : <Users className="size-3 shrink-0" />}
-        <span className="shrink-0 font-mono">{t.id}</span>
-        {alone ? (
-          <span className="inline-flex min-w-0 items-center gap-1 truncate">
-            · <span className={clsx("size-1.5 shrink-0 rounded-full", memberDot(t))} />
-            {memberLabel(t)}
-          </span>
-        ) : (
-          <span>· {ms.length} 个成员</span>
-        )}
-      </div>
-      <p className={clsx("line-clamp-2 text-[13px] font-medium", t.status === "dropped" && "text-muted-foreground line-through")}>{t.title}</p>
-      {n > 0 && t.status !== "done" && t.status !== "dropped" && (
-        <p className="line-clamp-2 text-[12px] text-warn">
-          {n > 1 && <span className="font-medium">{n} 件等你 · </span>}
-          {first}
-        </p>
-      )}
-      {t.reroute && <p className="text-[12px] text-brand">秘书在按你的意见重新安排…</p>}
-      {last && last !== waitLine && (
-        <p className="line-clamp-2 text-[12px] text-muted-foreground">
-          {last.by && byId[last.by] && <span className="text-foreground/80">{memberLabel(byId[last.by])}</span>}
-          {last.to && byId[last.to] && <span> → {memberLabel(byId[last.to])}</span>}
-          {last.by && byId[last.by] ? "：" : ""}
-          {last.text}
-          <span className="text-muted-foreground/70"> · {ago(last.at)}</span>
-        </p>
-      )}
-      {waitLine && (
-        <p className="line-clamp-2 text-[12px] text-muted-foreground">
-          <span className="shimmer font-medium text-foreground/80">在等</span>
-          {!alone && waitLine.by && byId[waitLine.by] && <span className="text-foreground/80"> · {memberLabel(byId[waitLine.by])}</span>}
-          ：{waitLine.text}
-          <span className="text-muted-foreground/70"> · {ago(waitLine.at)}</span>
-        </p>
-      )}
-      {fallback && <p className="line-clamp-2 text-[12px] text-muted-foreground">{fallback}</p>}
-      {!alone && (
-      <div className="flex flex-wrap items-center gap-1">
-        {ms.map((m) => (
-          <span key={m.id} title={`${m.id} ${m.title}`} className="inline-flex items-center gap-1 rounded-sm bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
-            <span className={clsx("size-1.5 rounded-full", memberDot(m))} />
-            {memberLabel(m)}
-            {m.id === t.id && <span className="text-[10px]">（负责）</span>}
-          </span>
-        ))}
-      </div>
-      )}
-    </button>
-  );
-}
 
 /**
  * A 在等 line still in effect: its member's latest line, and the member still waits on that (wait_for). Shimmers like
@@ -2020,476 +1941,5 @@ export function WorkingRow({ items }: { items: { key: string; face: React.ReactN
 /** One thing in the feed, in time order: a line of activity, a step / decision waiting on the user, a member stuck on them. */
 export type FeedItem = { at: number; key: string } & ({ type: "act"; a: NonNullable<Task["activity"]>[number] } | { type: "ask"; h: Task } | { type: "stuck"; m: Task });
 
-/**
- * Opening a requirement: drawn like a group chat. On top what it is (its request as first put, folded when long) and
- * who works on it; a row per thing waiting on the user, each jumping to it; then the feed, oldest first — members on
- * the left (their avatar opens their chat), the user's answers on the right, what waits on the user right where it was
- * asked. It opens on the latest thing waiting on the user, else at the bottom. 放弃 / 标为完成 are for the whole
- * requirement; chats are only behind the avatars.
- */
-/**
- * Writing to the requirement's members from its drawer, like the chat's input box: one member gets it without an @;
- * with several, @ picks who (one or more). Each gets it right away (tasks.message), and the feed has the line.
- */
-function FeedComposer({ t, ms, act }: { t: Task; ms: Task[]; act: Act }) {
-  const [text, setText] = useState("");
-  const [files, setFiles] = useState<Attachment[]>([]);
-  const attach = useAttach(files, setFiles);
-  const { busy, err, go } = useAction(act);
-  const pick = useRef<HTMLInputElement>(null);
-  const live = ms.filter((m) => m.status !== "dropped" && m.session);
-  const people: AgentInfo[] = live.map((m) => ({ id: m.id, name: memberLabel(m) }));
-  const to = mentionsOf(text, people);
-  const alone = live.length === 1;
-  const ready = !attach.uploading && (text.trim() || files.length) && (alone || to.length > 0) && !busy;
-  if (!live.length) return null;
-  const send = async () => {
-    if (!ready) return;
-    const ok = await go("message", "message", {
-      id: t.id,
-      to: alone ? undefined : to.map((a) => a.id),
-      text,
-      attachments: files.filter((a) => a.path).map((a) => ({ path: a.path, name: a.name })),
-    });
-    if (ok) (setText(""), setFiles([]));
-  };
-  const hint = alone ? `发给 ${memberLabel(live[0])}` : to.length ? `发给 ${to.map((a) => a.name).join("、")}` : "@ 选择发给谁（可以 @ 几个）";
-  return (
-    <div className="px-3 pt-2 pb-1" onDrop={attach.onDrop} onDragOver={attach.onDragOver}>
-      <div className="rounded-2xl border border-border/60 bg-card shadow-md transition-colors focus-within:border-ring/60">
-        {files.length > 0 && (
-          <div className="px-3 pt-3">
-            <AttachmentBar items={files} onChange={setFiles} onPick={attach.add} />
-          </div>
-        )}
-        <MentionArea
-          agents={people}
-          value={text}
-          onChange={setText}
-          onPaste={attach.onPaste}
-          onSubmit={() => void send()}
-          up
-          byName
-          autoFocus={false}
-          className="block max-h-40 min-h-[2.75rem] w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-[14px] leading-relaxed outline-none [field-sizing:content] placeholder:text-muted-foreground max-md:text-[16px]"
-          placeholder={alone ? "发消息给它（回车发送，Shift+回车换行）" : "输入 @ 选成员，再写要说的（回车发送）"}
-        />
-        <div className="flex items-center gap-1 px-2.5 pb-2.5">
-          <button aria-label="加图片或文件" onClick={() => pick.current?.click()} className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
-            <Paperclip className="size-4" />
-          </button>
-          <input ref={pick} type="file" multiple hidden onChange={(e) => (attach.add([...(e.target.files ?? [])]), (e.target.value = ""))} />
-          <span className={clsx("min-w-0 flex-1 truncate text-[12px]", err ? "text-bad" : !alone && !to.length && text.trim() ? "text-warn" : "text-muted-foreground")}>{err || hint}</span>
-          <Button size="icon" className="size-8 rounded-full" aria-label="发送" disabled={!ready} onClick={() => void send()}>
-            {busy ? <Loader2 className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Gerdr's FeedChat (the feed drawn and answered as a chat: lightbox, ↓ to the newest, its input box). A Gerdr from
-// before it has none: the drawer keeps its own list and FeedComposer then.
-type FeedEntry = { key: string; at: number; user?: { text: string; files?: { path: string; name?: string; mime?: string }[] } };
-const FeedChat = (core as unknown as { FeedChat?: <E extends FeedEntry>(p: {
-  id: string;
-  entries: E[];
-  render: (e: E) => React.ReactNode;
-  onSend: (m: { text: string; files: { path: string; name?: string }[] }) => Promise<void>;
-  mentions?: string[];
-  hint?: (text: string) => React.ReactNode;
-  placeholder?: string;
-  jump?: { key: string; seq: number };
-  children?: React.ReactNode;
-}) => React.ReactNode }).FeedChat;
 const PixelLoader = (core as unknown as { PixelLoader?: (p: { className?: string }) => React.ReactNode }).PixelLoader;
 
-/** The user's line as a chat message: 「你对 a、b 说：…」 reads as "@a @b …" in their own bubble. */
-function userText(text: string) {
-  const m = /^你对 (.+?) 说：([\s\S]*)$/.exec(text);
-  return m ? `${m[1].split("、").map((n) => `@${n}`).join(" ")} ${m[2]}`.trim() : text;
-}
-
-/** What the feed's rows are in FeedChat: its items, plus who's working now and the router rearranging, at the end. */
-type Tab = "feed" | "info";
-
-type FeedRow = FeedEntry & ({ type: "item"; x: FeedItem } | { type: "working"; ms: Task[] } | { type: "reroute" } | { type: "empty" } | { type: "sending" });
-
-function TeamDrawer({ t, tasks, byId, act, line, onClose, onGo }: { t: Task; tasks: Task[]; byId: Record<string, Task>; act: Act; /** A feed line to open at (its `at`) */ line?: number; onClose: () => void; onGo: (id: string) => void }) {
-  const { busy, err, go } = useAction(act);
-  const [rejecting, setRejecting] = useState(false);
-  const [feedback, setFeedback] = useState("");
-  // 重新安排: what's wrong with how it was handed out goes to the router, which decides what to do (another
-  // repository, several, keep or stop the old workers); the user doesn't pick repositories, as when creating a task
-  const [rerouting, setRerouting] = useState(false);
-  const [why, setWhy] = useState("");
-  const ms = (t.members ?? []).map((id) => byId[id]).filter(Boolean);
-  const over = t.status === "done" || t.status === "dropped";
-  const request = (t.request ?? t.prompt ?? "").trim();
-  // 动态 (the feed, where the drawer opens), 详情 (the request as written, the latest, links): one at a time under a short header, so a phone keeps the feed in view
-  const [tab, setTab] = useState<Tab>("feed");
-  const files = t.attachments ?? [];
-  const link = (p: string) => (/[\s()]/.test(p) ? `<${p}>` : p);
-  const requestMd = [request, ...files.map((a) => (a.mime?.startsWith("image/") || /\.(png|jpe?g|gif|webp)$/i.test(a.path) ? `![${a.name}](${link(a.path)})` : `[${a.name}](${link(a.path)})`))].filter(Boolean).join("\n\n");
-  // The user's part as on the secretary's page (needsIn): open ones while the requirement is on, records always.
-  // An open one sits at its newest open question: one asked later joins the same item, and must not sit up where
-  // the first was (t63)
-  const needs = needsIn(tasks.filter((x) => x.id === t.id || x.in === t.id)).filter((x) => isRecord(x) || !over);
-  const records = new Set(needs.filter(isRecord).map((x) => (x as { h: Task }).h.id));
-  const items: FeedItem[] = [
-    ...(t.activity ?? []).flatMap((a, i) => (recordedElsewhere(a, records) ? [] : [{ at: a.at, key: `a${i}`, type: "act" as const, a }])),
-    ...needs,
-  ].sort((a, b) => a.at - b.at);
-  // What the jump pill and the scroll on opening point at: what still waits, not records
-  const pending = items.filter((x) => x.type !== "act" && !isRecord(x));
-  const scroller = useRef<HTMLDivElement>(null);
-  const box = useRef<HTMLDivElement>(null);
-  const [jumpTo, setJumpTo] = useState<{ key: string; seq: number }>();
-  const working = ms.filter((m) => m.live?.status === "running");
-  const [outbox, setOutbox] = useState<{ key: string; at: number; text: string; files: { path: string; name?: string }[] }[]>([]);
-  const rows: FeedRow[] = [
-    ...items.map((x): FeedRow => (x.type === "act" && x.a.kind === "user" ? { key: x.key, at: x.at, type: "item", x, user: { text: userText(x.a.text), files: x.a.files } } : { key: x.key, at: x.at, type: "item", x })),
-    ...(!items.length ? [{ key: "empty", at: t.createdAt, type: "empty" as const }] : []),
-    ...(t.reroute ? [{ key: "reroute", at: Date.now(), type: "reroute" as const }] : []),
-    // What the user just sent, shown at once as their message until the board has it as a line (a phone's round trips
-    // through the relay took seconds, and the box emptied with nothing in the feed meanwhile)
-    ...outbox.map((o): FeedRow => ({ key: o.key, at: o.at, type: "sending", user: { text: o.text, files: o.files } })),
-    // Who's on it right now, like the chat's "working…" line: always last
-    ...(working.length && !over ? [{ key: `working:${working.map((m) => m.id).join(",")}`, at: Date.now(), type: "working" as const, ms: working }] : []),
-  ];
-  const rowsKey = JSON.stringify(rows.map((r) => [r.key, r.type === "item" && r.x.type === "act" ? r.x.a.text : r.type === "item" && r.x.type !== "act" ? (r.x.type === "ask" ? r.x.h.updatedAt : r.x.m.updatedAt) : r.type === "working" ? r.ms.map((m) => m.live?.turnStartedAt) : 0]));
-  // The same array until something in it changes: a new one redraws the whole chat list
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const entries = useMemo(() => rows, [rowsKey]);
-  // The jump rows are for what's out of sight: a thing already on screen in the feed would be shown twice (t48: one
-  // line in its feed, the same line again above it)
-  // Where each thing waiting on the user is: on screen, or above / below it (the pill's arrow points there)
-  const [where, setWhere] = useState<Record<string, "in" | "above" | "below">>({});
-  const pendingKeys = pending.map((x) => x.key).join(",");
-  useEffect(() => {
-    const host = FeedChat ? box.current : scroller.current;
-    const root = FeedChat ? null : scroller.current;
-    if (!host || !pendingKeys) return;
-    const io = new IntersectionObserver(
-      (es) =>
-        setWhere((cur) => {
-          const next = { ...cur };
-          for (const e of es) {
-            const k = (e.target as HTMLElement).dataset.feed!;
-            next[k] = e.isIntersecting ? "in" : e.boundingClientRect.top < (e.rootBounds?.top ?? 0) ? "above" : "below";
-          }
-          return next;
-        }),
-      // Any of it showing counts: a long decision card never gets to 30% on a phone, and the pill pointed at it while it filled the screen
-      { root, threshold: 0.01 },
-    );
-    // FeedChat's rows mount as they're drawn (and scroll in): watch for them
-    const seen = new WeakSet<Element>();
-    const scan = () => {
-      for (const k of pendingKeys.split(",")) {
-        const el = host.querySelector(`[data-feed="${k}"]`);
-        if (el && !seen.has(el)) (seen.add(el), io.observe(el));
-      }
-    };
-    scan();
-    const mo = new MutationObserver(scan);
-    mo.observe(host, { childList: true, subtree: true });
-    return () => (io.disconnect(), mo.disconnect());
-  }, [pendingKeys]);
-  // Until the observer has said, nothing counts as away: no pill flashing up on open
-  const away = pending.filter((x) => where[x.key] && where[x.key] !== "in");
-  const jump = (key: string, smooth = true) =>
-    FeedChat ? setJumpTo((j) => ({ key, seq: (j?.seq ?? 0) + 1 })) : scroller.current?.querySelector(`[data-feed="${key}"]`)?.scrollIntoView({ block: "center", behavior: smooth ? "smooth" : "auto" });
-  // Once per opening, not on every refresh: the line asked for, else the latest thing waiting on the user, else the newest line
-  useEffect(() => {
-    const id = requestAnimationFrame(() => {
-      const last = pending[pending.length - 1];
-      const at = line ? (t.activity ?? []).findIndex((a) => a.at === line) : -1;
-      if (at >= 0) jump(`a${at}`, false);
-      else if (last) jump(last.key, false);
-      else if (scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight;
-    });
-    return () => cancelAnimationFrame(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [t.id, line]);
-  const when = (ms: number) => new Date(ms).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
-  const who = (id?: string) => (id ? byId[id] : undefined);
-  const head = (m: Task | undefined, label: string, at: number, tone?: string) => (
-    <div className="flex items-baseline gap-1.5 text-[11px] text-muted-foreground">
-      <span className="font-medium text-foreground/80">{memberLabel(m) || "?"}</span>
-      <span className={tone}>{label}</span>
-      <span className="tabular-nums">{when(at)}</span>
-    </div>
-  );
-  const row = (x: FeedItem) => {
-    // What waits on the user: the same rows as on the secretary's page (NeedRow)
-    if (x.type !== "act") return <NeedRow x={x} lead={t.id} activity={t.activity ?? []} byId={byId} act={act} onGo={onGo} />;
-    // A line of the feed: the same rows as on the secretary's page (LineRow)
-    return <LineRow a={x.a} lead={t.id} activity={t.activity ?? []} byId={byId} />;
-  };
-  // Writing from the drawer (FeedChat's box): to its one member as is; with several, to the ones @-ed
-  const live = ms.filter((m) => m.status !== "dropped" && m.session);
-  const people: AgentInfo[] = live.map((m) => ({ id: m.id, name: memberLabel(m) }));
-  const send = async ({ text, files }: { text: string; files: { path: string; name?: string }[] }) => {
-    if (t.status === "dropped") throw new Error("这个需求已经放弃了");
-    if (!live.length) throw new Error("还没有成员在做：等秘书派出去再发");
-    const to = mentionsOf(text, people);
-    if (live.length > 1 && !to.length) throw new Error("有几个成员：@ 选发给谁（可以 @ 几个）");
-    const o = { key: `sending:${Date.now()}`, at: Date.now(), text, files };
-    setOutbox((x) => [...x, o]);
-    try {
-      // act refreshes the board before it returns: the real line is in the feed by the time this one goes
-      await act("message", { id: t.id, to: live.length > 1 ? to.map((a) => a.id) : undefined, text, attachments: files });
-    } finally {
-      setOutbox((x) => x.filter((y) => y !== o));
-    }
-  };
-  const hint = (text: string) => {
-    if (!live.length) return null;
-    const to = mentionsOf(text, people);
-    const alone = live.length === 1;
-    return (
-      <span className={clsx("truncate px-1 text-[12px]", !alone && !to.length && text.trim() ? "text-warn" : "text-muted-foreground")}>
-        {alone ? `发给 ${memberLabel(live[0])}` : to.length ? `发给 ${to.map((a) => a.name).join("、")}` : "@ 选择发给谁（可以 @ 几个）"}
-      </span>
-    );
-  };
-  const feedRow = (r: FeedRow) => {
-    if (r.type === "item") return row(r.x);
-    // Drawn by FeedChat as the user's own message (it has `user`): nothing of the drawer's
-    if (r.type === "sending") return null;
-    if (r.type === "empty")
-      return <p className="py-8 text-center text-[12px] text-muted-foreground">{t.createdAt < FEEDS_SINCE ? "这是有活动记录之前的任务：看上面的「最新」，或点头像看对话" : "还没有活动"}</p>;
-    if (r.type === "reroute")
-      return (
-        <p className="flex items-center justify-center gap-1.5 px-6 text-center text-[11px] text-muted-foreground">
-          <Loader2 className="size-3 shrink-0 animate-spin" />
-          秘书在重新安排
-          {t.reroute?.router && (
-            <button className="text-brand hover:underline" onClick={() => openChat(t.reroute!.router!)}>
-              看它怎么想
-            </button>
-          )}
-        </p>
-      );
-    // Who's working now, as the chat's "working…" line: each member's face, name and how long its turn has run
-    return <WorkingRow items={r.ms.map((m) => ({ key: m.id, face: <Avatar m={m} lead={m.id === t.id} size="sm" />, name: memberLabel(m), since: m.live?.turnStartedAt }))} />;
-  };
-  return (
-    <Sheet open modal={false} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent
-        showCloseButton={false}
-        aria-describedby={undefined}
-        className="w-full gap-0 sm:max-w-[560px]"
-        onInteractOutside={(e) => {
-          const el = e.target as Element | null;
-          if (!el?.closest?.("[data-gerdr-mount]") || el.closest("[data-task-card]")) e.preventDefault();
-        }}
-      >
-        <SheetTitle className="sr-only">{t.title}</SheetTitle>
-        <div className="flex items-center gap-2 border-b px-4 py-2.5 text-[12px] text-muted-foreground">
-          {ms.length > 1 ? <Users className="size-3.5" /> : <Bot className="size-3.5" />}
-          <span className="shrink-0 font-mono">{t.id}</span>
-          {/* nowrap: on a phone the dates below took the room and "已完成" broke over two lines */}
-          <span className="shrink-0 whitespace-nowrap">· {COLS.find((c) => c.id === colOf(t))?.title}</span>
-          {/* When it was asked for (and finished): the feed starts later, or not at all for older tasks */}
-          <span className="min-w-0 truncate tabular-nums" title={new Date(t.createdAt).toLocaleString("zh-CN")}>
-            · {when(t.createdAt)} 建{t.status === "done" && t.doneAt ? ` · ${when(t.doneAt)} 完成` : ""}
-          </span>
-          <span className="ml-auto" />
-          <Button variant="ghost" size="icon" aria-label="关闭" onClick={onClose}>
-            <X className="size-4" />
-          </Button>
-        </div>
-        {/* What it is and who's on it: stays put while the feed scrolls. Kept short (2026-11-06: request, latest,
-            artifacts and members above the feed left a phone no room for the feed): the rest is under 详情 */}
-        <div className="space-y-2 border-b px-4 pt-3">
-          <h3 className="line-clamp-2 text-[15px] font-medium" title={t.title}>
-            {t.title}
-          </h3>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-            {ms.map((m) => (
-              <span key={m.id} className="inline-flex items-center gap-1.5 text-[12px]" title={m.title}>
-                <Avatar m={m} lead={m.id === t.id} size="sm" />
-                <span className={clsx("size-1.5 rounded-full", memberDot(m))} />
-                <span className="text-muted-foreground">{memberLabel(m)}</span>
-              </span>
-            ))}
-          </div>
-          <div className="-mb-px flex gap-4 text-[13px]">
-            {(
-              [
-                ["feed", "动态"],
-                ["info", "详情"],
-              ] as [Tab, string][]
-            ).map(([k, label]) => (
-              <button
-                key={k}
-                onClick={() => setTab(k)}
-                className={clsx("border-b-2 pb-2 transition-colors", tab === k ? "border-foreground font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-        {tab === "info" && (
-          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-3 text-[13px]">
-            {t.summary && (
-              <section className="space-y-1">
-                <h4 className="text-[12px] text-muted-foreground">最新进展</h4>
-                <p className="whitespace-pre-wrap">{t.summary}</p>
-              </section>
-            )}
-            <section className="space-y-1">
-              <h4 className="text-[12px] text-muted-foreground">原始需求{files.length > 0 ? ` · ${files.length} 个附件` : ""}</h4>
-              {/* What the user wrote as they wrote it, with the images they pasted (Gerdr's Markdown draws ![](path)) */}
-              <Md className="text-[13px] text-foreground/90">{requestMd || t.title}</Md>
-            </section>
-            {ms.some((m) => m.links?.length) && (
-              <section className="space-y-1.5">
-                <h4 className="text-[12px] text-muted-foreground">产物链接</h4>
-                {ms.map((m) => (
-                  <Links key={m.id} t={m} />
-                ))}
-              </section>
-            )}
-          </div>
-        )}
-        {/* The feed stays mounted under the other tabs: its scroll place, draft and jumps carry on */}
-        <div className={clsx("flex min-h-0 flex-1 flex-col", tab !== "feed" && "hidden")}>
-        {FeedChat ? (
-          // The feed as a chat (Gerdr's FeedChat): members' lines drawn here, the user's as their own messages, its input
-          // box writing to the members (one without @, several by @)
-          <div ref={box} className="relative min-h-0 flex-1">
-            <FeedChat
-              // With the panel's name: a Gerdr before d3437e0 kept every panel's feeds in one place by id, so the same task
-              // number in two installs (t35 in each) showed one's feed in the other
-              id={`${project}.drawer.${t.id}`}
-              entries={entries}
-              render={(r: FeedRow) => <div className="px-1 py-1.5">{feedRow(r)}</div>}
-              onSend={send}
-              mentions={live.map((m) => memberLabel(m))}
-              hint={hint}
-              placeholder={live.length > 1 ? "输入 @ 选成员，再写要说的（回车发送）" : "发消息给它（回车发送，Shift+回车换行）"}
-              jump={jumpTo}
-            >
-            {away.length > 0 && (
-              <button
-                onClick={() => jump(away[away.length - 1].key)}
-                className="absolute top-14 left-1/2 z-20 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-warn/50 bg-background px-3 py-1 text-[12px] shadow-sm hover:bg-warn/10"
-              >
-                <AlertTriangle className="size-3.5 text-warn" />
-                {away.length} 件等你处理
-                <ArrowRight className={clsx("size-3.5 text-muted-foreground", where[away[away.length - 1].key] === "above" ? "-rotate-90" : "rotate-90")} />
-              </button>
-            )}
-            </FeedChat>
-          </div>
-        ) : (
-          <>
-          {/* The feed, with a floating way to what waits on the user when it's out of sight: floating, so showing and
-              hiding it never moves the feed (a row above it did, and jumped as the user scrolled) */}
-          <div className="relative flex min-h-0 flex-1 flex-col">
-          {away.length > 0 && (
-            <button
-              onClick={() => jump(away[away.length - 1].key)}
-              className="absolute top-3 left-1/2 z-10 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-warn/50 bg-background px-3 py-1 text-[12px] shadow-sm hover:bg-warn/10"
-            >
-              <AlertTriangle className="size-3.5 text-warn" />
-              {away.length} 件等你处理
-              <ArrowRight className={clsx("size-3.5 text-muted-foreground", where[away[away.length - 1].key] === "above" ? "-rotate-90" : "rotate-90")} />
-            </button>
-          )}
-          <div ref={scroller} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
-            {items.length ? (
-              items.map((x) => (
-                <div key={x.key} data-feed={x.key}>
-                  {row(x)}
-                </div>
-              ))
-            ) : (
-              // A task from before feeds has none: say where its story is instead of looking broken
-              <p className="py-8 text-center text-[12px] text-muted-foreground">{t.createdAt < FEEDS_SINCE ? "这是有活动记录之前的任务：看上面的「最新」，或点头像看对话" : "还没有活动"}</p>
-            )}
-            {t.reroute && (
-              <p className="flex items-center justify-center gap-1.5 px-6 text-center text-[11px] text-muted-foreground">
-                <Loader2 className="size-3 shrink-0 animate-spin" />
-                秘书在重新安排
-                {t.reroute.router && (
-                  <button className="text-brand hover:underline" onClick={() => openChat(t.reroute!.router!)}>
-                    看它怎么想
-                  </button>
-                )}
-              </p>
-            )}
-          </div>
-          </div>
-          {t.status !== "dropped" && <FeedComposer t={t} ms={ms} act={act} />}
-          </>
-        )}
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-2 border-t px-4 py-2.5">
-          {err && <p role="alert" className="mr-auto text-[12px] text-bad">{err}</p>}
-          {rejecting && (
-            // 打回: what's wrong goes to the lead, which reworks it (and tells its teammates)
-            <div className="flex w-full gap-2">
-              <input autoFocus value={feedback} onChange={(e) => setFeedback(e.target.value)} placeholder="哪里不对，要怎么改" className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]" />
-              <Button disabled={!feedback.trim() || !!busy} onClick={async () => (await go("reject", "reject", { id: t.id, feedback })) && (setFeedback(""), setRejecting(false))}>
-                {busy === "reject" ? <Loader2 className="size-3.5 animate-spin" /> : <Undo2 className="size-3.5" />}打回
-              </Button>
-              <Button variant="ghost" size="icon" aria-label="取消" onClick={() => setRejecting(false)}>
-                <X className="size-4" />
-              </Button>
-            </div>
-          )}
-          {rerouting && (
-            <div className="flex w-full gap-2">
-              <input autoFocus value={why} onChange={(e) => setWhy(e.target.value)} placeholder="跟秘书说哪里不对，比如：仓库错了，应该在 operation" className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]" />
-              <Button disabled={!why.trim() || !!busy} onClick={async () => (await go("reroute", "reroute", { id: t.id, feedback: why })) && (setWhy(""), setRerouting(false))}>
-                {busy === "reroute" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}发给秘书
-              </Button>
-              <Button variant="ghost" size="icon" aria-label="取消" onClick={() => setRerouting(false)}>
-                <X className="size-4" />
-              </Button>
-            </div>
-          )}
-          {!over && !t.reroute && !rerouting && !rejecting && (
-            <Button variant="ghost" className="mr-auto" disabled={!!busy} title="派得不对（仓库、agent、该几个人做）：告诉秘书，它来重新安排" onClick={() => setRerouting(true)}>
-              <Route className="size-3.5" />
-              重新安排
-            </Button>
-          )}
-          {t.status === "review" && !rejecting && (
-            <>
-              <Button variant="outline" disabled={!!busy} onClick={() => setRejecting(true)}>
-                <Undo2 className="size-3.5" />
-                打回
-              </Button>
-              <Button disabled={!!busy} onClick={() => go("accept", "accept", { id: t.id })}>
-                {busy === "accept" ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}通过
-              </Button>
-            </>
-          )}
-          {!over && t.status !== "review" && (
-            <>
-              <DropButton busy={!!busy} onDrop={() => go("drop", "drop", { id: t.id })} />
-              <Button variant="outline" disabled={!!busy} onClick={() => go("accept", "accept", { id: t.id })}>
-                <Check className="size-3.5" />
-                {ms.length > 1 ? "整个需求标为完成" : "标为完成"}
-              </Button>
-            </>
-          )}
-          {t.status === "dropped" && (
-            <Button variant="outline" disabled={!!busy} onClick={() => go("restore", "restore", { id: t.id })}>
-              <Undo2 className="size-3.5" />
-              恢复
-            </Button>
-          )}
-          {t.status === "done" && <span className="text-[12px] text-ok">已完成</span>}
-        </div>
-      </SheetContent>
-    </Sheet>
-  );
-}

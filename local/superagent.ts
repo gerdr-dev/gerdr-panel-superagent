@@ -8,7 +8,7 @@ import { workflow } from "./_config";
 
 /** task: on a reroute, an existing worker of the card kept for this part (it is told, not restarted). */
 type Part = { repo: string; agent?: string; model?: string; effort?: string; worktree?: boolean; title?: string; prompt?: string; task?: string };
-type Decision = { item: string; decision?: "accept" | "attach" | "stop" | "ignore"; title?: string; parts?: Part[]; team?: boolean; task?: string; reason?: string; reply?: string; rule?: string };
+type Decision = { item: string; decision?: "accept" | "attach" | "stop" | "ignore"; title?: string; parts?: Part[]; task?: string; reason?: string; reply?: string; rule?: string };
 
 /**
  * The main session's decisions on a batch, in one call: { decisions: [{ item, decision?, title?, parts?, task?,
@@ -47,11 +47,11 @@ async function one(d: Decision, ctx: Ctx) {
         // Observe mode (dsh's default for proactive work): recorded with what it would have done, not done. 去向
         // shows it; the user can have it done (superagent.run) or switch the mode once the judgements look right.
         if (workflow(ctx).proactive !== "on") {
-          settle({ state: "observed", rule: d.rule.trim(), would: { title: d.title, parts: d.parts, team: d.team }, reason: undefined });
+          settle({ state: "observed", rule: d.rule.trim(), would: { title: d.title, parts: d.parts }, reason: undefined });
           return { item: it.id, observed: true };
         }
       }
-      return accept(ctx, it, d.title, d.parts, d.rule?.trim(), d.team);
+      return accept(ctx, it, d.title, d.parts, d.rule?.trim());
     }
     case "attach": {
       const t = live(ctx, d.task);
@@ -186,7 +186,7 @@ async function rearrange(d: Decision, self: Task, ctx: Ctx) {
   for (const p of rest) {
     try {
       const t = (await add(
-        { title: p.title, prompt: `${p.prompt?.trim() || req}${told}`, repo: p.repo, agent: p.agent, model: p.model, effort: p.effort, worktree: p.worktree, attachments: self.attachments, from: self.id, router: self.router, routerClosed: true, start: true, team: self.id },
+        { title: p.title, prompt: `${p.prompt?.trim() || req}${told}`, repo: p.repo, agent: p.agent, model: p.model, effort: p.effort, worktree: p.worktree, attachments: self.attachments, from: self.id, router: self.router, routerClosed: true, start: true },
         ctx,
       )) as Task;
       changes.push(`加了 ${memberName(t)}`);
@@ -195,15 +195,16 @@ async function rearrange(d: Decision, self: Task, ctx: Ctx) {
     }
   }
   for (const m of gone) if (m.id !== self.id) changes.push(`停了 ${memberName(m)}`);
-  const now = members(load(ctx).store, self).filter((m) => m.status !== "dropped" && m.status !== "done");
   for (const [id, p] of kept) {
     const m = find(load(ctx).store, id);
     const yours = p.prompt?.trim() ? `\n你这份现在是：${p.prompt.trim()}` : "";
-    await say({ id, text: `调度按用户的意见重新安排了这件事。用户说：${fb}${yours}\n现在一起做的：${now.map(memberName).join("、")}（my_task 里有）。` }, ctx).catch((e: any) => errors.push(`${id}：${e?.message ?? e}`));
+    await say({ id, text: `调度按用户的意见重新安排了这件事。用户说：${fb}${yours}` }, ctx).catch((e: any) => errors.push(`${id}：${e?.message ?? e}`));
     if (p.prompt?.trim()) changes.push(`${memberName(m)} 改做：${p.prompt.trim().slice(0, 40)}`);
   }
   settle(`调度重新安排：${changes.join("；") || "保持不变"}`);
   if (errors.length) throw new Error(`已重新安排 ${self.id}；没成的：\n${errors.join("\n")}`);
+  // The card and the cards split off it that are still going
+  const now = load(ctx).store.tasks.filter((m) => (m.id === self.id || m.from === self.id) && m.status !== "dropped" && m.status !== "done");
   return { item: self.id, tasks: now.map((m) => m.id) };
 }
 
@@ -212,7 +213,7 @@ async function rearrange(d: Decision, self: Task, ctx: Ctx) {
  * it came from. Taken under a proactive rule (nobody asked): the worker is told to stay within that rule, and nobody
  * is told it was taken — no one is waiting for an answer.
  */
-async function accept(ctx: Ctx, it: Item, title: string | undefined, parts: Part[], rule?: string, team?: boolean) {
+async function accept(ctx: Ctx, it: Item, title: string | undefined, parts: Part[], rule?: string) {
   const e = it.event;
   const settle = (patch: Partial<Item>) => updateState(ctx, (s) => Object.assign(findItem(s, it.id), { decidedAt: Date.now(), ...patch }));
   const text = (e.text ?? "").trim() || e.title || "";
@@ -231,7 +232,7 @@ async function accept(ctx: Ctx, it: Item, title: string | undefined, parts: Part
   )) as Task;
   let ids = [t.id];
   try {
-    ids = ((await dispatch({ id: t.id, parts, team }, ctx)) as Task[]).map((x) => x.id);
+    ids = ((await dispatch({ id: t.id, parts }, ctx)) as Task[]).map((x) => x.id);
   } catch (err: any) {
     // Accepted all the same: the task is on the board; only sending it out is to redo, as a board task
     settle({ state: "accepted", tasks: ids, rule, reason: undefined });
@@ -246,7 +247,7 @@ async function accept(ctx: Ctx, it: Item, title: string | undefined, parts: Part
 export async function execute(input: { id: string }, ctx: Ctx) {
   const it = findItem(state(ctx), input?.id ?? "");
   if (it.state !== "observed" || !it.would) throw new Error(`${it.id} 不是「只记录」下记的（${it.state}）`);
-  return accept(ctx, it, it.would.title, it.would.parts as Part[], it.rule, (it.would as any).team);
+  return accept(ctx, it, it.would.title, it.would.parts as Part[], it.rule);
 }
 
 function live(ctx: Ctx, id?: string): Task {

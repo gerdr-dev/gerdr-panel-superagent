@@ -13,7 +13,7 @@ description: 用户本人的工作方式：派活怎么挑仓库和模型、代�
 | 参考 | 什么时候看 |
 |---|---|
 | [references/board.md](references/board.md) | 你是看板派出去的 worker 时：每次停下怎么汇报、等别人（同事回话、job 跑完）怎么等、你开的会话来问问题时怎么办 |
-| [references/activity.md](references/activity.md) | 和队友一起做一个需求时：需求的活动里记什么、记多细（`message_user`、`tell` 的 `summary`） |
+| [references/activity.md](references/activity.md) | 做看板任务时：怎么跟我说话、结论写在哪、什么时候用 `message_user` |
 | [references/secretary.md](references/secretary.md) | 你是我的秘书（Superagent）时：怎么跟我说话、什么时候打扰我、简报怎么写 |
 | [references/dispatch.md](references/dispatch.md) | 你是我的秘书、在派活时：外面来的消息接不接、怎么派 |
 | [references/routing.md](references/routing.md) | 派活的时候：怎么挑仓库，什么时候换更强或更便宜的模型 |

@@ -267,14 +267,17 @@ async function brief(ctx: Ctx): Promise<string> {
       `- attach：${ex({ item: "c5", decision: "attach", task: "t9" })}；stop：${ex({ item: "c6", decision: "stop", task: "t9", reason: "…" })}\n` +
       `- decide 会替你建任务、派出去、回原对话一句、记下这条消息的去向。\n\n` +
       `## 看板任务 [任务 tN]：用看板的命令（和用户点按钮是同一套）\n` +
-      `- 派出去：gerdr panel run tasks.dispatch '${ex({ id: "t12", parts: [{ repo: "/绝对路径" }] })}'（可加 title、team）\n` +
+      `- 派出去：gerdr panel run tasks.dispatch '${ex({ id: "t12", parts: [{ repo: "/绝对路径" }] })}'（可加 title）\n` +
       `- 它是在管别的任务：停掉 tasks.drop '${ex({ id: "t9", reason: "…" })}'；转告 tasks.say '${ex({ id: "t9", text: "…" })}'；` +
       `接手一个停掉的任务，派的时候加 "from": "t9"，会带上它的进展和对话；tN 只是条指令、照做完了：tasks.edit '${ex({ id: "t12", status: "done", summary: "停了 t9" })}'\n` +
-      `- 用户对某张卡的安排有意见（[重新安排 tN]，比如仓库错了）：用 superagent.decide 照反馈重新安排这张卡，item 就是 tN（它要记下这次安排完了没有）。重新派给 parts（新的完整安排：要留下的已有 worker 那份写 "task": "它的 id"，会收到反馈和这份的 prompt；没留下的停掉；没写 task 的开新 worker，都在这张卡上，第一份新的接负责人的位置）；只是让现在的 worker 自己改，写 "decision": "attach"（task 不写就给负责人）；整件事不做了，写 "decision": "stop" 和 reason。\n` +
+      `- 用户对某张卡的安排有意见（[重新安排 tN]，比如仓库错了）：用 superagent.decide 照反馈重新安排这张卡，item 就是 tN（它要记下这次安排完了没有）。重新派给 parts（新的完整安排：要留下的已有 worker 那份写 "task": "它的 id"，会收到反馈和这份的 prompt；没留下的停掉；没写 task 的开新 worker，第一份接这张卡，其余各是一张新卡）；只是让现在的 worker 自己改，写 "decision": "attach"；整件事不做了，写 "decision": "stop" 和 reason。\n` +
       `\n## parts（decide 的 accept 和 tasks.dispatch 一样）\n` +
       `- parts 每项一份活：repo 必填；agent、model、effort 不写就用下面的默认，简单的活可以给便宜的模型；worktree 默认 false。\n` +
       `- 只有一份：就是这件事本身，不用写 prompt。拆成几份并行（用户 @ 了几个 agent，或者活明显能分开做）：每份写 title（十几个字）和 prompt（这一份做什么、和别的份怎么配合）；同一个仓库有两份以上时都写 "worktree": true。\n` +
-      `- 几份是同一个需求、要互相配合（前端接后端的新接口）：加 "team": true，成了一张卡片、几个成员，第一份是负责人，成员之间直接对话，不经过你。互不相干的几件事不加，各是一张卡。看不出要动别的仓库就只派一份，worker 发现了会自己拉队友。\n` +
+      `- 每份都是一张独立的卡、一个 worker。一份要用另一份的结果（前端接后端的新接口）：先派被依赖的那份，另一份用 tasks.add 建好、带 "blockedBy": ["tN"]、不带 start，等你收到 tN 做完的 [动态] 再派，交代里写上 tN 的结果在哪。\n` +
+      `- **几份并行之前，先找它们该共用的东西**（同一套组件、风格、规范、规划文档）：在仓库里找到了，就把源码和文档的路径写进每一份的 prompt，写明「用这里的，不要自己另写一套」；` +
+      `只给成片、截图、效果图不够，worker 只能照着重画。还没有共用的底子，就先只派一份「打底」（抽出共用组件、写好规范），其余几份照上一条建成等它的卡。` +
+      `交代里说清哪些是共用的、并行时只读，要改共用的就在回复里提出来，不要各自复制一份改；别只写「别碰别人的文件」。\n` +
       `- 任务的标题是从内容第一行截的，不够好就加 "title"。\n` +
       `- 命令报错就按错误改了再发那几条。`,
     `## 可选的 agent\n${agentLines.join("\n")}`,
@@ -310,10 +313,10 @@ function talkText(ctx: Ctx) {
       `- 用户问到的、你要说的，先查事实再说：\`gerdr panel run secretary.status\` 给出等他的事（带问题的 id 和选项）、在做的、待验收的、最近完成的。` +
       `不要凭记忆说「做完了」。问到某一件事的细节（做到哪、动态里写了什么、开了哪个 MR、它最后说了什么）：` +
       `\`gerdr panel run tasks.list '${ex({ id: "t12" })}'\` 只给这一件（和它的成员），别不带 id 拉整块看板。\n` +
-      `- **说到某个需求的结果、方案、结论时，附上 worker 的原话**：message_user 带 \`"quote": "t12"\`，它最新说的那段会原样显示在你的消息下面，` +
+      `- **说到某个任务的结果、方案、结论时，附上 worker 的原话**：message_user 带 \`"quote": "t12"\`，它 worker 最后一轮的回复会原样显示在你的消息下面，` +
       `用户能展开、能直接回它。你只说一句为什么要他看、要他做什么，不要把内容再缩写一遍（缩写会丢掉他要的细节）。\n` +
-      `- **用户追问某个需求里的细节**（方案里为什么这样、某个数字哪来的、它具体改了什么）：别凭你看到的摘要答，转给做它的 worker —— ` +
-      `\`gerdr panel run tasks.message '${ex({ id: "t12", to: ["t12"], text: "用户的原话" })}'\`（to 是那个成员的任务号），` +
+      `- **用户追问某个任务里的细节**（方案里为什么这样、某个数字哪来的、它具体改了什么）：别凭你看到的摘要答，转给做它的 worker —— ` +
+      `\`gerdr panel run tasks.message '${ex({ id: "t12", text: "用户的原话" })}'\`，` +
       `再用 message_user 带 \`"follow": "t12"\` 说一句「问了 t12，它的回答会接在下面」。它的回答会显示在秘书页上，你不用转述。` +
       `跨需求的、要汇总的（哪些在等他、进度、日报）才由你自己答。\n` +
       `- 用户交给你一件事：是活就派（\`tasks.add\` 带 \`"start": true\`，你知道去哪个仓库就给 \`repo\`，不知道就不给，交给下面的派活）；` +
@@ -428,7 +431,7 @@ export async function toMain(ctx: Ctx, blocks: string[], why: Why = "route", att
 }
 
 /** Its message to the user (board.ts message_user, called from the secretary's session): a line on the secretary's page. */
-export function secretaryMessage(ctx: Ctx, input: { text: string; files?: { path: string; name?: string }[]; brief?: boolean; quote?: { task: string; at: number }; follow?: string }) {
+export function secretaryMessage(ctx: Ctx, input: { text: string; files?: { path: string; name?: string }[]; brief?: boolean; quote?: { task: string; at: number; text: string }; follow?: string }) {
   const e = append(ctx, {
     kind: input.brief ? "brief" : "message",
     by: SECRETARY_ID,

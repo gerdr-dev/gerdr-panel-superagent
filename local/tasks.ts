@@ -169,16 +169,15 @@ export async function list(input: unknown, ctx: Ctx) {
       .send(
         n.session,
         n.reply
-          ? `[看板] 用户在需求面板里等你回话（任务 ${n.id}）：用 message_user 工具回他。他看的是面板，不看你的对话，你回复里的文字他看不到。`
+          ? `[看板] 用户在秘书页上等你回话（任务 ${n.id}）：用 message_user 工具回他。这个问题是从秘书页来的，他在那里看回答，不在这个对话里。`
           : n.out.length
           ? `[看板] 你把活派出去了，但没有等它（任务 ${n.id}）：${n.out.join("；")}。\n` +
               `派活的人要自己盯着：现在用 wait_for 等它，what 写等谁做什么，wake 里一定要有 {"type":"time","minutes":N} 作超时（按它要做多久估）。` +
               `它回报会先叫醒你；到了超时还没回报，你去看它卡在哪（gerdr session read），卡住或那台电脑下线了就换个做法或 ask_human。然后结束这一轮。`
-          : `[看板] 你这一轮停下了，但看板上看不出接下来要什么（任务 ${n.id}）。用户看的是看板，不看聊天：\n` +
+          : `[看板] 你这一轮停下了，但看板上看不出接下来要什么（任务 ${n.id}）。看板的列只认这些工具，光在回复里说不算：\n` +
           `- 要用户决定 / 给东西：用 ask_human 登记（决定带 options），然后结束这一轮；\n` +
           `- 做完了、交付了、要用户验收：用 task_update 报对应的 state；\n` +
           `- 在等别人（同事回话、job / 发布跑完）：用 wait_for 说等什么、在哪个对话等回复，一定带 {"type":"time"} 超时，然后结束这一轮；\n` +
-          `- 在等队友（同一个需求的另一个成员）：先 tell 它要什么，再 wait_for {"type":"teammate"} 加超时，然后结束这一轮；\n` +
           `- 还有能做的：接着做，别停。\n` +
           `只补汇报，别重复聊天里说过的话。`,
       )
@@ -677,8 +676,8 @@ export async function message(input: { id: string; to?: string[]; text: string; 
     await wake(ctx, m.id, {
       how: "你发了消息",
       text:
-        `[看板] 用户在需求的面板里对你说${others.length ? `（同时发给了 ${others.map((x) => `${x.id}（${name(x)}）`).join("、")}，谁做哪部分不清楚就先和它说好）` : ""}：\n\n${text}${list}\n\n` +
-        `回他用 message_user 工具：他在面板里看，不看你的对话。`,
+        `[看板] 用户在秘书页上问你：\n\n${text}${list}\n\n` +
+        `回他用 message_user 工具：这个问题是从秘书页来的，他在那里看你的回答。`,
       files: files.map((a) => a.path),
       resume: true,
       // One line for all of them, written with the first
@@ -846,15 +845,12 @@ async function route(id: string, prompt: string, ctx: Ctx) {
 type Part = { repo: string; agent?: string; model?: string; effort?: string; worktree?: boolean; title?: string; prompt?: string };
 
 /**
- * team: the parts are one requirement worked on together (前后端一个功能): the first is the lead and the card, the
- * others its members (team), talking to each other straight. Without it, parallel parts are tasks of their own (from).
- *
  * Sends a task out in one go, as the router decided: { id, title?, parts: [{ repo, agent?, model?, effort?, worktree?,
  * title?, prompt? }] }. One part is the task itself. Several run in parallel: the first stays this task (its title /
  * prompt narrowed to that part), each other one becomes a new task split off it (`from`), with the same attachments.
  * from: a task this one takes over (usually just dropped with tasks.drop): its progress and conversation go in the prompt.
  */
-export async function dispatch(input: { id: string; title?: string; parts: Part[]; team?: boolean; from?: string }, ctx: Ctx) {
+export async function dispatch(input: { id: string; title?: string; parts: Part[]; from?: string }, ctx: Ctx) {
   const parts = input?.parts ?? [];
   if (!parts.length) throw new Error(`parts 至少一份：{"id":"${input?.id}","parts":[{"repo":"/绝对路径"}]}`);
   for (const p of parts) {
@@ -878,17 +874,16 @@ export async function dispatch(input: { id: string; title?: string; parts: Part[
   const { store } = load(ctx);
   const t = find(store, input.id);
   const [first, ...rest] = parts;
-  // Title stays the requirement's (team) or narrows to the first part (split); the request's own words are kept either way
-  const title = (split && !input.team ? first.title : undefined) || input.title;
+  // Split: the title narrows to the first part (each part is a task of its own)
+  const title = (split ? first.title : undefined) || input.title;
   if (title) edit({ id: t.id, title }, ctx);
-  if (split && input.team && t.prompt && !t.request) edit({ id: t.id, request: t.prompt }, ctx);
   const out: Task[] = [await start({ id: t.id, repo: first.repo, agent: first.agent, model: first.model, effort: first.effort, worktree: first.worktree, prompt: split ? first.prompt : undefined }, ctx)];
   const errors: string[] = [];
   for (const p of rest) {
     try {
       out.push(
         (await add(
-          { title: p.title, prompt: p.prompt, repo: p.repo, agent: p.agent, model: p.model, effort: p.effort, worktree: p.worktree, attachments: t.attachments, from: t.id, router: t.router, routerClosed: true, start: true, ...(input.team ? { team: t.id } : {}) },
+          { title: p.title, prompt: p.prompt, repo: p.repo, agent: p.agent, model: p.model, effort: p.effort, worktree: p.worktree, attachments: t.attachments, from: t.id, router: t.router, routerClosed: true, start: true },
           ctx,
         )) as Task,
       );
@@ -896,8 +891,6 @@ export async function dispatch(input: { id: string; title?: string; parts: Part[
       errors.push(`${p.title ?? p.repo}：${e?.message ?? e}`);
     }
   }
-  if (input.team && out.length > 1)
-    update(ctx, (s) => activity(s, find(s, t.id), { kind: "join", text: `一起做：${out.map((x) => `${x.id}（${x.repo?.split("/").pop()}）${x.title}`).join("；")}` }));
   if (errors.length) throw new Error(`已派出 ${out.map((x) => x.id).join("、")}；没派出去的：\n${errors.join("\n")}`);
   return out;
 }

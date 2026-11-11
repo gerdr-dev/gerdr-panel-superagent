@@ -4,21 +4,13 @@
 // block couldn't do: take back a human step the user no longer needs to do, and answer with ids.
 
 import { applyBlock } from "./_apply";
-import { activity, bouncesOf, find, load, memberName, members, note, reqOf, splitRef, teamOf, update, type Store, type Task } from "./_store";
+import { activity, find, load, members, note, reqOf, splitRef, teamOf, update, type Store, type Task } from "./_store";
 import { handBack, isMain, secretaryMessage } from "./_main";
 import { waitCard } from "./waits";
 import { eventCard } from "./_cards";
 import { endWaits, isOutside, open, question } from "./_waits";
-import { wake } from "./_wake";
-import { add } from "./tasks";
 import { GENERAL, MEMORY, nameOf } from "./_memory";
 import { skillFile } from "./_user";
-
-/**
- * Teammate messages in a row with no part done, nothing for review and no word from the user: past this the members
- * are going round (前端说是后端的问题，后端说是前端的), and tell makes them put it to the user instead.
- */
-const BOUNCE_LIMIT = 8;
 
 const STEP = {
   type: "object",
@@ -86,52 +78,19 @@ export const tools = {
     input: { type: "object", properties: { event: { type: "string" }, reason: { type: "string", description: "Why it isn't this task's, in a sentence" } }, required: ["event", "reason"] },
   },
   my_task: {
-    description: "Your board task as the board sees it: status, summary, artifacts, the human steps you asked for (open or done, with what was handed back), and — when you work with teammates on one requirement — who they are, where they stand and the requirement's recent activity.",
+    description: "Your board task as the board sees it: status, summary, artifacts, the human steps you asked for (open or done, with what was handed back),.",
     input: { type: "object", properties: {} },
-  },
-  add_teammate: {
-    description:
-      "Bring another agent onto your requirement, working in another repository (the frontend for your backend, say), when your work needs changes there. It becomes a member of the same requirement: one card for the user, and you two talk straight with tell — no one relays. One member per repository: if the repository already has one, tell it instead. Picking the repository: the user's repository list (`gerdr panel run tasks.repos`).",
-    input: {
-      type: "object",
-      properties: {
-        repo: { type: "string", description: "Absolute path of the repository it works in" },
-        title: { type: "string", description: "Its part in a dozen words (前端：登录页接新接口)" },
-        prompt: {
-          type: "string",
-          description: "What it needs that it can't see from your chat: what to do, what's decided, where the contract is (an API doc / MR link, not its text pasted), what you need back from it.",
-        },
-        agent: { type: "string" },
-        model: { type: "string" },
-        effort: { type: "string" },
-        worktree: { type: "boolean", description: "A git worktree of its own (only when another member already works in that repository)" },
-      },
-      required: ["repo", "prompt"],
-    },
-  },
-  tell: {
-    description:
-      "Tell a teammate (another member of your requirement) something it must know now: your part is ready (with the doc / MR link), what failed when you tried theirs (with the error), a change of plan. It gets it right away, even mid-step (a build it should stop). With summary, a line goes in the requirement's activity for the user. Waiting for its answer: wait_for with {type: teammate} and a {type: time} timeout.",
-    input: {
-      type: "object",
-      properties: {
-        to: { type: "string", description: "The teammate's task id (my_task lists them)" },
-        text: { type: "string", description: "The message, complete: what it needs to act on, links rather than pasted contents" },
-        summary: { type: "string", description: "A line for the requirement's activity feed, which the user reads. Only when the user's rules say this message belongs there (the my-workflow skill, references/activity.md); left out, the message stays between you two" },
-      },
-      required: ["to", "text"],
-    },
   },
   message_user: {
     description:
-      "Says something to the user: a line in the feed they follow (your requirement's, or the secretary's page if you are the secretary), shown in your chat too. Your reply text and your chat are not what they read. Whenever they spoke to you, answer with this; and it is your one way to tell them anything — a result, where things stand when you stop. What deserves a line, and what never does, is the user's own rule: the my-workflow skill, references/activity.md — read it before writing one. Finishing (task_update done / review), asking the user (ask_human), waiting (wait_for) and pulling in a teammate add their own lines; don't repeat them here. Progress in a line; a result, plan or findings in full, as you'd write them in your chat (the feed folds long ones), and then your chat reply only says it's on the board. Questions for the user go in ask_human, not here. In their language, Markdown; a file to look at as ![](/absolute/path).",
+      "Only for the secretary's page: a message reaches you from there (\"[看板] 用户在秘书页上…\") and the user reads your answer there, not in this chat — answer it with this. The secretary itself says everything to the user with it. Anything else you have to say (a result, a plan, where things stand), say in your reply as usual: opening your task on the board opens this chat. In their language, Markdown; a file to look at as ![](/absolute/path).",
     input: {
       type: "object",
       properties: {
         text: { type: "string" },
         files: { type: "array", items: { type: "object", properties: { path: { type: "string" }, name: { type: "string" } }, required: ["path"] }, description: "Files that go with it (absolute paths)" },
         brief: { type: "boolean", description: "The secretary's briefing (only the secretary)" },
-        quote: { type: "string", description: "Only the secretary: a requirement's id (t12). Its worker's latest line (a result, a plan) is shown under your message as the worker wrote it; your text says why it matters / what the user has to do, not the content again" },
+        quote: { type: "string", description: "Only the secretary: a task's id (t12). Its worker's last reply (a result, a plan) is shown under your message as the worker wrote it; your text says why it matters / what the user has to do, not the content again" },
         follow: { type: "string", description: "Only the secretary: the member task you passed the user's question to with tasks.message. Its answer shows under your message on the secretary's page" },
       },
       required: ["text"],
@@ -155,23 +114,14 @@ export function instructions(input: unknown, ctx: Ctx) {
   const who = ctx.caller.session;
   const t = who && load(ctx).store.tasks.find((x) => x.owner === "agent" && (x.session === who || x.sessions?.includes(who)));
   if (!t) return "";
-  const { store } = load(ctx);
-  const root = teamOf(store, t);
-  const mates = root ? members(store, root).filter((x) => x.id !== t.id && x.status !== "dropped") : [];
-  const team = root
-    ? ` You are one member of requirement ${root.id} ("${root.title}")${root.id === t.id ? ", and its lead: you say when the whole of it is done" : `, led by ${memberName(root)}`}. ` +
-      `Teammates, each in its own repository: ${mates.map((x) => `${memberName(x)} "${x.title}"`).join("; ") || "none yet"}. ` +
-      `Talk to them straight with tell (it reaches them at once), wait for them with wait_for {type: teammate} plus a {type: time} timeout; ` +
-      `the user follows the requirement's activity feed, not your chats — what goes in it is their my-workflow skill, ${skillFile(ctx, "my-workflow/references/activity.md")}.`
-    : "";
   return (
-    `You are the worker of task ${t.id} ("${t.title}") on the user's Superagent board. They follow it on the board, not in ` +
-    `this chat. How to work on it (reporting with these tools, asking them, starting other agents, teammates) is their my-workflow ` +
+    `You are the worker of task ${t.id} ("${t.title}") on the user's Superagent board. Opening the task on the board opens ` +
+    `this chat: the user reads it here, so say things in your replies as you normally would, results in full. The board's ` +
+    `columns follow what you report with these tools. How to work on it (reporting, asking them, starting other agents) is their my-workflow ` +
     `skill, ${skillFile(ctx, "my-workflow/references/board.md")}: read it before you report or stop. my_task shows the task as the board sees it. ` +
     `What the user's memory says about this repository and all of them came in your first message; the files are ` +
     `${ctx.fs.root}/${MEMORY}/${t.repo ? nameOf(t.repo) : "…"}.md and ${GENERAL}.md there — add to them with remember ` +
-    `(when: ${skillFile(ctx, "my-workflow/references/memory.md")}).` +
-    team
+    `(when: ${skillFile(ctx, "my-workflow/references/memory.md")}).`
   );
 }
 
@@ -416,95 +366,7 @@ export function my_task(input: unknown, ctx: Ctx) {
     waits: open(t).map((w) => ({ kind: w.kind, what: w.what, since: w.since })),
     artifacts: t.links ?? [],
     humanSteps: humans.map((h) => ({ id: h.id, title: h.title, status: h.status, handedBack: h.handBack?.kind === "secret" ? (h.status === "done" ? `secret ${h.handBack.name} saved` : undefined) : h.handedBack })),
-    ...teamView(store, t),
   };
-}
-
-function teamView(s: Store, t: Task) {
-  const root = teamOf(s, t);
-  if (!root) return {};
-  return {
-    requirement: { id: root.id, title: root.title, lead: root.id, youAreLead: root.id === t.id },
-    teammates: members(s, root)
-      .filter((x) => x.id !== t.id)
-      .map((x) => ({ id: x.id, title: x.title, repo: x.repo, status: x.status, summary: x.summary, waits: open(x).map((w) => w.what) })),
-    activity: (root.activity ?? []).slice(-15).map((a) => ({ at: new Date(a.at).toISOString(), by: a.by, to: a.to, text: a.text })),
-  };
-}
-
-export async function add_teammate(input: { repo: string; title?: string; prompt: string; agent?: string; model?: string; effort?: string; worktree?: boolean }, ctx: Ctx) {
-  const prompt = input?.prompt?.trim();
-  if (!prompt) throw new Error("prompt 写清它要做什么、已经定了什么、要交回什么");
-  const st = ctx.dirs.stat(input.repo?.trim() ?? "");
-  if (!st?.dir) throw new Error(`仓库目录不存在：${input.repo}`);
-  const { store } = load(ctx);
-  const t = mine(store, ctx);
-  const root = teamOf(store, t) ?? t;
-  if (root.status === "done" || root.status === "dropped") throw new Error(`需求 ${root.id} 已经结束了`);
-  const there = members(store, root).find((x) => x.status !== "done" && x.status !== "dropped" && x.repo && ctx.dirs.stat(x.repo)?.path === st.path);
-  if (there && !input.worktree) throw new Error(`${memberName(there)} 已经在这个仓库里做「${there.title}」了：用 tell 告诉它要做什么`);
-  const m = (await add(
-    {
-      title: input.title,
-      prompt: `${prompt}\n\n（${memberName(t)} 拉你进需求 ${root.id}「${root.title}」：有事直接 tell 它。）`,
-      repo: st.path,
-      agent: input.agent,
-      model: input.model,
-      effort: input.effort,
-      worktree: input.worktree,
-      team: root.id,
-      from: t.id,
-      router: root.router,
-      routerClosed: true,
-      start: true,
-    } as any,
-    ctx,
-  )) as Task;
-  update(ctx, (s) => activity(s, find(s, m.id), { by: t.id, to: m.id, kind: "join", text: `拉了 ${memberName(m)} 进来：${m.title}` }));
-  return { id: m.id, title: m.title, gerdrCard: eventCard(ctx, t.id, "join", `${memberName(m)}：${m.title}`), note: `${m.id} 已经开始做了。它会直接 tell 你；你要等它的结果就 wait_for [{"type":"teammate","who":"${m.id}"},{"type":"time","minutes":N}]（N 是超时），然后结束这一轮。` };
-}
-
-export async function tell(input: { to: string; text: string; summary?: string }, ctx: Ctx) {
-  const text = input?.text?.trim();
-  if (!text) throw new Error("text 是空的");
-  const r = update(ctx, (s) => {
-    const from = mine(s, ctx);
-    const root = teamOf(s, from);
-    if (!root) throw new Error("你没有队友：要别的仓库一起做，先用 add_teammate 拉一个进来");
-    const ms = members(s, root);
-    const to = ms.find((x) => x.id === String(input.to).trim());
-    if (!to || to.id === from.id) throw new Error(`${input.to} 不是你的队友（队友：${ms.filter((x) => x.id !== from.id).map(memberName).join("、")}）`);
-    if (to.status === "dropped") throw new Error(`${to.id} 已经放弃了`);
-    if (root.status === "done" || root.status === "dropped") throw new Error(`需求 ${root.id} 已经结束了`);
-    if (!to.session) throw new Error(`${to.id} 还没派出去`);
-    // Stopped, with a line in the feed: returned rather than thrown, or the write (and the line) would be undone
-    const bounces = bouncesOf(s, root);
-    if (bounces >= BOUNCE_LIMIT) {
-      const last = root.activity?.[root.activity.length - 1];
-      if (last?.kind !== "stuck") activity(s, from, { by: from.id, kind: "stuck", text: `和队友来回了 ${bounces} 次还没进展，要交给你定` });
-      return { stuck: bounces };
-    }
-    from.tells = [...(from.tells ?? []), Date.now()].slice(-BOUNCE_LIMIT * 2);
-    // In the feed only when the member says so (its summary, by the user's activity.md): the talk itself is theirs
-    const line = input.summary?.trim();
-    if (line) activity(s, from, { by: from.id, to: to.id, kind: "tell", text: line });
-    Object.assign(from, { viaTools: true, reportedAt: Date.now() });
-    return { from, to };
-  });
-  if ("stuck" in r)
-    throw new Error(
-      `你们已经来回了 ${r.stuck} 次，没有一部分做完，也没人问过用户：别再来回了。用 ask_human 把分歧交给用户定：` +
-        `两边各自的说法和证据（报错、请求和响应），选项，你的建议。用户答了以后才能再 tell。`,
-    );
-  const { from, to } = r;
-  // Right away, like the user's own words (DESIGN.md): it may be in the middle of something the message stops
-  await wake(ctx, to.id, {
-    how: `${memberName(from)} 发来消息`,
-    text: `[队友 ${memberName(from)}，需求 ${to.team ?? to.id}] ${text}\n\n（回它用 tell，to: "${from.id}"）`,
-    ends: isOutside,
-    resume: true,
-  });
-  return { sent: to.id, gerdrCard: eventCard(ctx, from.id, "tell", `给 ${memberName(to)}：${input.summary?.trim() || text}`), note: `已送到 ${memberName(to)}。要等它回话：wait_for [{"type":"teammate","who":"${to.id}"},{"type":"time","minutes":N}]（N 是超时），然后结束这一轮。` };
 }
 
 /**
@@ -520,7 +382,7 @@ export function message_user(input: { text: string; files?: { path: string; name
   const files = (input.files ?? []).filter((f) => f?.path);
   if (isMain(ctx, ctx.caller.session)) {
     const { store } = load(ctx);
-    const quote = input.quote ? quoteOf(store, input.quote) : undefined;
+    const quote = input.quote ? quoteOf(ctx, store, input.quote) : undefined;
     const follow = input.follow ? find(store, input.follow).id : undefined;
     secretaryMessage(ctx, { text, files, brief: !!input.brief, quote, follow });
     return { ok: true, gerdrCard: eventCard(ctx, undefined, "message", text) };
@@ -536,17 +398,24 @@ export function message_user(input: { text: string; files?: { path: string; name
   });
 }
 
-/** What a worker's line can be that the secretary quotes: what it said, not the board's own notes. */
-const SAID = new Set(["message", "review", "done", "stuck", "progress"]);
+/** Gerdr's note at the end of a reply on how the turn ended (tasks.ts ENDING): not the worker's words. */
+const ENDING = /^(这一轮结束：|Turn ended: |出错：|Error: )/;
 
-/** The latest line a member of `id`'s requirement wrote itself, as { task: the requirement, at }. */
-function quoteOf(s: Store, id: string) {
-  const root = reqOf(s, find(s, id));
-  if (!root) throw new Error(`${id} 不是 agent 的需求`);
-  const ids = new Set(members(s, root).map((m) => m.id));
-  const a = [...(root.activity ?? [])].reverse().find((x) => x.by && ids.has(x.by) && SAID.has(x.kind));
-  if (!a) throw new Error(`${root.id} 的动态里还没有 worker 说的话可以附上`);
-  return { task: root.id, at: a.at };
+/**
+ * What the worker of `id` said in its last reply, as written, for the secretary to show under its message: { task, at,
+ * text }. Its chat is where the user reads a worker (opening the task opens it), so that's what is quoted, not a
+ * summary of it.
+ */
+function quoteOf(ctx: Ctx, s: Store, id: string) {
+  const t = find(s, id);
+  if (t.owner !== "agent" || !t.session) throw new Error(`${id} 没有 worker 的对话可以引用`);
+  const reply = String(ctx.sessions.get(t.session)?.reply ?? "")
+    .split(/\n\s*\n/)
+    .filter((p) => !ENDING.test(p.trim()))
+    .join("\n\n")
+    .trim();
+  if (!reply) throw new Error(`${id} 的 worker 最近还没说什么可以引用`);
+  return { task: t.id, at: Date.now(), text: reply };
 }
 
 /**
