@@ -11,7 +11,7 @@ import { usePoll } from "../lib/visible";
 // neither. Turning one on writes a Gerdr trigger file (triggers/inbox-*.json, local/inbox.ts); its runs come from
 // /api/work/triggers.
 
-type Source = { on: string; title?: string; description?: string; addon?: string; canReply?: boolean; seen?: number; enabled: boolean; key?: string; allow?: string[]; inferred?: boolean; by?: string };
+type Source = { on: string; title?: string; description?: string; addon?: string; canReply?: boolean; seen?: number; enabled: boolean; key?: string; allow?: string[]; deny?: string[]; inferred?: boolean; by?: string };
 /** One of the panel's own triggers (triggers/*.json): always on. */
 type Builtin = { id: string; on: string; name?: string; key?: string; off?: boolean };
 
@@ -124,6 +124,8 @@ function Row({ s, info, onSaved }: { s: Source; info?: TriggerInfo; onSaved: () 
   const [key, setKey] = useState(s.key ?? "");
   const [allow, setAllow] = useState((s.allow ?? []).join(", "));
   const allowNow = (s.allow ?? []).join(", ");
+  const [deny, setDeny] = useState((s.deny ?? []).join(", "));
+  const denyNow = (s.deny ?? []).join(", ");
   const [inferred, setInferred] = useState(!!s.inferred);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -131,7 +133,7 @@ function Row({ s, info, onSaved }: { s: Source; info?: TriggerInfo; onSaved: () 
     setBusy(true);
     setErr("");
     try {
-      await run("inbox.setSource", { on: s.on, enabled, key, title: s.title, allow, inferred });
+      await run("inbox.setSource", { on: s.on, enabled, key, title: s.title, allow, deny, inferred });
       onSaved();
     } catch (e: any) {
       setErr(String(e.message || e));
@@ -173,12 +175,14 @@ function Row({ s, info, onSaved }: { s: Source; info?: TriggerInfo; onSaved: () 
           <input className="h-7 w-56 rounded-md border bg-background px-2 font-mono text-[12px]" value={key} placeholder="比如某个频道 id" onChange={(e) => setKey(e.target.value)} />
           <span className="text-muted-foreground">只收这些人（发送人 ID 或名字，逗号分隔；空 = 来源放进来的都收）</span>
           <input className="h-7 w-56 rounded-md border bg-background px-2 font-mono text-[12px]" value={allow} placeholder="比如 U012ABCD" onChange={(e) => setAllow(e.target.value)} />
+          <span className="text-muted-foreground">不收这些人（同上，在「只收」之后再排除）</span>
+          <input className="h-7 w-56 rounded-md border bg-background px-2 font-mono text-[12px]" value={deny} placeholder="比如群发机器人的 ID" onChange={(e) => setDeny(e.target.value)} />
           <span className="text-muted-foreground">这些消息是</span>
           <select className="h-7 rounded-md border bg-background px-1.5 text-[12px]" value={inferred ? "inferred" : "explicit"} onChange={(e) => setInferred(e.target.value === "inferred")}>
             <option value="explicit">找我的（私信、@ 我）</option>
             <option value="inferred">不是找我的（只按主动工作的规则接）</option>
           </select>
-          {(key !== (s.key ?? "") || allow !== allowNow || inferred !== !!s.inferred) && (
+          {(key !== (s.key ?? "") || allow !== allowNow || deny !== denyNow || inferred !== !!s.inferred) && (
             <Button disabled={busy} onClick={() => save(true)}>
               保存
             </Button>
