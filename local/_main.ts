@@ -22,7 +22,6 @@ import { DATA, migrate } from "./_user";
 import { activity, find, load as loadTasks, note, update as updateTasks, type Task } from "./_store";
 import { wake } from "./_wake";
 import { append, windowText, SECRETARY as SECRETARY_ID } from "./_log";
-import { waitingLines } from "./_inbox";
 import { isOutside, waitingOn } from "./_waits";
 
 const STATE = `${DATA}/superagent.json`;
@@ -83,6 +82,8 @@ export type Why = "user" | "brief" | "notice" | "route";
 
 type State = {
   main?: string;
+  /** The tasks the last stuck check reported (secretary.checkStuck): told as "still stuck" next time. */
+  stuck?: string[];
   mains: string[];
   brief?: string;
   handled: number;
@@ -281,7 +282,7 @@ async function brief(ctx: Ctx): Promise<string> {
       `\n## parts（decide 的 accept 和 tasks.dispatch 一样）\n` +
       `- parts 每项一份活：repo 必填；agent、model、effort 不写就用下面的默认，简单的活可以给便宜的模型；worktree 默认 false。\n` +
       `- 只有一份：就是这件事本身，不用写 prompt。拆成几份并行（用户 @ 了几个 agent，或者活明显能分开做）：每份写 title（十几个字）和 prompt（这一份做什么、和别的份怎么配合）；同一个仓库有两份以上时都写 "worktree": true。\n` +
-      `- 每份都是一张独立的卡、一个 worker。一份要用另一份的结果（前端接后端的新接口）：先派被依赖的那份，另一份用 tasks.add 建好、带 "blockedBy": ["tN"]、不带 start，等你收到 tN 做完的 [动态] 再派，交代里写上 tN 的结果在哪。\n` +
+      `- 每份都是一张独立的卡、一个 worker。一份要用另一份的结果（前端接后端的新接口）：先派被依赖的那份，另一份用 tasks.add 建好、带 "blockedBy": ["tN"] 和 "start": true：tN 做完时看板会自动派出它，并把 tN 的结果写进它的交代。\n` +
       `- **几份并行之前，先找它们该共用的东西**（同一套组件、风格、规范、规划文档）：在仓库里找到了，就把源码和文档的路径写进每一份的 prompt，写明「用这里的，不要自己另写一套」；` +
       `只给成片、截图、效果图不够，worker 只能照着重画。还没有共用的底子，就先只派一份「打底」（抽出共用组件、写好规范），其余几份照上一条建成等它的卡。` +
       `交代里说清哪些是共用的、并行时只读，要改共用的就在回复里提出来，不要各自复制一份改；别只写「别碰别人的文件」。\n` +
@@ -314,9 +315,11 @@ function talkText(ctx: Ctx) {
   return [
     `## 和用户说话\n` +
       `- 你收到的消息有几种：[用户] 是用户在秘书页上对你说的话；[任务 tN] / [消息 cN] / [重新安排 tN] 是要派的活（见下面）；` +
-      `[动态] 是任务的状态变了（开始做、等用户、待验收、做完、放弃、接着做；中途的进展不会来）；[简报] 是到了写简报的时间。\n` +
+      `[检查] 是定时检查发现了卡住的任务；[简报] 是到了写简报的时间。\n` +
+      `- **看板是用户自己盯的，你是辅助**：任务的状态变化不会发给你，你也不去盯、不去推进任务。用户问起、或者定时任务（[检查]、[简报]）交给你时，才去看看板。` +
+      `用户交代的才做：他让你催、让你转告，你再用下面的命令去做。\n` +
       `- **对用户说话一律用 message_user 工具**（简报带 \`"brief": true\`）：秘书页上只有它发的消息，你回复里的文字和中间过程用户都看不到。` +
-      `没有要告诉他的（派活、分拣、不急的动态）就不调用。他问你的、交代你的，每次都要用 message 回一句。\n` +
+      `没有要告诉他的（派活、分拣）就不调用。他问你的、交代你的，每次都要用 message 回一句。\n` +
       `- 用户问到的、你要说的，先查事实再说：\`gerdr panel run secretary.status\` 给出等他的事（带问题的 id 和选项）、在做的、待验收的、最近完成的。` +
       `不要凭记忆说「做完了」。问到某一件事的细节（做到哪、动态里写了什么、开了哪个 MR、它最后说了什么）：` +
       `\`gerdr panel run tasks.list '${ex({ id: "t12" })}'\` 只给这一件（和它的成员），别不带 id 拉整块看板。\n` +
@@ -333,7 +336,7 @@ function talkText(ctx: Ctx) {
       `他做完了自己的步骤 \`tasks.complete ${ex({ id: "t5", value: "要交回的值（没有就不写）" })}\`；` +
       `转告 worker \`tasks.say ${ex({ id: "t5", text: "…" })}\`；不做了 \`tasks.drop ${ex({ id: "t5", reason: "…" })}\`。\n` +
       `- 不要用你自带的提问工具（AskUserQuestion）：有要问用户的，用 message_user 问，他会在秘书页上答你。\n` +
-      `- **要用户回答的问题会作为卡片出现在秘书页的对话里**（[动态] 和 secretary.status 里带着问题、选项和交答案的命令）：` +
+      `- **要用户回答的问题会作为卡片出现在秘书页的对话里**（secretary.status 里带着问题、选项和交答案的命令）：` +
       `他可以直接点卡片，也可以对你说。你说一句要他决定什么、为什么要紧就行，不用重复选项，更不要让他去看板或 worker 的对话里答。` +
       `他用文字答了，你用给出的命令替他交（一个问题一条命令），再告诉他交了。密钥不经过对话：卡片上会让他在看板上填。\n` +
       `- 改这个面板本身（设置、流程、触发器、定时任务、页面）不归你：告诉用户去面板右边的面板助手那里说。\n` +
@@ -510,64 +513,7 @@ export function askText(t: any): string {
   return t.question ? `    worker 问：${t.question} → tasks.answer ${ex({ id: t.id, answer: "用户的回答" })}` : "";
 }
 
-/** Where a task stands, for news: what changes it is a change of status; progress within one isn't. */
-const STATUS: Record<string, string> = { todo: "待办", active: "在做", you: "等你", review: "待验收", done: "做完了", dropped: "放弃了" };
 
-/**
- * News for the secretary (DESIGN.md「秘书」「什么时候打扰」): every change of a task's status — started, waiting on
- * the user (a question, a step of theirs, stopped, an approval, an error: a new question counts too), a result to
- * review, done, dropped, going on again. Progress within a status (activity, a new summary) isn't news: the user asked
- * for status changes only. One message per sync with every change in it; the secretary decides whether to tell the
- * user now, keep it for the briefing or say nothing. A task first seen still waiting to be started isn't news (it was
- * just added). The first time there's no record, so where everything stands is taken as known, not sent as a flood.
- * `tasks` is tasks.list's view (columns, questions, live sessions).
- */
-export async function notice(ctx: Ctx, tasks: any[]) {
-  const waiting = new Map(waitingLines(tasks).map((l) => [l.id, l]));
-  const now: Record<string, string> = {};
-  const lines: Record<string, string> = {};
-  for (const t of tasks) {
-    const head = `${t.id}「${t.title}」`;
-    if (t.status === "dropped") {
-      now[t.id] = "dropped";
-      lines[t.id] = `${head} 放弃了${t.dropReason ? `：${t.dropReason}` : ""}`;
-    } else if (t.status === "done") {
-      now[t.id] = "done";
-      const link = (t.links ?? []).at(-1);
-      lines[t.id] = `${head} 做完了${t.summary ? `：${t.summary}` : t.handedBack && t.handBack?.kind !== "secret" ? `：${t.handedBack}` : ""}${link ? `（${link.label}：${link.url}）` : ""}`;
-    } else if (t.column === "you") {
-      const open = (t.questions ?? []).filter((q: any) => !q.dropped && !q.answer).map((q: any) => q.id);
-      now[t.id] = `you|${t.question ?? ""}|${t.stopped ? "stopped" : ""}|${t.live?.status === "waiting" || t.live?.status === "error" ? t.live.status : ""}|${open.join(",")}`;
-      const l = waiting.get(t.id);
-      const ask = askText(t);
-      lines[t.id] = l
-        ? `${l.title}${ask ? `\n${ask}` : l.body ? `\n  ${l.body.replace(/\n/g, "\n  ")}` : ""}`
-        : `${head} 的 worker ${t.live?.status === "error" ? "出错了" : `在等你批准：${t.live?.waiting ?? ""}`}`;
-    } else if (t.column === "review") {
-      now[t.id] = "review";
-      lines[t.id] = `${head} 交了结果，等你验收：${t.summary ?? ""}`;
-    } else if (t.session || t.status === "running" || t.status === "delivering") {
-      now[t.id] = "active";
-      lines[t.id] = `${head} `;
-    } else now[t.id] = "todo";
-  }
-  const fresh = updateState(ctx, (s) => {
-    const was = s.states;
-    s.states = now;
-    if (!was) return [];
-    const out: string[] = [];
-    for (const [id, key] of Object.entries(now)) {
-      const before = was[id];
-      if (before === key || key === "todo") continue;
-      const from = before ? STATUS[before.split("|")[0]] : "";
-      if (key === "active") lines[id] += from === "等你" || from === "待验收" ? "接着做了" : "开始做了";
-      out.push(`${lines[id]}${from && key !== "active" ? `（之前：${from}）` : ""}`);
-    }
-    return out;
-  });
-  if (!fresh.length) return;
-  await toMain(ctx, [`[动态] 这些任务的状态变了（细节用 secretary.status 查）：\n${fresh.map((l) => `- ${l}`).join("\n")}`], "notice");
-}
 
 function taskBlock(t: Task, agents: { id: string; name: string }[]) {
   const named = (id: string) => {

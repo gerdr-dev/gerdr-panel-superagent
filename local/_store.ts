@@ -120,6 +120,12 @@ export type Task = {
   sessions?: string[];
   /** Tasks that must be done first (a human task blocking an agent task, or the other way round). */
   blockedBy?: string[];
+  /**
+   * Added with start while what it's blocked by was still going: the board starts it once those are done (tasks.ts
+   * startUnblocked), told what they came to. A split's later part, waiting on the one it needs (2026-11-11: the
+   * secretary no longer watches tasks to send it out itself).
+   */
+  startWhenFree?: boolean;
   /** @deprecated a question for the user: now a user wait (_waits.ts askUser). */
   question?: string;
   /** The latest result in a line or a paragraph, and where to look (MR, doc). */

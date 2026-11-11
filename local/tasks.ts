@@ -7,7 +7,7 @@ import { applyBlock } from "./_apply";
 import { askUser, endQuestions, endWaits, isOutside, open, question, syncAgents, syncSessions, wakeText, type Wait } from "./_waits";
 import { wake } from "./_wake";
 import { allAgents, mentionsIn } from "./_agents";
-import { isMain, notice, rerouteTask, routeTask, settle, sweep } from "./_main";
+import { isMain, rerouteTask, routeTask, settle, sweep } from "./_main";
 
 export type { Task };
 
@@ -56,6 +56,7 @@ function lastBlock(reply: string): any {
  * asking about one task: the whole board is tens of thousands of characters. Syncing still covers every task.
  */
 export async function list(input: unknown, ctx: Ctx) {
+  await startUnblocked(ctx);
   const live: Record<string, any> = {};
   const { store } = load(ctx);
   // Read sessions outside the write: ctx.sessions.get is cheap, but keep the locked part small
@@ -215,9 +216,10 @@ export async function list(input: unknown, ctx: Ctx) {
   tellInbox(ctx, tasks as any);
   // The secretary's side (_main.ts): its finished reply into the conversation, and news of what newly needs the user.
   // Here because the board's sync runs every minute with or without the page open; a failure mustn't break the board.
+  // Task changes aren't sent to the secretary any more (2026-11-11, the user: the board is where they work, the secretary
+  // helps; it looks at tasks when a schedule asks it to, secretary.checkStuck)
   try {
     await settle(ctx);
-    await notice(ctx, tasks);
   } catch (err: any) {
     ctx.log(`秘书那边没跟上：${err?.message ?? err}`);
   }
@@ -412,8 +414,33 @@ export async function add(input: Partial<Task> & { title?: string; start?: boole
   }
   if (rest.mentions?.length === 1 && !rest.agent) rest.agent = rest.mentions[0];
   const t = update(ctx, (s) => newTask(s, { ...rest, title, id: undefined } as any));
-  if (go && t.owner === "agent") return start({ id: t.id }, ctx);
+  if (go && t.owner === "agent") {
+    // Blocked by something still going: started by the board once it's done (startUnblocked), not now
+    if (!blockersDone(load(ctx).store, t)) return edit({ id: t.id, startWhenFree: true }, ctx);
+    return start({ id: t.id }, ctx);
+  }
   return t;
+}
+
+/**
+ * Tasks added to start once what they're blocked by is done (startWhenFree): started now that it is, with what those
+ * came to in the prompt (their summaries and links), so a split's later part picks up from the earlier one.
+ */
+async function startUnblocked(ctx: Ctx) {
+  const { store } = load(ctx);
+  for (const t of store.tasks) {
+    if (!t.startWhenFree || t.owner !== "agent" || t.status !== "todo" || t.session || !blockersDone(store, t)) continue;
+    const before = (t.blockedBy ?? [])
+      .map((id) => store.tasks.find((x) => x.id === id))
+      .filter((x): x is Task => !!x && x.owner === "agent")
+      .map((x) => [`- ${x.id}「${x.title}」${x.status === "dropped" ? "放弃了" : "做完了"}${x.summary ? `：${x.summary}` : ""}`, ...(x.links ?? []).map((l) => `  - ${l.label ?? "链接"}：${l.url}`), x.session ? `  - 它的对话：gerdr session read ${x.session}` : ""].filter(Boolean).join("\n"));
+    edit({ id: t.id, startWhenFree: undefined }, ctx);
+    const prompt = before.length ? `${t.prompt ?? t.title}\n\n## 你等的任务\n${before.join("\n")}` : undefined;
+    await start({ id: t.id, prompt }, ctx).catch((e: any) => {
+      ctx.log(`${t.id} 等的任务做完了，但没派出去：${e?.message ?? e}`);
+      update(ctx, (s) => note(find(s, t.id), `等的任务做完了，自动派出失败：${e?.message ?? e}`));
+    });
+  }
 }
 
 /** Changes fields of a task: { id, ...fields }. */

@@ -160,3 +160,45 @@ export async function briefing(input: unknown, ctx: Ctx) {
   });
   return "已交给秘书";
 }
+
+/**
+ * The stuck check (schedules/stuck.json, every 3 hours by default; DESIGN.md「秘书是辅助」): the board finds what's
+ * stuck — waiting on the user for `hours`, no word from its worker for that long, an error, one turn running that
+ * long — and only then hands it to the secretary to report. Nothing stuck: the secretary isn't woken (no cost, no
+ * message). { hours?: 3, dry?: true — only list them: the secretary isn't told, nothing is remembered }
+ */
+export async function checkStuck(input: { hours?: number; dry?: boolean } | null, ctx: Ctx) {
+  const hours = Number(input?.hours) > 0 ? Number(input!.hours) : 3;
+  const since = Date.now() - hours * 3600_000;
+  const { tasks } = await list({}, ctx);
+  const stuck: { id: string; line: string }[] = [];
+  for (const t of tasks as any[]) {
+    if (t.status === "done" || t.status === "dropped" || t.remote) continue;
+    const head = `${t.id}「${t.title}」`;
+    const ago = (ms: number) => when(ms);
+    if (t.owner === "human") {
+      if (t.ready && t.status === "todo" && t.createdAt < since) stuck.push({ id: t.id, line: `${head} 要你${t.handBack?.kind === "choice" || t.questions?.length ? "决定" : "亲手做"}，${ago(t.createdAt)}就在等${askText(t) ? `\n${askText(t)}` : ""}` });
+      continue;
+    }
+    if (t.status === "todo") continue;
+    const last = Math.max(t.reportedAt ?? 0, t.updatedAt ?? 0, t.live?.updatedAt ?? 0);
+    if (t.live?.status === "error") stuck.push({ id: t.id, line: `${head} 的 worker 出错了：${cut(t.live.error ?? "", 120)}` });
+    else if (t.live?.status === "waiting" && (t.live.waitingSince ?? last) < since) stuck.push({ id: t.id, line: `${head} 的 worker ${ago(t.live.waitingSince ?? last)}起在等你批准：${t.live.waiting ?? ""}` });
+    else if (t.live?.status === "running" && (t.live.turnStartedAt ?? Date.now()) < since) stuck.push({ id: t.id, line: `${head} 这一轮 ${ago(t.live.turnStartedAt)}开始，到现在还没停` });
+    else if (t.column === "review" && last < since) stuck.push({ id: t.id, line: `${head} 交了结果，${ago(last)}起等你验收：${cut(t.summary ?? "", 160)}` });
+    else if (t.column === "you" && last < since) stuck.push({ id: t.id, line: `${head} ${ago(last)}起在等你：${t.question ? `问：${cut(t.question, 160)}` : t.stopped ? `${t.stopWhy ?? "停下了"}${t.said ? `，它最后说：${cut(t.said, 160)}` : ""}` : "见它的对话"}` });
+    else if (t.column === "active" && t.live?.status !== "running" && last < since) {
+      const w = (t.waits ?? []).find((x: any) => !x.user);
+      stuck.push({ id: t.id, line: `${head} ${ago(last)}之后就没进展了${w ? `，在等：${w.what}` : ""}` });
+    }
+  }
+  if (input?.dry) return stuck.map((x) => x.line);
+  const before = new Set(state(ctx).stuck ?? []);
+  updateState(ctx, (s) => {
+    s.stuck = stuck.map((x) => x.id);
+  });
+  if (!stuck.length) return `没有卡住的任务（${hours} 小时为界），没叫秘书`;
+  const lines = stuck.map((x) => `- ${x.line}${before.has(x.id) ? "（上次检查也报过）" : ""}`).join("\n");
+  await toMain(ctx, [`[检查] 定时检查（${hours} 小时为界）发现这些任务卡住了，照「检查卡住的任务」的写法告诉用户：\n${lines}`], "brief");
+  return `${stuck.length} 个卡住的任务，已交给秘书汇报`;
+}
