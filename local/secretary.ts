@@ -181,6 +181,8 @@ export async function checkStuck(input: { hours?: number; dry?: boolean } | null
       continue;
     }
     if (t.status === "todo") continue;
+    // Held up by a step of the user's: that step is what's reported (above), not this one again
+    if ((t.blockedBy ?? []).some((b: string) => (tasks as any[]).some((h) => h.id === b && h.owner === "human" && h.status === "todo"))) continue;
     const last = Math.max(t.reportedAt ?? 0, t.updatedAt ?? 0, t.live?.updatedAt ?? 0);
     if (t.live?.status === "error") stuck.push({ id: t.id, line: `${head} 的 worker 出错了：${cut(t.live.error ?? "", 120)}` });
     else if (t.live?.status === "waiting" && (t.live.waitingSince ?? last) < since) stuck.push({ id: t.id, line: `${head} 的 worker ${ago(t.live.waitingSince ?? last)}起在等你批准：${t.live.waiting ?? ""}` });
