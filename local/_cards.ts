@@ -4,8 +4,8 @@
  * task_update" row said nothing of what changed.
  *
  * How loud it is follows how much it matters to the user:
- * - "card": a result or a change of who's on it (review, done, a teammate pulled in, a progress line for the feed);
- * - "line": bookkeeping they may glance at (the card's summary updated, a message to a teammate, a message handed
+ * - "card": a result or a change of who's on it (review, done, a part added, a progress line for the feed);
+ * - "line": bookkeeping they may glance at (the card's summary updated, a message to another part, a message handed
  *   back, a memory kept).
  * Things waiting on the user or on something outside have their own cards (task-step, task-wait).
  */
@@ -16,8 +16,8 @@ const KICKER: Record<EventKind, string> = {
   working: "更新概要",
   review: "等你验收",
   done: "做完了",
-  join: "拉队友",
-  tell: "告诉队友",
+  join: "加了一部分",
+  tell: "告诉另一部分",
   handBack: "交回 Superagent",
   remember: "记住了",
   message: "发给你",
