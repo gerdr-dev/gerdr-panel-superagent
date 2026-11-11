@@ -731,16 +731,14 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
   const { busy, err, go } = useAction(act);
   const [text, setText] = useState("");
   const [rejecting, setRejecting] = useState(false);
-  // 编辑: a task not sent out yet is still the user's words — what to do and its title, changed before 派出去
+  // 编辑: a task not sent out yet is still the user's words, changed before 派出去 the way it was written (新任务 asks
+  // only what to do; the title is its first line, here too)
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState({ title: "", prompt: "" });
+  const [draft, setDraft] = useState("");
   const editable = t.status === "todo" && !t.routing && !t.session;
   const save = async () => {
-    const prompt = draft.prompt.trim();
-    // A title that was only the old first line follows the new one; one the user wrote stays
-    const auto = !draft.title.trim() || (draft.title === t.title && t.title === firstLine(t.prompt ?? ""));
-    const title = auto ? firstLine(prompt) || t.title : draft.title.trim();
-    if (await go("edit", "edit", { id: t.id, title, prompt })) setEditing(false);
+    const prompt = draft.trim();
+    if (await go("edit", "edit", { id: t.id, title: firstLine(prompt) || t.title, prompt })) setEditing(false);
   };
   const l = t.live;
   const stale = l?.status === "running" && l.turnStartedAt && Date.now() - l.turnStartedAt > 40 * 60000;
@@ -762,17 +760,11 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
       <Links t={t} />
       {editing ? (
         <div className="space-y-2">
-          <input
-            value={draft.title}
-            onChange={(e) => setDraft({ ...draft, title: e.target.value })}
-            placeholder="标题（不写就用说明的第一行）"
-            className="h-8 w-full rounded-md border bg-background px-2 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]"
-          />
           <textarea
             autoFocus
             rows={8}
-            value={draft.prompt}
-            onChange={(e) => setDraft({ ...draft, prompt: e.target.value })}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void save();
               if (e.key === "Escape") (e.stopPropagation(), setEditing(false));
@@ -784,7 +776,7 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
             <Button variant="ghost" onClick={() => setEditing(false)}>
               取消
             </Button>
-            <Button disabled={!draft.prompt.trim() || !!busy} onClick={save}>
+            <Button disabled={!draft.trim() || !!busy} onClick={save}>
               {busy === "edit" ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}保存
             </Button>
           </div>
@@ -834,7 +826,7 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
       {err && <p role="alert" className="text-[12px] text-bad">{err}</p>}
       <div className="flex flex-wrap justify-end gap-2">
         {editable && !editing && (
-          <Button variant="ghost" disabled={!!busy} onClick={() => (setDraft({ title: t.title, prompt: t.prompt ?? "" }), setEditing(true))}>
+          <Button variant="ghost" disabled={!!busy} onClick={() => (setDraft(t.prompt ?? t.title), setEditing(true))}>
             <Pencil className="size-3.5" />
             编辑
           </Button>
