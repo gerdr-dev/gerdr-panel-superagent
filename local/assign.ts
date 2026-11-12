@@ -52,13 +52,22 @@ export async function onAssignEvent(ctx: Ctx, e: GerdrEvent): Promise<{ handled:
   const threads = e.key ? [{ source: e.source, key: e.key }] : undefined;
   if (a!.agreed && a!.how === "self") {
     const t = await add({ owner: "human", title, steps: body, origin, threads, assigned } as any, ctx);
+    hello(ctx, t);
     return { handled: true, task: t.id };
   }
   const repo = a!.repos?.find((r) => ctx.dirs.stat(r)?.dir);
   const t = await add({ title, prompt: body || title, repo, agent: a!.agent, origin, threads, assigned } as any, ctx);
+  hello(ctx, t);
   // Agreed (or nobody to ask) and an agent does it: out at once; without a repository the secretary picks one
   if (a!.agreed) await start({ id: t.id }, ctx).catch((err: any) => ctx.log(`${t.id} 没派出去：${err?.message ?? err}`));
   return { handled: true, task: t.id };
+}
+
+/** Tells the source which panel took its task (step "panel"), so its page can act on the card from there. */
+function hello(ctx: Ctx, t: Task) {
+  try {
+    tell(ctx, t, "", { step: "panel", task: t.id });
+  } catch {}
 }
 
 async function onUpdate(ctx: Ctx, mine: Task[], u: { state?: string; text?: string }) {
@@ -122,7 +131,18 @@ function assignedTask(ctx: Ctx, id: string) {
 function tell(ctx: Ctx, t: Task, text: string, data: Record<string, unknown>) {
   const ev = (ctx as any).events;
   if (!ev?.reply) throw new Error("这个 Gerdr 还没有事件功能：升级 Gerdr 后再用");
-  return ev.reply(t.origin as any, text, data);
+  // panel: which task panel this is, so the source can act on its card from its own page (forOrigin, agree…)
+  return ev.reply(t.origin as any, text, { ...data, panel: ctx.workspace.project });
+}
+
+/**
+ * The card a source's task became here, for that source's page to act on it in place (the team panel's drawer):
+ * { source, key } → { id, status, owner, assigned, session } or null.
+ */
+export function forOrigin(input: { source: string; key: string }, ctx: Ctx) {
+  const t = load(ctx).store.tasks.filter((x) => x.assigned && x.origin?.source === input.source && x.origin?.key === input.key).pop();
+  if (!t) return null;
+  return { id: t.id, title: t.title, status: t.status, owner: t.owner, assigned: t.assigned, session: t.session, repo: t.repo, prompt: t.prompt, steps: t.steps };
 }
 
 /**

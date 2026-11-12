@@ -576,7 +576,7 @@ export async function start(
   // when the user shared it (share) and for their words to it
   if (out.assigned && out.origin?.reply) {
     try {
-      (ctx as any).events.reply(out.origin, "", { step: "session", session: sess.id, ...(out.assigned.share !== undefined ? { share: out.assigned.share } : {}) });
+      (ctx as any).events.reply(out.origin, "", { step: "session", panel: ctx.workspace.project, session: sess.id, ...(out.assigned.share !== undefined ? { share: out.assigned.share } : {}) });
     } catch (err: any) {
       ctx.log(`告诉 ${out.origin.source} 对话 id 失败：${err?.message ?? err}`);
     }
