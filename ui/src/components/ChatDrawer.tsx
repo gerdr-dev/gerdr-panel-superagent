@@ -1,4 +1,5 @@
 import { ArrowDownRight, ArrowLeft, FolderOpen, MessageSquare, MoreHorizontal, X } from "lucide-react";
+import { EditableTitle } from "./EditableTitle";
 import clsx from "clsx";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Sheet, SheetContent, SheetTitle } from "./ui/sheet";
@@ -32,7 +33,12 @@ export function ChatDrawer({
   back,
   extra,
   task,
+  title,
+  onRename,
 }: {
+  /** The task's title instead of the conversation's, renamed in place with onRename. */
+  title?: string;
+  onRename?: (title: string) => Promise<unknown>;
   /** The task it is about: a 文件 tab beside the chat shows the task's artifacts folder (tasks.folder). */
   task?: string;
   /** Under the title row: the page's own strip (answering whoever asked for this task). */
@@ -118,7 +124,11 @@ export function ChatDrawer({
         </Button>
       )}
       <span className={clsx("mr-1 size-2 shrink-0 rounded-full", s?.status === "running" ? "bg-ok" : s?.status === "waiting" || s?.status === "error" ? "bg-warn" : "bg-muted-foreground/40")} />
-      <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{s?.title || session}</span>
+      {onRename ? (
+        <EditableTitle value={title || s?.title || session} onSave={onRename} className="text-[13px] font-medium" />
+      ) : (
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{title || s?.title || session}</span>
+      )}
       {tabs}
       {toggle}
       {tucked.length > 0 && <Menu actions={tucked} armed={armed} onPick={act} onClose={() => setArmed("")} />}

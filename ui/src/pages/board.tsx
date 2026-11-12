@@ -1,4 +1,5 @@
 import { AlertTriangle, ArrowRight, ArrowUp, Bot, Users, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Route, Send, Settings, Undo2, X } from "lucide-react";
+import { EditableTitle } from "../components/EditableTitle";
 import clsx from "clsx";
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../components/Button";
@@ -278,6 +279,8 @@ export default function BoardPage() {
           {...panel}
           trail={{ task: sel.id, version: sel.updatedAt, current: viewing, router: sel.router, onSession: setShown, onTask: setOpen, onRules: () => setSettings("settings") }}
           task={sel.id}
+          title={sel.title}
+          onRename={(title) => renameTask(act, sel, title)}
           onAction={onAction}
           onClose={() => setOpen("")}
           extra={sel.assigned && sel.assigned.state !== "ask" ? <div className="shrink-0 border-b px-3 py-2"><ReplyBox t={sel} act={act} /></div> : undefined}
@@ -581,8 +584,8 @@ function Drawer({ t, byId, act, onClose, onGo }: { t: Task; byId: Record<string,
             <div className="flex items-center gap-2 border-b px-4 py-2.5 text-[12px] text-muted-foreground">
               {t.owner === "human" ? <Hand className="size-3.5" /> : <Bot className="size-3.5" />}
               <span className="font-mono">{t.id}</span>
-              <span>· {COLS.find((c) => c.id === colOf(t))?.title}</span>
-              <span className="ml-auto" />
+              <span className="shrink-0">· {COLS.find((c) => c.id === colOf(t))?.title}</span>
+              <EditableTitle value={t.title} onSave={(title) => renameTask(act, t, title)} className="text-[13px] font-medium text-foreground" />
               {toggle}
               <Button variant="ghost" size="icon" aria-label="关闭" onClick={onClose}>
                 <X className="size-4" />
@@ -598,6 +601,21 @@ function Drawer({ t, byId, act, onClose, onGo }: { t: Task; byId: Record<string,
 }
 
 type Act = (fn: string, input: unknown) => Promise<unknown>;
+
+/**
+ * Renames a task (tasks.edit: its folder follows) and the conversations working on it, so the chat's title, the
+ * card and the folder say the same.
+ */
+async function renameTask(act: Act, t: Task, title: string) {
+  await act("edit", { id: t.id, title });
+  for (const id of new Set([t.session, ...(t.sessions ?? [])].filter(Boolean) as string[]))
+    await fetch(`/api/sessions/${encodeURIComponent(id)}/rename`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "X-Gerdr": "1", "Content-Type": "application/json" },
+      body: JSON.stringify({ Title: title }),
+    }).catch(() => {});
+}
 
 /** A button that runs an action, shows it running and its error. */
 function useAction(act: Act) {
