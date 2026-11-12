@@ -51,25 +51,24 @@ const STEP = {
 export const tools = {
   task_update: {
     description:
-      "Put where your board task stands on the board. state: working (still at it: summary / links), review (you finished, or have a result: the user looks at it and marks it done). Only the user marks a task done, never you: \"done\" is taken as review. A merged MR or a passed pipeline is news for you, not the end. Waiting on an MR, a colleague or a job: wait_for. links are artifacts (MR, docs, pipelines): kept, so add new ones only. When to report: the my-workflow skill, references/board.md.",
+      "Optional, and not a report: the task panel follows your conversation, and your turn ending puts the task before the user (待验收) with what you said last. Use it only to put artifacts on the task's card (links: an MR, a doc, a pipeline; kept, so add new ones only) or a better one-line summary than your reply's first paragraph. Waiting on something: wait_for; something for the user to decide or do: ask_human.",
     input: {
       type: "object",
       properties: {
-        state: { type: "string", enum: ["working", "review"] },
-        summary: { type: "string", description: "Where it stands in 1-3 sentences, for the board card" },
+        state: { type: "string", enum: ["working", "review"], description: "Leave it out (working). review: what you have is for the user to judge now, even if you go on" },
+        summary: { type: "string", description: "The task card's line, 1-3 sentences" },
         links: { type: "array", items: { type: "object", properties: { label: { type: "string" }, url: { type: "string" } }, required: ["url"] } },
       },
-      required: ["state"],
     },
   },
   ask_human: {
     description:
-      "Put something on the user's board that needs them: a step only they can do (give steps), or a decision (give options). Their answer / 'done' comes to you as a message, maybe days later. Decisions and values asked while earlier ones are unanswered go in one board item: you get all the answers together once every one is answered. cancel_human takes one back. When and how to ask: the my-workflow skill, references/human.md and board.md.",
+      "Put something on the user's task panel that needs them: a step only they can do (give steps), or a decision (give options). Their answer / 'done' comes to you as a message, maybe days later. Decisions and values asked while earlier ones are unanswered go in one item: you get all the answers together once every one is answered. cancel_human takes one back. When and how to ask: the my-workflow skill, references/human.md and task.md.",
     input: STEP,
   },
   cancel_human: {
     description:
-      "Take back a step or question you asked the user for with ask_human (t5, or t5#1 for one question of several): they answered it in the chat already, you found another way, or it's moot. It leaves their board with your reason. Do it as soon as it's moot — never leave it for the user to answer with \"any is fine\". Asking a changed question instead: ask_human with replaces.",
+      "Take back a step or question you asked the user for with ask_human (t5, or t5#1 for one question of several): they answered it in the chat already, you found another way, or it's moot. It leaves their task panel with your reason. Do it as soon as it's moot — never leave it for the user to answer with \"any is fine\". Asking a changed question instead: ask_human with replaces.",
     input: { type: "object", properties: { id: { type: "string" }, reason: { type: "string" } }, required: ["id", "reason"] },
   },
   hand_back: {
@@ -78,12 +77,12 @@ export const tools = {
     input: { type: "object", properties: { event: { type: "string" }, reason: { type: "string", description: "Why it isn't this task's, in a sentence" } }, required: ["event", "reason"] },
   },
   my_task: {
-    description: "Your board task as the board sees it: status, summary, artifacts, the human steps you asked for (open or done, with what was handed back),.",
+    description: "Your task as the task panel sees it: status, summary, artifacts, the human steps you asked for (open or done, with what was handed back).",
     input: { type: "object", properties: {} },
   },
   message_user: {
     description:
-      "A line in your task's feed on the board, for the user. Rarely needed: what you have to say (a result, a plan, where things stand, an answer to a question passed on from the secretary) goes in your reply as usual — opening your task on the board opens this chat. Not for the secretary: the user reads its chat, so it just replies. In their language, Markdown; a file to look at as ![](/absolute/path).",
+      "Not needed: say it in your reply (opening your task on the task panel opens this chat). Kept for workers started before 2026-11-12.",
     input: {
       type: "object",
       properties: {
@@ -112,10 +111,11 @@ export function instructions(input: unknown, ctx: Ctx) {
   const t = who && load(ctx).store.tasks.find((x) => x.owner === "agent" && (x.session === who || x.sessions?.includes(who)));
   if (!t) return "";
   return (
-    `You are the worker of task ${t.id} ("${t.title}") on the user's Superagent board. Opening the task on the board opens ` +
-    `this chat: the user reads it here, so say things in your replies as you normally would, results in full. The board's ` +
-    `columns follow what you report with these tools. How to work on it (reporting, asking them, starting other agents) is their my-workflow ` +
-    `skill, ${skillFile(ctx, "my-workflow/references/board.md")}: read it before you report or stop. my_task shows the task as the board sees it. ` +
+    `You are the worker of task ${t.id} ("${t.title}") on the user's Superagent task panel. Opening the task there opens ` +
+    `this chat: the user reads it here, so say things in your replies as you normally would, results in full. There is ` +
+    `nothing to report: when your turn ends and you wait on nothing, the task goes before the user with what you said. ` +
+    `Waiting on someone or something: wait_for; something only the user can decide or do: ask_human. How to work on it ` +
+    `is their my-workflow skill, ${skillFile(ctx, "my-workflow/references/task.md")}: read it before you stop. my_task shows the task as the panel sees it. ` +
     `What the user's memory says about this repository and all of them came in your first message; the files are ` +
     `${ctx.fs.root}/${MEMORY}/${t.repo ? nameOf(t.repo) : "…"}.md and ${GENERAL}.md there — add to them with remember ` +
     `(when: ${skillFile(ctx, "my-workflow/references/memory.md")}).`
@@ -126,7 +126,7 @@ export function instructions(input: unknown, ctx: Ctx) {
 export function mine(s: Store, ctx: Ctx): Task {
   const who = ctx.caller.session;
   const t = who && s.tasks.find((x) => x.owner === "agent" && (x.session === who || x.sessions?.includes(who)));
-  if (!t) throw new Error("这个对话不是看板上任何任务的 worker（只有看板派出去的会话能用这些工具）");
+  if (!t) throw new Error("这个对话不是任务面板上任何任务的 worker（只有任务面板派出去的会话能用这些工具）");
   return t;
 }
 
@@ -205,12 +205,12 @@ export function ask_human(input: any, ctx: Ctx) {
     }
     if (decision) h.urgent = false; // a decision can wait: no warning mark, it just sits under 等你
     // gerdrCard: Gerdr draws this result as a card in the chat, so the user sees the step where they are too
-    const back = h.handBack?.kind === "secret" ? `\n\n做完要交回：密钥「${h.handBack.label || h.handBack.name}」（在看板上存，不经过对话）` : h.handBack?.kind === "value" ? `\n\n做完要交回：${h.handBack.label || "一个值"}` : "";
+    const back = h.handBack?.kind === "secret" ? `\n\n做完要交回：密钥「${h.handBack.label || h.handBack.name}」（在任务面板上存，不经过对话）` : h.handBack?.kind === "value" ? `\n\n做完要交回：${h.handBack.label || "一个值"}` : "";
     const left = h.expiresAt ? `（${Math.round((h.expiresAt - Date.now()) / 60000)} 分钟内有效）` : "";
     return {
       id: h.id,
       title: h.title,
-      note: "已放到用户看板的「等你」里；做完你会收到消息",
+      note: "已放到用户任务面板的「等你」里；做完你会收到消息",
       // ref: the drawer's "跳到 tN" scrolls to this card. choose: answered right in the chat, the same tasks.complete
       // the board calls. A secret isn't: it goes through Gerdr's password box on the board, never the chat.
       // type: drawn by ui/src/cards.tsx (it shows how the step ended once the board has it); the rest is the built-in card
@@ -219,7 +219,7 @@ export function ask_human(input: any, ctx: Ctx) {
             type: "task-step",
             ref: h.id,
             project: ctx.workspace.project,
-            kicker: `等你决定 · ${h.id} · 不急，在这里选或之后在看板上选`,
+            kicker: `等你决定 · ${h.id} · 不急，在这里选或之后在任务面板上选`,
             title: h.title,
             body: h.steps || undefined,
             tone: "info",
@@ -231,7 +231,7 @@ export function ask_human(input: any, ctx: Ctx) {
             project: ctx.workspace.project,
             kicker: `要你做 · ${h.id}${left}`,
             title: h.title,
-            body: `${h.steps ?? ""}${back}${h.handBack?.kind === "secret" ? `\n\n做完在看板「等你」里的 ${h.id} 上存密钥。` : ""}`,
+            body: `${h.steps ?? ""}${back}${h.handBack?.kind === "secret" ? `\n\n做完在任务面板「等你」里的 ${h.id} 上存密钥。` : ""}`,
             tone: "warn",
             choose:
               h.handBack?.kind === "secret"
@@ -407,12 +407,12 @@ function questionCard(h: Task, ctx: Ctx) {
   const choice = q.kind === "choice";
   return {
     id: ref,
-    note: qs.length > 1 ? `和你前面问的 ${qs.length - 1} 个放在同一个看板事项 ${h.id} 里；用户都答完，你会一次收到全部答案` : `已放到用户看板的「等你」里（${h.id}）；再问的会并进同一项，都答完你一次收到全部答案`,
+    note: qs.length > 1 ? `和你前面问的 ${qs.length - 1} 个放在同一个任务面板事项 ${h.id} 里；用户都答完，你会一次收到全部答案` : `已放到用户任务面板的「等你」里（${h.id}）；再问的会并进同一项，都答完你一次收到全部答案`,
     gerdrCard: {
       type: "task-step",
       ref,
       project: ctx.workspace.project,
-      kicker: `${choice ? "等你决定" : "要你给"} · ${h.id}${of} · 不急，在这里答或之后在看板上答`,
+      kicker: `${choice ? "等你决定" : "要你给"} · ${h.id}${of} · 不急，在这里答或之后在任务面板上答`,
       title: q.title,
       body: [q.steps, !choice && q.label ? `要交回：${q.label}` : ""].filter(Boolean).join("\n\n") || undefined,
       tone: "info",

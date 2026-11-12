@@ -236,7 +236,7 @@ export function update<T>(ctx: Ctx, fn: (s: Store) => T): T {
     }
     if (wrote === "same") return out;
     if (wrote) return out;
-    if (i >= 4) throw new Error("看板数据一直在被别处改，没写进去：稍后再试");
+    if (i >= 4) throw new Error("任务面板数据一直在被别处改，没写进去：稍后再试");
   }
 }
 

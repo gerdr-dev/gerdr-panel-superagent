@@ -226,7 +226,7 @@ export async function followUp(ctx: Ctx, id: string, e: Ev) {
     how: e.reply ? `${by || "有人"}回复了` : e.title || `${e.source}/${e.kind}`,
     fold: `[${e.source}] ${by}${e.reply ? "接着说" : ""}：${cutLine(text, 50)}`,
     text:
-      // How to handle it is in board.md「看板发给你的消息」(the worker's skill), not repeated in every message
+      // How to handle it is in task.md「任务面板发给你的消息」(the worker's skill), not repeated in every message
       `[${head}]（任务 ${id}，消息 ${e.id}）\n\n${text}`,
     files: files.map((f) => f.path),
     // What it waited on outside came — or something else did: it looks again either way, and waits again if it must
@@ -274,7 +274,7 @@ async function brief(ctx: Ctx): Promise<string> {
   const ex = (o: unknown) => JSON.stringify(o);
   return [
     `你是用户的秘书（Superagent）。用户只跟你一个人说话：什么事都交给你，问进度、要日报也找你。你不亲手做事，把活派给 worker，` +
-      `跟着它们，替用户记着每一件事，该他知道、该他拍板的时候告诉他。要派的活也都先到你这里：用户交给你的、看板上建的任务，和外面来的消息（私信、@、告警……）。`,
+      `跟着它们，替用户记着每一件事，该他知道、该他拍板的时候告诉他。要派的活也都先到你这里：用户交给你的、任务面板上建的任务，和外面来的消息（私信、@、告警……）。`,
     talkText(ctx),
     // How it judges is the user's prose (流程 → my-workflow/references/dispatch.md), theirs to read and change; only the
     // command and the facts below are the code's
@@ -283,10 +283,10 @@ async function brief(ctx: Ctx): Promise<string> {
       `gerdr panel run superagent.decide '${ex({ decisions: [{ item: "c3", decision: "accept", title: "十几个字的标题", parts: [{ repo: "/绝对路径" }] }, { item: "c4", decision: "ignore", reason: "道谢" }] })}'\n\n` +
       `- attach：${ex({ item: "c5", decision: "attach", task: "t9" })}；stop：${ex({ item: "c6", decision: "stop", task: "t9", reason: "…" })}\n` +
       (workflow(ctx).inboxWork === "review"
-        ? `- decide 的 accept 会替你建任务，但**不派出去**：放进看板的「待办」，用户看过、改好再派（他的设置）。parts 照常写，会成为卡片上的仓库和 agent；拆成几份就是几张卡。` +
+        ? `- decide 的 accept 会替你建任务，但**不派出去**：放进任务面板的「待办」，用户看过、改好再派（他的设置）。parts 照常写，会成为卡片上的仓库和 agent；拆成几份就是几张卡。` +
           `记下这条消息的去向；回不回原对话、什么时候回，按他的设置自动处理，你不用另外回。\n\n`
         : `- decide 会替你建任务、派出去、记下这条消息的去向；回不回原对话按用户的设置自动处理。\n\n`) +
-      `## 看板任务 [任务 tN]：用看板的命令（和用户点按钮是同一套）\n` +
+      `## 任务面板上的任务 [任务 tN]：用任务面板的命令（和用户点按钮是同一套）\n` +
       `- 派出去：gerdr panel run tasks.dispatch '${ex({ id: "t12", parts: [{ repo: "/绝对路径" }] })}'（可加 title）\n` +
       `- 它是在管别的任务：停掉 tasks.drop '${ex({ id: "t9", reason: "…" })}'；转告 tasks.say '${ex({ id: "t9", text: "…" })}'；` +
       `接手一个停掉的任务，派的时候加 "from": "t9"，会带上它的进展和对话；tN 只是条指令、照做完了：tasks.edit '${ex({ id: "t12", status: "done", summary: "停了 t9" })}'\n` +
@@ -294,7 +294,7 @@ async function brief(ctx: Ctx): Promise<string> {
       `\n## parts（decide 的 accept 和 tasks.dispatch 一样）\n` +
       `- parts 每项一份活：repo 必填；agent、model、effort 不写就用下面的默认，简单的活可以给便宜的模型；worktree 默认 false。\n` +
       `- 只有一份：就是这件事本身，不用写 prompt。拆成几份并行（用户 @ 了几个 agent，或者活明显能分开做）：每份写 title（十几个字）和 prompt（这一份做什么、和别的份怎么配合）；同一个仓库有两份以上时都写 "worktree": true。\n` +
-      `- 每份都是一张独立的卡、一个 worker。一份要用另一份的结果（前端接后端的新接口）：先派被依赖的那份，另一份用 tasks.add 建好、带 "blockedBy": ["tN"] 和 "start": true：tN 做完时看板会自动派出它，并把 tN 的结果写进它的交代。\n` +
+      `- 每份都是一张独立的卡、一个 worker。一份要用另一份的结果（前端接后端的新接口）：先派被依赖的那份，另一份用 tasks.add 建好、带 "blockedBy": ["tN"] 和 "start": true：tN 做完时任务面板会自动派出它，并把 tN 的结果写进它的交代。\n` +
       `- **几份并行之前，先找它们该共用的东西**（同一套组件、风格、规范、规划文档）：在仓库里找到了，就把源码和文档的路径写进每一份的 prompt，写明「用这里的，不要自己另写一套」；` +
       `只给成片、截图、效果图不够，worker 只能照着重画。还没有共用的底子，就先只派一份「打底」（抽出共用组件、写好规范），其余几份照上一条建成等它的卡。` +
       `交代里说清哪些是共用的、并行时只读，要改共用的就在回复里提出来，不要各自复制一份改；别只写「别碰别人的文件」。\n` +
@@ -331,16 +331,16 @@ function talkText(ctx: Ctx) {
       `- **秘书页就是你这段对话**：用户在这里对你打字，你回复里写的就是他看到的。直接在回复里说，不用任何工具发消息；` +
       `调了哪些命令他也看得见（折起来的一行），所以结论写在回复的正文里。\n` +
       `- 别的消息也会出现在这段对话里，开头标着是什么：[任务 tN] / [消息 cN] / [重新安排 tN] 是要派的活（见下面）；` +
-      `[检查] 是定时检查发现了卡住的任务；[简报] 是到了写简报的时间；[tN 的回答] 是你转给 worker 的问题它答了；[看板] 是看板的提醒；` +
+      `[检查] 是定时检查发现了卡住的任务；[简报] 是到了写简报的时间；[tN 的回答] 是你转给 worker 的问题它答了；[任务面板] 是任务面板的提醒；` +
       `[用户] 是用户在面板助手那里说、转给你的。` +
       `用户能看到它们，所以派活、分拣这种不用说话的，回复只写一句结论（「派给了 t12」「没接：道谢」），别把过程再讲一遍。\n` +
-      `- **看板是用户自己盯的，你是辅助**：任务的状态变化不会发给你，你也不去盯、不去推进任务。用户问起、或者定时任务（[检查]、[简报]）交给你时，才去看看板。` +
+      `- **任务面板是用户自己盯的，你是辅助**：任务的状态变化不会发给你，你也不去盯、不去推进任务。用户问起、或者定时任务（[检查]、[简报]）交给你时，才去看任务面板。` +
       `用户交代的才做：他让你催、让你转告，你再用下面的命令去做。\n` +
       `- 用户问到的、你要说的，先查事实再说：\`gerdr panel run secretary.status\` 给出等他的事（带问题的 id 和选项）、在做的、待验收的、最近完成的。` +
       `不要凭记忆说「做完了」。问到某一件事的细节（做到哪、开了哪个 MR、它最后说了什么）：` +
-      `\`gerdr panel run tasks.list '${ex({ id: "t12" })}'\` 只给这一件（和它的成员），别不带 id 拉整块看板。\n` +
+      `\`gerdr panel run tasks.list '${ex({ id: "t12" })}'\` 只给这一件（和它的成员），别不带 id 拉整块任务面板。\n` +
       `- **说到某个任务的结果、方案、结论时，别缩写 worker 的话**（缩写会丢掉他要的细节）：说一句为什么要他看、要他做什么，` +
-      `让他在看板上打开 tN 看 worker 的原话。\n` +
+      `让他在任务面板上打开 tN 看 worker 的原话。\n` +
       `- **用户追问某个任务里的细节**（方案里为什么这样、某个数字哪来的、它具体改了什么）：别凭你看到的摘要答，转给做它的 worker —— ` +
       `\`gerdr panel run tasks.message '${ex({ id: "t12", text: "用户的原话" })}'\`，说一句「问了 t12」就结束这一轮。` +
       `它答完，原话会作为 [t12 的回答] 出现在这段对话里，用户直接看得到：你不用转述，有要补的（下一步要他做什么）再说一句。` +
@@ -355,9 +355,9 @@ function talkText(ctx: Ctx) {
       `问了就先不派，这一轮到此为止，他的回答会是他的下一条消息。\n` +
       `- **仓库拿不准就先问，不要先派了再说明**（包括这件事不属于仓库列表里的任何一个）：带上你的建议问他，怎么挑、怎么建议见「怎么派」。\n` +
       `- **worker 要用户回答的问题**（secretary.status 里带着问题、选项和交答案的命令）：页面顶上「等你」那一栏列着，他能点开去答，也可以对你说。` +
-      `你问他的时候说清要他决定什么、为什么要紧、有哪几个选项，他答了，你用给出的命令替他交（一个问题一条命令），再告诉他交了。密钥不经过对话：让他在看板上那张卡里填。\n` +
+      `你问他的时候说清要他决定什么、为什么要紧、有哪几个选项，他答了，你用给出的命令替他交（一个问题一条命令），再告诉他交了。密钥不经过对话：让他在任务面板上那张卡里填。\n` +
       `- 改这个面板本身（设置、流程、触发器、定时任务、页面）不归你：告诉用户去面板右边的面板助手那里说。\n` +
-      `- 这段对话一直用下去，长了会被压缩：早先的聊天变成一段摘要，细节会丢。要长期记住的事当场记下 —— 用户交代的活进看板（任务），` +
+      `- 这段对话一直用下去，长了会被压缩：早先的聊天变成一段摘要，细节会丢。要长期记住的事当场记下 —— 用户交代的活进任务面板（任务），` +
       `他的偏好和规矩用 \`remember\` 记进记忆，做事方式写进流程（skill）。只留在聊天里的，压缩之后就只剩个大概。`,
     textOf(ctx, SECRETARY),
   ]
@@ -411,7 +411,7 @@ export async function toMain(ctx: Ctx, blocks: string[], why: Why = "route", att
   const body = blocks.join("\n\n");
   const { id, changed, hash: h } = await ensureMain(ctx, body, attachments, fold);
   if (id.fresh) return id.id;
-  const text = changed ? `[看板] 你的规则有更新：重读一遍 ${abs(ctx, SYSTEM)}，以它为准。\n\n${body}` : body;
+  const text = changed ? `[任务面板] 你的规则有更新：重读一遍 ${abs(ctx, SYSTEM)}，以它为准。\n\n${body}` : body;
   await ctx.sessions.send(id.id, text, { ...(attachments?.length ? { attachments } : {}), ...(fold ? { fold } : fold === false ? { show: true } : {}) } as any);
   if (changed) updateState(ctx, (x) => void (x.brief = h));
   return id.id;
@@ -529,7 +529,7 @@ export function askText(t: any): string {
     const k = t.handBack?.kind;
     if (k === "choice") return `    要用户选：${t.title}${opts(t.handBack.options)} → tasks.complete ${ex({ id: t.id, value: "选的那项" })}`;
     if (k === "value") return `    要用户给：${t.handBack.label ?? t.title} → tasks.complete ${ex({ id: t.id, value: "…" })}`;
-    if (k === "secret") return `    要用户交一个密钥（${t.handBack.label ?? t.handBack.name ?? ""}）：不能经过对话，请他在看板上 ${t.id} 那里填`;
+    if (k === "secret") return `    要用户交一个密钥（${t.handBack.label ?? t.handBack.name ?? ""}）：不能经过对话，请他在任务面板上 ${t.id} 那里填`;
     return t.steps ? `    要用户亲手做：${t.steps.replace(/\n/g, "\n    ")}\n    他说做完了 → tasks.complete ${ex({ id: t.id })}` : "";
   }
   return t.question ? `    worker 问：${t.question} → tasks.answer ${ex({ id: t.id, answer: "用户的回答" })}` : "";

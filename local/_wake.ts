@@ -33,7 +33,7 @@ export type Wake = {
   feedFiles?: { path: string; name?: string }[];
   /**
    * The one line the worker's chat shows instead of the message (Gerdr's send fold): the board's prompt to it is
-   * long and mostly instructions, and what came already shows as the chat's wait card. Default "[看板] <how>";
+   * long and mostly instructions, and what came already shows as the chat's wait card. Default "[任务面板] <how>";
    * false: shown whole.
    */
   fold?: string | false;
@@ -68,7 +68,7 @@ export async function wake(ctx: Ctx, id: string, m: Wake): Promise<Task> {
     x.updatedAt = now;
     return x;
   });
-  const fold = m.fold === false ? undefined : m.fold || `[看板] ${cutLine(m.how, 80)}`;
+  const fold = m.fold === false ? undefined : m.fold || `[任务面板] ${cutLine(m.how, 80)}`;
   if (t.session) await ctx.sessions.send(t.session, m.text, { now: true, attachments: m.files, ...(fold ? { fold } : {}) } as any);
   return t;
 }

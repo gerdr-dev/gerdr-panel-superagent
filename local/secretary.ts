@@ -107,7 +107,7 @@ export async function briefing(input: unknown, ctx: Ctx) {
     [`[简报] 到了写简报的时间${last ? `（上一次是 ${when(last)}）` : ""}。照「简报」的写法写给用户；下面是现在的事实，「完成的」是上次简报以来的。\n\n${facts}`],
     "brief",
     undefined,
-    "[简报] 到点了：秘书照看板现状写简报",
+    "[简报] 到点了：秘书照任务面板现状写简报",
   );
   updateState(ctx, (s) => {
     s.briefAt = Date.now();

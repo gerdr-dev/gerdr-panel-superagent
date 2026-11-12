@@ -19,7 +19,7 @@ export function effective(ctx: Ctx, rel: string): string | null {
 }
 
 /**
- * The absolute path of a skill's file as it counts for this person (`my-workflow/references/board.md`), for a message
+ * The absolute path of a skill's file as it counts for this person (`my-workflow/references/task.md`), for a message
  * to an agent: "the skill, references/x.md" sends it searching the disk for the file, a path it can just read.
  */
 export function skillFile(ctx: Ctx, rel: string): string {

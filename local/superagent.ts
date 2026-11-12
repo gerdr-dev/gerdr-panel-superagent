@@ -96,7 +96,7 @@ async function boardTask(d: Decision, ctx: Ctx) {
   const self = find(load(ctx).store, d.item);
   if (self.reroute) return rearrange(d, self, ctx);
   throw new Error(
-    `看板任务不用 decide，用看板的命令：派出去 tasks.dispatch {"id":"${self.id}","parts":[…]}；停掉别的任务 tasks.drop {"id":"tN","reason":"…"}；` +
+    `任务面板上的任务不用 decide，用任务面板的命令：派出去 tasks.dispatch {"id":"${self.id}","parts":[…]}；停掉别的任务 tasks.drop {"id":"tN","reason":"…"}；` +
       `转告 tasks.say {"id":"tN","text":"…"}；它只是条指令、照做完了 tasks.edit {"id":"${self.id}","status":"done","summary":"…"}`,
   );
 }

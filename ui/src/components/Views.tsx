@@ -6,7 +6,7 @@ import { Link, useLocation } from "react-router";
 // handed over and asked about, and the board, for when the user wants to see every task for themselves.
 const VIEWS = [
   { to: "/", label: "秘书", icon: MessageCircle },
-  { to: "/board", label: "看板", icon: ListTodo },
+  { to: "/board", label: "任务面板", icon: ListTodo },
 ];
 
 export function Views() {

@@ -81,7 +81,7 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
 
       {s && (
         <>
-          <Section title="秘书" note="你在秘书页上跟它说话；看板上没指定仓库的任务、外面来的消息，也都由它判断接不接、挑仓库和 agent 再派出去。它只说话和派活、不写代码；它要听懂你、写简报，别用太弱的模型。">
+          <Section title="秘书" note="你在秘书页上跟它说话；任务面板上没指定仓库的任务、外面来的消息，也都由它判断接不接、挑仓库和 agent 再派出去。它只说话和派活、不写代码；它要听懂你、写简报，别用太弱的模型。">
             <WhoFields who={s.router} onChange={(v) => put("router", v)} />
             <Field
               label="压缩对话"
@@ -111,7 +111,7 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
 
           <Section
             title="仓库"
-            note="新任务的仓库下拉和秘书都只看这份。说明写给秘书看（这是哪个服务、哪个产品），它靠这个挑仓库。空着时，看板拿最近用过的目录当建议。"
+            note="新任务的仓库下拉和秘书都只看这份。说明写给秘书看（这是哪个服务、哪个产品），它靠这个挑仓库。空着时，任务面板拿最近用过的目录当建议。"
           >
             <Repos repos={s.repos} onChange={(v) => put("repos", v)} />
           </Section>

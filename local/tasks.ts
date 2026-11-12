@@ -4,7 +4,7 @@ import { workflow } from "./_config";
 import { forWorker } from "./memory";
 import { activity, blockersDone, find, load, members, newTask, note, reqOf, splitRef, update, type Question, type Store, type Task } from "./_store";
 import { applyBlock } from "./_apply";
-import { askUser, endQuestions, endWaits, isOutside, open, question, syncAgents, syncSessions, wakeText, type Wait } from "./_waits";
+import { endQuestions, endWaits, isOutside, open, question, syncAgents, syncSessions, wakeText, type Wait } from "./_waits";
 import { cutLine, wake } from "./_wake";
 import { allAgents, mentionsIn } from "./_agents";
 import { isMain, rerouteTask, routeTask, sweep, toMain } from "./_main";
@@ -15,20 +15,23 @@ export type { Task };
 // things only the user can do (UI clicks, accounts, approvals). Everything here is deterministic: the page, the
 // panel agent (`gerdr panel run tasks.<fn> '<json>'`) and worker replies all go through these functions.
 //
-// Workers report through the board's panel tools (board.ts: task_update, ask_human, cancel_human), which Gerdr gives
-// them over MCP. Older workers ended replies with a ```gerdr-task``` JSON block instead; `list` still reads those.
+// Workers don't report (2026-11-12): the task panel follows their sessions, and a turn that ends waiting on nothing
+// puts the task before the user (待验收). What they still tell it goes through the panel tools (board.ts: wait_for,
+// ask_human, cancel_human; task_update only for links), which Gerdr gives them over MCP. Older workers ended replies
+// with a ```gerdr-task``` JSON block; `list` still reads those.
 
 // What a worker is told besides its task: short, since it shows in the chat as part of the first message. How to
 // use each tool is in the tools' own descriptions (board.ts), the user's way of working in the panel's skills — named
-// by absolute path (skillFile): "the skill, references/board.md" had the worker search the disk for it.
+// by absolute path (skillFile): "the skill, references/task.md" had the worker search the disk for it.
 // Old sessions may still end replies with a ```gerdr-task``` block: list() keeps reading those.
 // Not exported: an exported function here is one a page or an agent can call (tasks.<name>).
 function workerProtocol(ctx: Ctx, id: string) {
   return `
 
 ---
-This is task ${id} on the user's Superagent board: they follow it there, not in this chat. How to work on it (reporting
-with the "work" tools, asking them, sessions you start) is their my-workflow skill: read ${skillFile(ctx, "my-workflow/references/board.md")} first.
+This is task ${id} on the user's Superagent task panel: opening it there opens this chat. Nothing to report: say it
+in your replies, conclusion first. How to work on it (waiting on others, asking them, sessions you start) is their
+my-workflow skill: read ${skillFile(ctx, "my-workflow/references/task.md")} first.
 `;
 }
 
@@ -149,22 +152,18 @@ export async function list(input: unknown, ctx: Ctx) {
       // question / blocked still apply: they say something changed or is needed.
       if (b && sess.byPerson && b.state === "review" && t.status === "running") applyBlock(s, t, { ...b, state: undefined });
       else if (b) applyBlock(s, t, b);
-      else if (t.status === "running" && sess.status === "idle" && !t.viaTools && !cancelled) askUser(t, `${STOPPED_ASK}：去对话里看看它说了什么，让它接着做，或者直接「标为完成」`);
-      else if (t.status === "running" && sess.status === "idle" && t.viaTools && !settled(t) && !cancelled && !busyBehind(sess) && !repliedLast(s, t)) {
-        // It stopped in no state the board knows: a question written only in its reply (t3, 2026-11-04), "I'll wait"
-        // with nothing to wake it (t29), "working" reported and then nothing (t30), work handed to a session with no
-        // timeout on it (#1, 2026-11-06). Reminded once to put itself in one; if it stops like that again, it is put in
-        // one for it: waiting on the user, with what it last said. Either way it never sits in 进行中 with nothing to
-        // wake it.
+      else if (t.status === "running" && sess.status === "idle" && !settled(t) && !cancelled && !busyBehind(sess)) {
+        // Its turn ended and it waits on nothing: its turn is over, so it's the user's to look at (待验收), with what it
+        // said last as the card's line. No reporting (2026-11-12, the user: workers say things in their reply; the
+        // task panel reads the session). The one thing it is still reminded of: work it handed to another session
+        // with nobody waiting on it (wait_for), which nothing would wake it for.
         const out = open(t).filter((w) => w.kind === "session");
-        if ((t.nudges ?? 0) < 1) {
+        if (out.length && (t.nudges ?? 0) < 1) {
           t.nudges = (t.nudges ?? 0) + 1;
           nudge.push({ session: sess.id, id: t.id, out: out.map((w) => w.what.replace(/^它派出的/, "")) });
-        } else if (out.length) {
-          askUser(t, `派出去了没人盯：${out.map((w) => w.what.replace(/^它派出的/, "")).join("；")}。提醒过它带超时等，它还是停下了：去对话里让它 wait_for，或者你来接手`);
         } else {
-          const said = String(sess.reply ?? "").replace(/\s+/g, " ").trim();
-          askUser(t, `Worker 停下了，没在看板上汇报。它最后说：「${[...said].slice(0, 160).join("")}${[...said].length > 160 ? "…" : ""}」`);
+          const said = firstWords(String(sess.reply ?? ""));
+          Object.assign(t, { status: "review", reportedAt: Date.now(), ...(said ? { summary: said } : {}) });
         }
       }
       t.updatedAt = Date.now();
@@ -173,15 +172,13 @@ export async function list(input: unknown, ctx: Ctx) {
     return s;
   });
   for (const n of nudge) {
-    const fold = n.reply ? "[看板] 提醒：用户在等你回话" : n.out.length ? "[看板] 提醒：派出去的活要用 wait_for 等着" : "[看板] 提醒：停下了，看板上看不出接下来要什么";
+    const fold = n.reply ? "[任务面板] 提醒：用户在等你回话" : "[任务面板] 提醒：派出去的活要用 wait_for 等着";
     await ctx.sessions
       .send(
         n.session,
         n.reply
-          ? `[看板] 用户在等你回话（任务 ${n.id}）：在回复里答他。`
-          : n.out.length
-          ? `[看板] 你把活派出去了，但没有等它（任务 ${n.id}）：${n.out.join("；")}。照 board.md「等别人」用 wait_for 等它（带超时），然后结束这一轮。`
-          : `[看板] 你这一轮停下了，但看板上看不出接下来要什么（任务 ${n.id}）。照 board.md「停下的时候只有两种」补上汇报，别重复聊天里说过的话。`,
+          ? `[任务面板] 用户在等你回话（任务 ${n.id}）：在回复里答他。`
+          : `[任务面板] 你把活派出去了，但没有等它（任务 ${n.id}）：${n.out.join("；")}。照 task.md「等别人」用 wait_for 等它（带超时），然后结束这一轮。`,
         { fold } as any,
       )
       .catch(() => {});
@@ -259,10 +256,20 @@ function teams<T extends Task & { column: string }>(s: Store, tasks: T[]) {
 }
 
 /** The board's own question when a worker stops without reporting (older tasks have it): told apart from a real one. */
+/** Kept to recognize the question older tasks still have open (before 2026-11-12 a worker stopping unreported got it). */
 const STOPPED_ASK = "Worker 停下了，但没在看板上汇报进展";
 
 /** Gerdr's note at the end of a reply on how the turn ended (lastReply in its workhost.go): not the worker's words. */
 const ENDING = /^(这一轮结束：|Turn ended: |出错：|Error: )/;
+
+/**
+ * A reply's first paragraph, whitespace folded, cut to 200 characters: the card's line for a worker whose turn ended
+ * (its conclusion usually leads; Gerdr's note on how the turn ended is skipped).
+ */
+export function firstWords(reply: string) {
+  const p = reply.split(/\n\s*\n/).map((x) => x.replace(/\s+/g, " ").trim()).find((x) => x && !ENDING.test(x)) ?? "";
+  return [...p].length > 200 ? [...p].slice(0, 200).join("") + "…" : p;
+}
 
 /** The worker's last paragraph, whitespace folded, its end kept when long (the card shows two lines). */
 export function lastWords(reply: string) {
@@ -292,7 +299,7 @@ function stopWhy(t: Task, sess: any, s?: Store) {
   if (sess?.stopReason && sess.stopReason !== "end_turn") return `这一轮没正常结束（${sess.stopReason}）`;
   if (!sess) return "对话关掉了";
   if (s && repliedLast(s, t)) return "回了你的话，等你接着说";
-  return `停下了，没在看板上说接下来要什么${(t.nudges ?? 0) > 0 ? "（提醒过一次）" : ""}`;
+  return "停下了";
 }
 
 /**
@@ -585,7 +592,7 @@ export async function reject(input: { id: string; feedback: string }, ctx: Ctx) 
     Object.assign(t, { status: "running", updatedAt: Date.now() });
     return t;
   });
-  await tell(ctx, t, `验收没通过：${input.feedback.trim()}\n改完用 task_update 汇报。`);
+  await tell(ctx, t, `验收没通过：${input.feedback.trim()}\n改完在回复里说改了什么。`);
   return t;
 }
 
@@ -680,7 +687,7 @@ export async function refreshAsk(input: { id: string }, ctx: Ctx) {
   await wake(ctx, w.id, {
     how: "你请它更新问题",
     text:
-      `[看板] 用户请你把还在问他的 ${ids} 按现在的情况更新：这些是在你们后来的对话之前问的。\n` +
+      `[任务面板] 用户请你把还在问他的 ${ids} 按现在的情况更新：这些是在你们后来的对话之前问的。\n` +
       `- 还要问但问法变了：ask_human 带 replaces（写上旧的 id）重新问，写清现在的情况和选项；\n` +
       `- 已经不用问了：cancel_human，说明原因；\n` +
       `- 还是原样要问：不用改，用 message_user 说一句「这个问题还是要你定」。\n做完就结束这一轮。`,
@@ -722,9 +729,9 @@ export async function message(input: { id: string; to?: string[]; text: string; 
     const others = targets.filter((x) => x !== m);
     await wake(ctx, m.id, {
       how: "你发了消息",
-      fold: `[看板] 你在秘书那里问：${cutLine(text, 50)}`,
+      fold: `[任务面板] 你在秘书那里问：${cutLine(text, 50)}`,
       text:
-        `[看板] 用户在秘书那里问你：\n\n${text}${list}`,
+        `[任务面板] 用户在秘书那里问你：\n\n${text}${list}`,
       files: files.map((a) => a.path),
       resume: true,
       // One line for all of them, written with the first

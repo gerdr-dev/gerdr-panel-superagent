@@ -46,7 +46,7 @@ export const tools = {
       "{type: time, minutes}: the timeout, required: woken after that long if nothing else came; " +
       "Every wait needs a time item as its timeout (how long it should take): whoever you wait on may never answer — stuck, offline, forgot; a wait without one is refused. Handed work to a session you started (gerdr session new, here or on another computer)? You are the one who waits for it, the same way: its report wakes you first; past the timeout, go and see where it's stuck. " +
       "Waiting on a person to do something you can see (approve, merge, deploy)? Give both a message and a check. " +
-      "Your card stays in progress meanwhile, showing `what`. When the last thing you waited on came and you got something done with it (it went live, a check passed), say that result in your reply first. Then end your turn; when woken and still waiting, call it again (it replaces the last one). When to use: the my-workflow skill, references/board.md.",
+      "Your card stays in progress meanwhile, showing `what`. When the last thing you waited on came and you got something done with it (it went live, a check passed), say that result in your reply first. Then end your turn; when woken and still waiting, call it again (it replaces the last one). When to use: the my-workflow skill, references/task.md.",
     input: {
       type: "object",
       properties: {
@@ -373,7 +373,7 @@ export async function tick(input: unknown, ctx: Ctx) {
         : "";
       await wake(ctx, t.id, {
         how: "到点了，回来看",
-        text: `[看板] 到时间了，回来看一下（任务 ${t.id}）：${w.what}。${late}`,
+        text: `[任务面板] 到时间了，回来看一下（任务 ${t.id}）：${w.what}。${late}`,
         // The whole wait_for ends: it looks again and waits again if it must
         ends: isOutside,
       });
@@ -421,11 +421,11 @@ async function runChecks(ctx: Ctx): Promise<string[]> {
       try {
         await wake(ctx, t.id, {
           how,
-          fold: code === 0 ? `[看板] 等到了「${cutLine(w.what, 30)}」：${cutLine(last.out || "exit 0", 50)}` : `[看板] 检查命令连着 3 次出错：${cutLine(w.what, 30)}`,
+          fold: code === 0 ? `[任务面板] 等到了「${cutLine(w.what, 30)}」：${cutLine(last.out || "exit 0", 50)}` : `[任务面板] 检查命令连着 3 次出错：${cutLine(w.what, 30)}`,
           text:
             code === 0
-              ? `[看板] 你等的「${w.what}」检查到了（任务 ${t.id}）。检查命令的输出：\n\n${tail || "（没有输出）"}`
-              : `[看板] 你为「${w.what}」写的检查命令连着 3 次没跑成（任务 ${t.id}）：\n\n${tail}\n\n看看命令哪里不对，改好再 wait_for。`,
+              ? `[任务面板] 你等的「${w.what}」检查到了（任务 ${t.id}）。检查命令的输出：\n\n${tail || "（没有输出）"}`
+              : `[任务面板] 你为「${w.what}」写的检查命令连着 3 次没跑成（任务 ${t.id}）：\n\n${tail}\n\n看看命令哪里不对，改好再 wait_for。`,
           ends: isOutside,
           also: (x) => {
             const ww = (x.waits ?? []).find((y) => y.id === w.id);

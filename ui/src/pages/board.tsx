@@ -1590,7 +1590,7 @@ function stuckText(x: Task) {
   if (x.live?.status === "error") return `出错了：${x.live.error ?? ""}`;
   if (k) return `它派出的「${k.title}」${k.waitingKind === "ask" ? "在问" : "要你批准"}：${k.waiting ?? ""}`;
   // The board's own ask on older tasks when a worker stopped without reporting: a stop, not a question from it
-  if (x.question?.startsWith("Worker 停下了")) return "停下了，没在看板上汇报";
+  if (x.question?.startsWith("Worker 停下了")) return "停下了";
   if (x.question) return `问你：${x.question}`;
   if (x.stopped) return x.stopWhy ?? "停下了";
   return "在等你";

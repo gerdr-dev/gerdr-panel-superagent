@@ -53,7 +53,7 @@ export default function Log({ onTask }: { onTask: (id: string) => void }) {
         <h1 className="text-[22px] font-semibold tracking-tight">去向</h1>
         <p className="mt-1 text-[13px] text-muted-foreground">
           外面来的每条消息去了哪。已有任务的对话里的后续直接交给那个任务；其余的由 Superagent 判断是不是活、派给谁。
-          「不是找你的」只按主动工作的规则接；规则还在「只记录」时，记成「本来会接」，看对了点「照做」。看板上自己建的任务不在这里。
+          「不是找你的」只按主动工作的规则接；规则还在「只记录」时，记成「本来会接」，看对了点「照做」。任务面板上自己建的任务不在这里。
         </p>
       </header>
       {err && <p role="alert" className="text-[13px] text-bad">{err}</p>}

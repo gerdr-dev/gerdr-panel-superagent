@@ -12,7 +12,7 @@
 // the sessions it handed work to. An MR is no kind of its own: a way of working (the worker's skill) plus a source of
 // events (the GitLab add-on, subscribed to by the wait's follow trigger, waits.ts), waited on like any conversation. The board reads only this:
 //
-//   有直接等你的（问题、批准）→ 等你（等你在看板上做的那一项，是那一项的卡片在等你）
+//   有直接等你的（问题、批准）→ 等你（等你在任务面板上做的那一项，是那一项的卡片在等你）
 //   worker 在跑，或者还有等待 → 进行中
 //   都没有、worker 也停了     → 停下了（等你，要你看一眼）
 //
@@ -278,7 +278,7 @@ export function wakeText(w: Wait): string {
     case "session":
       return "它做完会回报，Gerdr 把结果交给 worker";
     case "user":
-      return w.item ? `你在看板上做完 / 答了 ${w.item} 就叫醒它` : "你在对话里回复，或在看板上回答，就叫醒它";
+      return w.item ? `你在任务面板上做完 / 答了 ${w.item} 就叫醒它` : "你在对话里回复，或在任务面板上回答，就叫醒它";
     case "task":
       return `${w.item} 做完就叫醒它`;
     case "teammate":
