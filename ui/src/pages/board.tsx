@@ -279,6 +279,7 @@ export default function BoardPage() {
           trail={{ task: sel.id, version: sel.updatedAt, current: viewing, router: sel.router, onSession: setShown, onTask: setOpen, onRules: () => setSettings("settings") }}
           onAction={onAction}
           onClose={() => setOpen("")}
+          extra={sel.assigned && sel.assigned.state !== "ask" ? <div className="shrink-0 border-b px-3 py-2"><ReplyBox t={sel} act={act} /></div> : undefined}
         />
       )}</Linger>
       <Linger>{peek && (
@@ -813,9 +814,11 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
           要附截图：在对话里说哪里不对
         </button>
       )}
+      {t.assigned?.state === "ask" && <AssignBox t={t} act={act} save={save} />}
+      {t.assigned && t.assigned.state !== "ask" && !t.session && <ReplyBox t={t} act={act} />}
       {err && <p role="alert" className="text-[12px] text-bad">{err}</p>}
       <div className="flex flex-wrap justify-end gap-2">
-        {t.status === "todo" && !t.routing && (
+        {t.status === "todo" && !t.routing && t.assigned?.state !== "ask" && (
           <Button disabled={!!busy || (editable && !draft.trim())} onClick={async () => (await save()) && go("start", "start", { id: t.id })}>
             {busy === "start" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}派出去
           </Button>
@@ -845,6 +848,83 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
   );
 }
 
+/**
+ * Work someone asked of the user, not agreed yet (local/assign.ts): an agent does it (sent out at once, with the
+ * agent and repository it suggested, else the secretary picks), they arrange it themselves, or they say no.
+ */
+function AssignBox({ t, act, save }: { t: Task; act: Act; save: () => Promise<boolean> }) {
+  const { busy, err, go } = useAction(act);
+  const [no, setNo] = useState(false);
+  const [why, setWhy] = useState("");
+  return (
+    <div className="space-y-2 rounded-md border border-warn/40 bg-warn/5 p-3">
+      <p className="text-[13px]">
+        {t.assigned?.by ?? "有人"} 请你做这件事{t.origin?.url ? <a className="ml-1 text-brand hover:underline" href={t.origin.url} target="_blank" rel="noreferrer">原文</a> : null}。同意之前什么都不会跑；上面的说明可以先改。
+      </p>
+      {no ? (
+        <div className="flex gap-2">
+          <input autoFocus value={why} onChange={(e) => setWhy(e.target.value)} placeholder="为什么不做（会告诉对方）" className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]" />
+          <Button disabled={!why.trim() || !!busy} onClick={() => go("decline", "decline", { id: t.id, reason: why })}>
+            {busy === "decline" ? <Loader2 className="size-3.5 animate-spin" /> : <X className="size-3.5" />}拒绝
+          </Button>
+          <Button variant="ghost" size="icon" aria-label="取消" onClick={() => setNo(false)}>
+            <X className="size-4" />
+          </Button>
+        </div>
+      ) : (
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button variant="ghost" disabled={!!busy} onClick={() => setNo(true)}>
+            拒绝
+          </Button>
+          <Button variant="outline" disabled={!!busy} title="变成你自己的任务：你来安排，可以再拆成几个交给 agent" onClick={async () => (await save()) && go("self", "agree", { id: t.id, how: "self" })}>
+            {busy === "self" ? <Loader2 className="size-3.5 animate-spin" /> : <Hand className="size-3.5" />}同意，我自己安排
+          </Button>
+          <Button disabled={!!busy} title={t.repo ? `交给 agent，在 ${t.repo.split("/").pop()} 里做` : "交给 agent；仓库由秘书挑"} onClick={async () => (await save()) && go("agent", "agree", { id: t.id, how: "agent" })}>
+            {busy === "agent" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}同意，交给 agent 做
+          </Button>
+        </div>
+      )}
+      {err && <p role="alert" className="text-[12px] text-bad">{err}</p>}
+    </div>
+  );
+}
+
+/**
+ * Answering whoever asked for this task (local/assign.ts replyOrigin): 回复 says something, 回复并交付 hands it over
+ * for them to accept — only a person delivers, after looking at the work themselves.
+ */
+function ReplyBox({ t, act }: { t: Task; act: Act }) {
+  const { busy, err, go } = useAction(act);
+  const [text, setText] = useState("");
+  const delivered = t.assigned?.state === "delivered" || t.assigned?.state === "done";
+  const send = async (deliver: boolean) => (await go(deliver ? "deliver" : "say", "replyOrigin", { id: t.id, text, deliver })) && setText("");
+  return (
+    <div className="space-y-1.5">
+      <p className="text-[12px] text-muted-foreground">
+        {delivered ? `已交付给 ${t.assigned?.by ?? "发起人"}，等对方验收；还可以接着回复` : `回复 ${t.assigned?.by ?? "发起人"}：worker 做完先到你这里看，你觉得完成了再交付`}
+      </p>
+      <textarea
+        rows={2}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder={`写给 ${t.assigned?.by ?? "发起人"} 的话`}
+        className="w-full resize-y rounded-md border bg-background px-2 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]"
+      />
+      <div className="flex justify-end gap-2">
+        <Button variant="outline" disabled={!text.trim() || !!busy} onClick={() => send(false)}>
+          {busy === "say" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}回复
+        </Button>
+        {!delivered && (
+          <Button disabled={!text.trim() || !!busy} onClick={() => send(true)}>
+            {busy === "deliver" ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}回复并交付
+          </Button>
+        )}
+      </div>
+      {err && <p role="alert" className="text-[12px] text-bad">{err}</p>}
+    </div>
+  );
+}
+
 function HumanCard({ t, byId, act, onGo }: { t: Task; byId: Record<string, Task>; act: Act; onGo: (id: string) => void }) {
   const { busy, err, go } = useAction(act);
   const [value, setValue] = useState("");
@@ -857,6 +937,20 @@ function HumanCard({ t, byId, act, onGo }: { t: Task; byId: Record<string, Task>
   }, [kind, t.handBack?.name, secretAsked]);
   const blocks = Object.values(byId).filter((x) => x.blockedBy?.includes(t.id) && x.status !== "done" && x.status !== "dropped");
   const complete = (v?: string) => go("complete", "complete", { id: t.id, value: v ?? (kind === "value" || kind === "choice" ? value : undefined) });
+  // Asked of the user by someone and arranged by them (assign.ts): they answer whoever asked, and deliver
+  if (t.assigned && t.assigned.state !== "ask")
+    return (
+      <Card t={t} icon={<Hand className="size-4" />}>
+        <h3 className="text-[16px] font-medium">{t.title}</h3>
+        <Meta t={t} byId={byId} />
+        {t.steps && <Md>{t.steps}</Md>}
+        <ReplyBox t={t} act={act} />
+        {err && <p role="alert" className="text-[12px] text-bad">{err}</p>}
+        <div className="flex justify-end">
+          <DropButton busy={!!busy} onDrop={() => go("drop", "drop", { id: t.id })} />
+        </div>
+      </Card>
+    );
   if (kind === "questions") return <Questions t={t} byId={byId} act={act} onGo={onGo} />;
   if (kind === "choice") return <Decision t={t} byId={byId} busy={busy} err={err} onPick={complete} onDrop={() => go("drop", "drop", { id: t.id })} onGo={onGo} />;
   return (

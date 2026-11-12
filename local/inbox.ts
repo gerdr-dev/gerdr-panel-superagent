@@ -10,6 +10,7 @@ import { load } from "./_store";
 import { migrate } from "./_user";
 import { workflow } from "./_config";
 import { compact, evaluate, followUp, record, state, subscribers } from "./_main";
+import { onAssignEvent } from "./assign";
 
 // Which events this person takes in is theirs: their trigger files live in user/triggers/ (Gerdr reads them beside the
 // panel's own triggers/, like triggers/mr.json)
@@ -165,6 +166,12 @@ export async function onEvent(input: { event: GerdrEvent; trigger?: string; allo
   if (input.off) return { off: true };
   const { store } = load(ctx);
   if (store.tasks.some((t) => t.origin?.id === e.id || t.followups?.includes(e.id)) || state(ctx).items.some((x) => x.event.id === e.id)) return { duplicate: true };
+  // Work asked of the user (data.assign) and what became of it (data.update): theirs to decide, not the secretary's
+  const as = await onAssignEvent(ctx, e);
+  if (as.handled) {
+    const it = record(ctx, compact(e), { state: as.task ? "delivered" : "filtered", tasks: as.task ? [as.task] : undefined, reason: as.note });
+    return { item: it.id, assign: as };
+  }
   const ev = compact(e);
   const owners = subscribers(store.tasks, ev);
   // 设置 → 任务对话里的后续: straight to the task's worker, or judged by the secretary first (it sees the tasks of this

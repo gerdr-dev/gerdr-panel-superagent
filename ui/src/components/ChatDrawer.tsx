@@ -28,7 +28,10 @@ export function ChatDrawer({
   onAction,
   onClose,
   back,
+  extra,
 }: {
+  /** Under the title row: the page's own strip (answering whoever asked for this task). */
+  extra?: ReactNode;
   /** Where it was opened from (a requirement's drawer, by a member's avatar): a way back there in the title row. */
   back?: { label: string; onBack: () => void };
   session: string;
@@ -104,6 +107,7 @@ export function ChatDrawer({
       >
         <SheetTitle className="sr-only">{s?.title || session}</SheetTitle>
         {trail ? <Trail {...trail} header={header} /> : header(null)}
+        {extra}
         {(label || shown.length > 0 || items?.length) && (
           <div className="shrink-0 space-y-1 border-b bg-muted/40 px-3 py-1.5">
             {(label || shown.length > 0) && (

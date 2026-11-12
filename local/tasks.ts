@@ -164,7 +164,7 @@ export async function list(input: unknown, ctx: Ctx) {
       // question / blocked still apply: they say something changed or is needed.
       if (b && sess.byPerson && b.state === "review" && t.status === "running") applyBlock(s, t, { ...b, state: undefined });
       else if (b) applyBlock(s, t, b);
-      else if (t.status === "running" && sess.status === "idle" && !settled(t) && !cancelled && !busyBehind(sess)) {
+      else if (t.status === "running" && sess.status === "idle" && !settled(t) && !cancelled && !busyBehind(sess) && t.assigned?.state !== "delivered") {
         // Its turn ended and it waits on nothing: its turn is over, so it's the user's to look at (待验收), with what it
         // said last as the card's line. No reporting (2026-11-12, the user: workers say things in their reply; the
         // task panel reads the session). The one thing it is still reminded of: work it handed to another session
@@ -369,6 +369,9 @@ function dropOrphans(s: Store) {
 function column(s: Store, t: Task, sess: any): "you" | "review" | "active" | "done" {
   if (t.status === "done" || t.status === "dropped") return "done";
   if (t.status === "review") return "review";
+  // Asked of the user by someone: theirs to agree to. Delivered: whoever asked has it now
+  if (t.assigned?.state === "ask") return "you";
+  if (t.assigned?.state === "delivered") return "active";
   if (t.owner === "human") return blockersDone(s, t) ? "you" : "active";
   if (sess?.status === "waiting" || sess?.status === "error") return "you";
   // Waiting on the user right here (a question, a helper's approval): its card is what they act on. A step / question
@@ -1284,3 +1287,6 @@ export function repos(input: unknown, ctx: Ctx) {
   if (!mine.length) for (const d of ctx.dirs.recent()) add(d.path, true);
   return out.slice(0, 40);
 }
+
+// Work asked of the user by someone (assign.ts), as the board's actions: tasks.agree / decline / replyOrigin
+export { agree, decline, replyOrigin } from "./assign";
