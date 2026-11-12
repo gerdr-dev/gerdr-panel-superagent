@@ -1,8 +1,10 @@
-import { ArrowDownRight, ArrowLeft, MoreHorizontal, X } from "lucide-react";
+import { ArrowDownRight, ArrowLeft, FolderOpen, MessageSquare, MoreHorizontal, X } from "lucide-react";
 import clsx from "clsx";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Sheet, SheetContent, SheetTitle } from "./ui/sheet";
+import * as core from "@gerdr/core";
 import { SessionChat, useSession } from "@gerdr/core";
+import { run } from "../lib/gerdr";
 import { Button } from "./Button";
 import { Trail, type TrailProps } from "./Trail";
 
@@ -29,7 +31,10 @@ export function ChatDrawer({
   onClose,
   back,
   extra,
+  task,
 }: {
+  /** The task it is about: a 文件 tab beside the chat shows the task's artifacts folder (tasks.folder). */
+  task?: string;
   /** Under the title row: the page's own strip (answering whoever asked for this task). */
   extra?: ReactNode;
   /** Where it was opened from (a requirement's drawer, by a member's avatar): a way back there in the title row. */
@@ -52,6 +57,38 @@ export function ChatDrawer({
   useEffect(() => setArmed(""), [session]);
   const [full, setFull] = useState(false);
   useEffect(() => setFull(false), [label]);
+  // 对话 / 文件. The folder view is Gerdr's (ArtifactsFolder, from 2026-11-12): an older Gerdr has none and no tab
+  const Folder = (core as any).ArtifactsFolder as ((p: { dir: string }) => ReactNode) | undefined;
+  const [tab, setTab] = useState<"chat" | "files">("chat");
+  const [dir, setDir] = useState<string | null>(null);
+  useEffect(() => {
+    setTab("chat");
+    setDir(null);
+  }, [task]);
+  useEffect(() => {
+    if (tab !== "files" || !task || dir) return;
+    run<{ path: string } | null>("tasks.folder", { id: task }).then((f) => setDir(f?.path ?? ""), () => setDir(""));
+  }, [tab, task, dir]);
+  const tabs =
+    task && Folder ? (
+      <div className="mr-1 flex shrink-0 rounded-md bg-muted p-0.5 text-[12px]">
+        {(
+          [
+            ["chat", "对话", MessageSquare],
+            ["files", "文件", FolderOpen],
+          ] as const
+        ).map(([k, label, Icon]) => (
+          <button
+            key={k}
+            onClick={() => setTab(k)}
+            className={clsx("flex items-center gap-1 rounded-sm px-2 py-0.5 text-muted-foreground", tab === k && "bg-background text-foreground shadow-xs")}
+          >
+            <Icon className="size-3.5" />
+            {label}
+          </button>
+        ))}
+      </div>
+    ) : null;
   const go = (ref: string) => setJump((j) => ({ ref, seq: (j?.seq ?? 0) + 1 }));
   const act = (a: ChatAction) => {
     if (a.confirm && armed !== a.id) return setArmed(a.id);
@@ -82,6 +119,7 @@ export function ChatDrawer({
       )}
       <span className={clsx("mr-1 size-2 shrink-0 rounded-full", s?.status === "running" ? "bg-ok" : s?.status === "waiting" || s?.status === "error" ? "bg-warn" : "bg-muted-foreground/40")} />
       <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{s?.title || session}</span>
+      {tabs}
       {toggle}
       {tucked.length > 0 && <Menu actions={tucked} armed={armed} onPick={act} onClose={() => setArmed("")} />}
       <Button variant="ghost" size="icon" className="size-7" title="关闭" onClick={onClose}>
@@ -138,9 +176,15 @@ export function ChatDrawer({
             ))}
           </div>
         )}
-        <div className="min-h-0 flex-1">
+        {/* The chat stays mounted under 文件: switching back keeps its place and what was typed */}
+        <div className={clsx("min-h-0 flex-1", tab !== "chat" && "hidden")}>
           <SessionChat id={session} focused jump={jump} sendNow sub={sub} onSub={onSub} />
         </div>
+        {tab === "files" && Folder && (
+          <div className="min-h-0 flex-1">
+            {dir ? <Folder dir={dir} /> : <div className="p-6 text-center text-[13px] text-muted-foreground">{dir === "" ? "这个任务还没有文件夹" : "…"}</div>}
+          </div>
+        )}
       </SheetContent>
     </Sheet>
   );

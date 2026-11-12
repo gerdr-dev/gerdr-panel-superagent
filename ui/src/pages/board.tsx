@@ -277,6 +277,7 @@ export default function BoardPage() {
           onSub={(tc) => setShown(convo(view.session, tc))}
           {...panel}
           trail={{ task: sel.id, version: sel.updatedAt, current: viewing, router: sel.router, onSession: setShown, onTask: setOpen, onRules: () => setSettings("settings") }}
+          task={sel.id}
           onAction={onAction}
           onClose={() => setOpen("")}
           extra={sel.assigned && sel.assigned.state !== "ask" ? <div className="shrink-0 border-b px-3 py-2"><ReplyBox t={sel} act={act} /></div> : undefined}

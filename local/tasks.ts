@@ -469,8 +469,32 @@ async function startUnblocked(ctx: Ctx) {
   }
 }
 
+/**
+ * The task's artifacts folder (Gerdr's docs/dev/ARTIFACTS.md): where its work leaves what isn't committed — drafts,
+ * images, videos, reports, copy to publish — and its records (a PR, a folder made elsewhere, a short text), under
+ * ~/Gerdr/<project>/任务/<title>/ where the user finds it in Finder. Created the first time something goes in; the
+ * worker gets it as its artifactsDir, the drawer shows it (文件). null on a Gerdr without ctx.artifacts. { id }
+ */
+export function folder(input: { id: string }, ctx: Ctx): { path: string; exists: boolean } | null {
+  const a = (ctx as any).artifacts;
+  if (!a) return null;
+  const t = find(load(ctx).store, input.id);
+  return a.folder({ key: t.id, name: t.title || t.id, under: "任务" });
+}
+
 /** Changes fields of a task: { id, ...fields }. */
 export function edit(input: Partial<Task> & { id: string }, ctx: Ctx) {
+  // Renamed: its folder follows (when it has one and the new name is free), as the user's Annulo content folders do
+  if (input.title && (ctx as any).artifacts) {
+    const before = find(load(ctx).store, input.id).title;
+    if (before !== input.title) {
+      try {
+        (ctx as any).artifacts.rename(input.id, input.title);
+      } catch (err: any) {
+        ctx.log(`任务文件夹改名失败：${err?.message ?? err}`);
+      }
+    }
+  }
   return update(ctx, (s) => {
     const t = find(s, input.id);
     const { id, createdAt, ...rest } = input as any;
@@ -524,6 +548,9 @@ export async function start(
     ...who,
     title: t.title,
     systemFile: `${ctx.workspace.dir}/${sys}`,
+    // What it makes that isn't committed goes in the task's folder (Gerdr names it in the worker's prompt and lets its
+    // sandbox write there); an older Gerdr ignores the option and the worker uses its repository's
+    artifactsDir: folder({ id: t.id }, ctx)?.path,
     tags: { task: t.id },
     // Followed on the board (its drawer shows the chat), not in Code: no tab of it appears there
     workspace: "none",
