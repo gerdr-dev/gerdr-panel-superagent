@@ -96,7 +96,7 @@ export function askUser(t: Task, text: string): Wait {
   return same ?? addWait(t, { kind: "user", what: text, user: true });
 }
 
-/** The open question to the user (no board item): what the card and the origin's chat are told. */
+/** The open question to the user (no board item): what the card shows. */
 export function question(t: Task): string | undefined {
   return open(t).find((w) => w.kind === "user" && !w.item)?.what;
 }

@@ -220,13 +220,13 @@ export async function followUp(ctx: Ctx, id: string, e: Ev) {
   const text = (e.text ?? "").trim() || e.title || "";
   const files = e.files ?? [];
   // A person in a chat (it has a reply address) "goes on"; anything else (an MR review, a failed pipeline) is headed by
-  // its own title. Only a chat hears back about results (tellOrigins).
+  // its own title.
   const head = e.reply ? `${e.source} 上${by}接着说` : e.title || `${e.source}/${e.kind}`;
   return wake(ctx, id, {
     how: e.reply ? `${by || "有人"}回复了` : e.title || `${e.source}/${e.kind}`,
     text:
       `[${head}]（任务 ${id}，消息 ${e.id}）\n\n${text}\n\n` +
-      `是这个任务的事就照常做、用 task_update 汇报${e.reply ? "，结果会转回给他" : ""}；超出这个任务、或者是别的任务的事，用 hand_back 交回，不要自己答。`,
+      `是这个任务的事就照常做、用 task_update 汇报${e.reply ? "（汇报是给用户看的，不会转给他；要回他什么、什么时候回，你自己判断，用你手上能在这段对话里发消息的工具回，写成对他说的话）" : ""}；超出这个任务、或者是别的任务的事，用 hand_back 交回，不要自己答。`,
     files: files.map((f) => f.path),
     // What it waited on outside came — or something else did: it looks again either way, and waits again if it must
     ends: isOutside,

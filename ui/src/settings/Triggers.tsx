@@ -40,7 +40,7 @@ export default function TriggersPage() {
         <h1 className="text-[22px] font-semibold tracking-tight">触发器</h1>
         <p className="mt-1 text-[13px] text-muted-foreground">
           这个面板收哪些外面发生的事（私信、@ 你、MR、告警……），都在这一页。已有任务的对话里的后续直接交给那个任务，其余的由秘书判断是不是活、派给谁（每条去了哪，看「去向」）。
-          能选什么取决于装了哪些插件、有哪些事件来过；来源支持回复的，接了活、有了结果都会回到原来的对话里说一声。
+          能选什么取决于装了哪些插件、有哪些事件来过；来源支持回复的，接了活会回到原来的对话里说一声（设置 → 回复对方）；之后要回什么由干活的 agent 自己判断、自己回。
         </p>
       </header>
       {err && <p role="alert" className="text-[13px] text-bad">{err}</p>}

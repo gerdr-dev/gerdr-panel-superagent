@@ -2,7 +2,7 @@
 // file per part in user/data/reqs/ (_parts.ts; this person's, never shared — _user.ts). A helper file (leading _):
 // nothing here is callable from a page.
 
-import { addWait, askUser, mrConversation, open, question, sync, type Wait } from "./_waits";
+import { addWait, askUser, mrConversation, open, sync, type Wait } from "./_waits";
 import { migrate } from "./_user";
 import { readAll, split, writeChanged } from "./_parts";
 
@@ -77,7 +77,8 @@ export type Task = {
   mentions?: string[];
   /**
    * The event it came from (a chat message, through the 触发器 settings: local/inbox.ts), with its reply address:
-   * the board answers there when the task is taken, and again when it reaches a result (tellOrigins below).
+   * the board answers there when the task is taken (设置 → 回复对方). Results are not sent back: what the board hears
+   * (done, review, questions) is written for the user; the worker tells the person itself when it judges they should know.
    */
   /** Later messages of the same conversation handled as follow-ups (event ids), so a re-sent one isn't handled twice. */
   followups?: string[];
@@ -221,7 +222,6 @@ export function update<T>(ctx: Ctx, fn: (s: Store) => T): T {
   for (let i = 0; ; i++) {
     const loaded = load(ctx);
     const store = loaded.store;
-    const before = snapshot(store);
     const out = fn(store);
     sync(store);
     // Only the parts this changed are written. Nothing changed (tasks.list reconciling an unchanged board, mostly):
@@ -235,44 +235,8 @@ export function update<T>(ctx: Ctx, fn: (s: Store) => T): T {
       continue;
     }
     if (wrote === "same") return out;
-    if (wrote) {
-      tellOrigins(ctx, before, store);
-      return out;
-    }
+    if (wrote) return out;
     if (i >= 4) throw new Error("看板数据一直在被别处改，没写进去：稍后再试");
-  }
-}
-
-// Every change goes through update, so this is the one place that notices a task from an event reaching a result
-// and answers where it came from (ctx.events.reply: the event's own address, whatever the source — Slack, Feishu…).
-type Seen = Record<string, { status: string; question?: string }>;
-function snapshot(s: Store): Seen {
-  const out: Seen = {};
-  for (const t of s.tasks) if (t.origin?.reply) out[t.id] = { status: t.status, question: question(t) };
-  return out;
-}
-
-function tellOrigins(ctx: Ctx, before: Seen, s: Store) {
-  const reply = (ctx as any).events?.reply;
-  if (typeof reply !== "function") return;
-  for (const t of s.tasks) {
-    const b = before[t.id];
-    if (!b || !t.origin?.reply) continue;
-    let text = "";
-    if (t.status !== b.status) {
-      const summary = t.summary ? `：${t.summary}` : "";
-      if (t.status === "done") text = `${t.id} 做完了${summary}`;
-      else if (t.status === "review") text = `${t.id} 有结论了，等你看${summary}`;
-      else if (t.status === "dropped") text = `${t.id} 不做了`;
-    } else if (question(t) && question(t) !== b.question) {
-      text = `${t.id} 需要你定：${question(t)}（在任务看板上回答）`;
-    }
-    if (!text) continue;
-    try {
-      reply({ ...t.origin, at: 0 }, text);
-    } catch (e: any) {
-      ctx.log(`回复 ${t.origin.source}/${t.origin.kind} 失败：${e?.message ?? e}`);
-    }
   }
 }
 
