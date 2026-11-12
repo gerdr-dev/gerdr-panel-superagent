@@ -180,15 +180,8 @@ export async function list(input: unknown, ctx: Ctx) {
         n.reply
           ? `[看板] 用户在等你回话（任务 ${n.id}）：在回复里答他。`
           : n.out.length
-          ? `[看板] 你把活派出去了，但没有等它（任务 ${n.id}）：${n.out.join("；")}。\n` +
-              `派活的人要自己盯着：现在用 wait_for 等它，what 写等谁做什么，wake 里一定要有 {"type":"time","minutes":N} 作超时（按它要做多久估）。` +
-              `它回报会先叫醒你；到了超时还没回报，你去看它卡在哪（gerdr session read），卡住或那台电脑下线了就换个做法或 ask_human。然后结束这一轮。`
-          : `[看板] 你这一轮停下了，但看板上看不出接下来要什么（任务 ${n.id}）。看板的列只认这些工具，光在回复里说不算：\n` +
-          `- 要用户决定 / 给东西：用 ask_human 登记（决定带 options），然后结束这一轮；\n` +
-          `- 做完了、交付了、要用户验收：用 task_update 报对应的 state；\n` +
-          `- 在等别人（同事回话、job / 发布跑完）：用 wait_for 说等什么、在哪个对话等回复，一定带 {"type":"time"} 超时，然后结束这一轮；\n` +
-          `- 还有能做的：接着做，别停。\n` +
-          `只补汇报，别重复聊天里说过的话。`,
+          ? `[看板] 你把活派出去了，但没有等它（任务 ${n.id}）：${n.out.join("；")}。照 board.md「等别人」用 wait_for 等它（带超时），然后结束这一轮。`
+          : `[看板] 你这一轮停下了，但看板上看不出接下来要什么（任务 ${n.id}）。照 board.md「停下的时候只有两种」补上汇报，别重复聊天里说过的话。`,
         { fold } as any,
       )
       .catch(() => {});
@@ -229,7 +222,7 @@ export async function list(input: unknown, ctx: Ctx) {
   // Task changes aren't sent to the secretary any more (2026-11-11, the user: the board is where they work, the secretary
   // helps; it looks at tasks when a schedule asks it to, secretary.checkStuck)
   for (const a of answered)
-    await toMain(ctx, [`[${a.id} 的回答]（用户问的：${a.asked.length > 80 ? a.asked.slice(0, 80) + "…" : a.asked}）\n\n${a.text || "（它这一轮没说话）"}`], "notice").catch((err: any) =>
+    await toMain(ctx, [`[${a.id} 的回答]（用户问的：${a.asked.length > 80 ? a.asked.slice(0, 80) + "…" : a.asked}）\n\n${a.text || "（它这一轮没说话）"}`], "notice", undefined, false).catch((err: any) =>
       ctx.log(`${a.id} 的回答没转给秘书：${err?.message ?? err}`),
     );
   const board = teams(s, tasks);
@@ -558,7 +551,8 @@ function workerOf(ctx: Ctx, t: Task, input: { agent?: string; model?: string; ef
 async function tell(ctx: Ctx, t: Task, text: string) {
   if (!t.session) throw new Error(`${t.id} 没有在跑的 agent 会话：先派出去（start）`);
   // Right away even mid-step: a worker running something long in the background still takes the message (DESIGN.md)
-  await ctx.sessions.send(t.session, text, { now: true });
+  // The user's words passed on: shown whole in the worker's chat (code's messages fold by default)
+  await ctx.sessions.send(t.session, text, { now: true, show: true } as any);
 }
 
 /** The user accepts the result: done, and the worker is parked (its context kept, a later send wakes it). */
@@ -730,8 +724,7 @@ export async function message(input: { id: string; to?: string[]; text: string; 
       how: "你发了消息",
       fold: `[看板] 你在秘书那里问：${cutLine(text, 50)}`,
       text:
-        `[看板] 用户在秘书那里问你：\n\n${text}${list}\n\n` +
-        `在回复里答就行：你这一轮的回复会原样转到秘书的对话里，他在那里看。`,
+        `[看板] 用户在秘书那里问你：\n\n${text}${list}`,
       files: files.map((a) => a.path),
       resume: true,
       // One line for all of them, written with the first

@@ -226,8 +226,8 @@ export async function followUp(ctx: Ctx, id: string, e: Ev) {
     how: e.reply ? `${by || "有人"}回复了` : e.title || `${e.source}/${e.kind}`,
     fold: `[${e.source}] ${by}${e.reply ? "接着说" : ""}：${cutLine(text, 50)}`,
     text:
-      `[${head}]（任务 ${id}，消息 ${e.id}）\n\n${text}\n\n` +
-      `是这个任务的事就照常做、用 task_update 汇报${e.reply ? "（汇报是给用户看的，不会转给他；要回他什么、什么时候回，你自己判断，用你手上能在这段对话里发消息的工具回，写成对他说的话）" : ""}；超出这个任务、或者是别的任务的事，用 hand_back 交回，不要自己答。`,
+      // How to handle it is in board.md「看板发给你的消息」(the worker's skill), not repeated in every message
+      `[${head}]（任务 ${id}，消息 ${e.id}）\n\n${text}`,
     files: files.map((f) => f.path),
     // What it waited on outside came — or something else did: it looks again either way, and waits again if it must
     ends: isOutside,
@@ -400,20 +400,19 @@ export function isMain(ctx: Ctx, id?: string) {
 
 /**
  * Hands the secretary messages: `blocks` are items in the formats the brief describes, `why` what they are (kept for
- * callers; the chat shows every message anyway). `fold`: the one line its chat shows instead (Gerdr's send fold), for
- * inputs the user reads past — outside messages to triage, tasks to route, a check, a briefing's facts; never what
- * they should read (their own words, a worker's answer). The brief goes to its system file first. One conversation goes on
+ * callers). `fold`: the one line its chat shows instead (Gerdr's send fold); without it Gerdr folds a message from
+ * code to its first line anyway. false: shown whole, for what the user should read (their own words, a worker's answer). The brief goes to its system file first. One conversation goes on
  * and is compacted (secretary.compact), never replaced by time. A new one only when there's none, it failed, or
  * 设置 changed who runs it: it carries the old one on (continueFrom), so the page still reads as one conversation.
  * When the rules changed while it runs, one line says so: its agent only re-reads the system file when it starts again.
  */
-export async function toMain(ctx: Ctx, blocks: string[], why: Why = "route", attachments?: string[], fold?: string): Promise<string> {
+export async function toMain(ctx: Ctx, blocks: string[], why: Why = "route", attachments?: string[], fold?: string | false): Promise<string> {
   void why;
   const body = blocks.join("\n\n");
   const { id, changed, hash: h } = await ensureMain(ctx, body, attachments, fold);
   if (id.fresh) return id.id;
   const text = changed ? `[看板] 你的规则有更新：重读一遍 ${abs(ctx, SYSTEM)}，以它为准。\n\n${body}` : body;
-  await ctx.sessions.send(id.id, text, { ...(attachments?.length ? { attachments } : {}), ...(fold ? { fold } : {}) } as any);
+  await ctx.sessions.send(id.id, text, { ...(attachments?.length ? { attachments } : {}), ...(fold ? { fold } : fold === false ? { show: true } : {}) } as any);
   if (changed) updateState(ctx, (x) => void (x.brief = h));
   return id.id;
 }
@@ -439,7 +438,7 @@ async function writeSystem(ctx: Ctx): Promise<{ hash: string; changed: boolean }
  * The secretary's session, started when there's none (or it failed, or 设置 changed who runs it). `first`: what a
  * new one is sent first (nothing: it just opens, for the page). fresh: it was started now, with `first`.
  */
-export async function ensureMain(ctx: Ctx, first?: string, attachments?: string[], fold?: string): Promise<{ id: { id: string; fresh: boolean }; changed: boolean; hash: string }> {
+export async function ensureMain(ctx: Ctx, first?: string, attachments?: string[], fold?: string | false): Promise<{ id: { id: string; fresh: boolean }; changed: boolean; hash: string }> {
   const { hash: h, changed } = await writeSystem(ctx);
   const s = state(ctx);
   const cur = s.main ? ctx.sessions.get(s.main) : null;
@@ -472,7 +471,7 @@ export async function ensureMain(ctx: Ctx, first?: string, attachments?: string[
   updateState(ctx, (x) => {
     Object.assign(x, { main: sess.id, mains: [...(x.mains ?? []), sess.id], brief: h, who, compactedAt: undefined, system });
   });
-  if (lead || attachments?.length) await ctx.sessions.send(sess.id, lead || "", { ...(attachments?.length ? { attachments } : {}), ...(fold ? { fold } : {}) } as any);
+  if (lead || attachments?.length) await ctx.sessions.send(sess.id, lead || "", { ...(attachments?.length ? { attachments } : {}), ...(fold ? { fold } : fold === false ? { show: true } : {}) } as any);
   // The one it replaces finished its last turn: let it go (still readable, as every one before it)
   if (cur && cur.status !== "running") await ctx.sessions.close(cur.id).catch(() => {});
   return { id: { id: sess.id, fresh: true }, changed: false, hash: h };

@@ -27,7 +27,7 @@ export async function say(input: { text: string; files?: { path: string; name?: 
   const text = (input?.text ?? "").trim();
   const files = (input?.files ?? []).filter((f) => f?.path);
   if (!text && !files.length) throw new Error("说点什么");
-  const id = await toMain(ctx, [`[用户] ${text}`], "user", files.map((f) => f.path));
+  const id = await toMain(ctx, [`[用户] ${text}`], "user", files.map((f) => f.path), false);
   return { main: id };
 }
 

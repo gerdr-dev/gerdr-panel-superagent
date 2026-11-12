@@ -373,7 +373,7 @@ export async function tick(input: unknown, ctx: Ctx) {
         : "";
       await wake(ctx, t.id, {
         how: "到点了，回来看",
-        text: `[看板] 到时间了，回来看一下（任务 ${t.id}）：${w.what}。有结果就照常做、用 task_update 汇报；还没好就再 wait_for（带超时）。${late}`,
+        text: `[看板] 到时间了，回来看一下（任务 ${t.id}）：${w.what}。${late}`,
         // The whole wait_for ends: it looks again and waits again if it must
         ends: isOutside,
       });
@@ -424,7 +424,7 @@ async function runChecks(ctx: Ctx): Promise<string[]> {
           fold: code === 0 ? `[看板] 等到了「${cutLine(w.what, 30)}」：${cutLine(last.out || "exit 0", 50)}` : `[看板] 检查命令连着 3 次出错：${cutLine(w.what, 30)}`,
           text:
             code === 0
-              ? `[看板] 你等的「${w.what}」检查到了（任务 ${t.id}）。检查命令的输出：\n\n${tail || "（没有输出）"}\n\n照常接着做、用 task_update 汇报；还要等别的就再 wait_for。`
+              ? `[看板] 你等的「${w.what}」检查到了（任务 ${t.id}）。检查命令的输出：\n\n${tail || "（没有输出）"}`
               : `[看板] 你为「${w.what}」写的检查命令连着 3 次没跑成（任务 ${t.id}）：\n\n${tail}\n\n看看命令哪里不对，改好再 wait_for。`,
           ends: isOutside,
           also: (x) => {
