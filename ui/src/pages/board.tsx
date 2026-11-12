@@ -946,8 +946,13 @@ function HumanCard({ t, byId, act, onGo }: { t: Task; byId: Record<string, Task>
         {t.steps && <Md>{t.steps}</Md>}
         <ReplyBox t={t} act={act} />
         {err && <p role="alert" className="text-[12px] text-bad">{err}</p>}
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-2">
           <DropButton busy={!!busy} onDrop={() => go("drop", "drop", { id: t.id })} />
+          {t.assigned.state === "agreed" && t.assigned.how === "self" && (
+            <Button variant="outline" disabled={!!busy} title="让 agent 按上面的说明去做；仓库由秘书挑。做完先回到你这里看" onClick={() => go("agent", "agree", { id: t.id, how: "agent" })}>
+              {busy === "agent" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}交给 agent 做
+            </Button>
+          )}
         </div>
       </Card>
     );

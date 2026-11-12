@@ -112,9 +112,20 @@ function tell(ctx: Ctx, t: Task, text: string, data: Record<string, unknown>) {
 /**
  * The user agrees: { id, how: "agent" | "self", agent?, repo?, prompt? }. agent: sent out at once (with the agent and
  * repository chosen, else the suggested ones); self: it becomes a task of their own (split it with new tasks from it).
+ * A task already agreed as self can still go to an agent this way (how: "agent").
  */
 export async function agree(input: { id: string; how: "agent" | "self"; agent?: string; repo?: string; prompt?: string }, ctx: Ctx) {
   const t = assignedTask(ctx, input.id);
+  // Agreed to arrange it themselves (or one's own task, which arrives agreed), then handing it to an agent after all
+  if (t.assigned!.state === "agreed" && t.assigned!.how === "self" && input.how === "agent" && t.owner === "human") {
+    tell(ctx, t, "", { step: "how", how: "agent" });
+    update(ctx, (s) => {
+      const x = find(s, t.id);
+      const prompt = (input.prompt ?? x.steps ?? x.title).trim();
+      Object.assign(x, { owner: "agent", prompt, status: "todo", updatedAt: Date.now(), assigned: { ...x.assigned, how: "agent" } });
+    });
+    return start({ id: t.id, repo: input.repo || t.repo || t.assigned!.repos?.[0], agent: input.agent || t.agent }, ctx);
+  }
   if (t.assigned!.state !== "ask") throw new Error(`${t.id} 已经同意过了`);
   if (input.how !== "agent" && input.how !== "self") throw new Error("how 只能是 agent 或 self");
   tell(ctx, t, "", { step: "agree", how: input.how });
