@@ -573,17 +573,15 @@ function cut(text: string, n: number) {
 function eventBlock(it: Item, tasks: Task[]) {
   const e = it.event;
   const related = tasks.filter((t) => follows(t).some((x) => x.source === e.source && x.key === e.key));
-  const recent = tasks
-    .filter((t) => t.owner === "agent" && t.status !== "dropped")
-    .sort((a, b) => b.updatedAt - a.updatedAt)
-    .slice(0, 12);
+  // Who and where only by name: the ids (user, conversation) are the board's to match, the secretary decides by item.
+  // No list of recent tasks any more (2026-11-12): it hung under every message, a dozen lines under a one-line "ok";
+  // the secretary looks tasks up when a message is about one (dispatch: attach / stop)
   return [
-    `[消息 ${it.id}]${it.inferred ? "（不是找你的：只按主动工作的规则判断）" : ""} ${e.source}/${e.kind}${who(e) ? ` · ${who(e)}${e.actor && e.actor !== who(e) ? `（${e.actor}）` : ""}` : ""}${e.key ? ` · 对话 ${e.key}` : ""}`,
+    `[消息 ${it.id}]${it.inferred ? "（不是找你的：只按主动工作的规则判断）" : ""} ${e.source}/${e.kind}${who(e) ? ` · ${who(e)}` : ""}`,
     e.text || e.title || "",
     e.files?.length ? `附件：\n${e.files.map((f) => `- ${f.name}：${f.path}`).join("\n")}` : "",
     it.handBacks?.length ? `负责它的 worker 交回了：\n${it.handBacks.map((h) => `- ${h.task}：${h.reason}`).join("\n")}` : "",
     related.length ? `这个对话里的任务：${related.map((t) => `${t.id}「${t.title}」(${t.status})`).join("、")}` : "",
-    `最近的任务（attach / stop 用）：${recent.map((t) => `${t.id}「${t.title}」(${t.status})`).join("；") || "无"}`,
   ]
     .filter(Boolean)
     .join("\n");
