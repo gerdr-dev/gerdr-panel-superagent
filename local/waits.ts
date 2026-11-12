@@ -24,7 +24,7 @@ import { activity, load, memberName, members, note, reqOf, teamOf, update, type 
 import { isOutside, mrConversation, open, waitOn, wakeItem, wakeText, type Wait, type WakeOn } from "./_waits";
 
 const sessionTitle = (w: Wait) => w.what.replace(/^它派出的「(.*?)」.*$/, "$1");
-import { wake } from "./_wake";
+import { cutLine, wake } from "./_wake";
 import { followUp, follows, record, subscribers, compact, type Ev } from "./_main";
 import { mine, staleAsks } from "./board";
 import { USER } from "./_user";
@@ -421,6 +421,7 @@ async function runChecks(ctx: Ctx): Promise<string[]> {
       try {
         await wake(ctx, t.id, {
           how,
+          fold: code === 0 ? `[看板] 等到了「${cutLine(w.what, 30)}」：${cutLine(last.out || "exit 0", 50)}` : `[看板] 检查命令连着 3 次出错：${cutLine(w.what, 30)}`,
           text:
             code === 0
               ? `[看板] 你等的「${w.what}」检查到了（任务 ${t.id}）。检查命令的输出：\n\n${tail || "（没有输出）"}\n\n照常接着做、用 task_update 汇报；还要等别的就再 wait_for。`

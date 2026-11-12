@@ -31,7 +31,19 @@ export type Wake = {
   feed?: string;
   /** What the user attached to that line (shown with it in the feed). */
   feedFiles?: { path: string; name?: string }[];
+  /**
+   * The one line the worker's chat shows instead of the message (Gerdr's send fold): the board's prompt to it is
+   * long and mostly instructions, and what came already shows as the chat's wait card. Default "[看板] <how>";
+   * false: shown whole.
+   */
+  fold?: string | false;
 };
+
+/** A line cut short, for a fold line. */
+export function cutLine(text: string, n: number) {
+  const t = text.replace(/\s+/g, " ").trim();
+  return [...t].length > n ? [...t].slice(0, n).join("") + "…" : t;
+}
 
 /** Wakes task `id`'s worker (a task not sent out yet only gets the record). Returns the task as written. */
 export async function wake(ctx: Ctx, id: string, m: Wake): Promise<Task> {
@@ -56,6 +68,7 @@ export async function wake(ctx: Ctx, id: string, m: Wake): Promise<Task> {
     x.updatedAt = now;
     return x;
   });
-  if (t.session) await ctx.sessions.send(t.session, m.text, { now: true, attachments: m.files });
+  const fold = m.fold === false ? undefined : m.fold || `[看板] ${cutLine(m.how, 80)}`;
+  if (t.session) await ctx.sessions.send(t.session, m.text, { now: true, attachments: m.files, ...(fold ? { fold } : {}) } as any);
   return t;
 }

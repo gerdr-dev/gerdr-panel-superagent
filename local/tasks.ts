@@ -5,7 +5,7 @@ import { forWorker } from "./memory";
 import { activity, blockersDone, find, load, members, newTask, note, reqOf, splitRef, update, type Question, type Store, type Task } from "./_store";
 import { applyBlock } from "./_apply";
 import { askUser, endQuestions, endWaits, isOutside, open, question, syncAgents, syncSessions, wakeText, type Wait } from "./_waits";
-import { wake } from "./_wake";
+import { cutLine, wake } from "./_wake";
 import { allAgents, mentionsIn } from "./_agents";
 import { isMain, rerouteTask, routeTask, sweep, toMain } from "./_main";
 
@@ -172,12 +172,13 @@ export async function list(input: unknown, ctx: Ctx) {
     dropOrphans(s);
     return s;
   });
-  for (const n of nudge)
+  for (const n of nudge) {
+    const fold = n.reply ? "[看板] 提醒：用户在等你回话" : n.out.length ? "[看板] 提醒：派出去的活要用 wait_for 等着" : "[看板] 提醒：停下了，看板上看不出接下来要什么";
     await ctx.sessions
       .send(
         n.session,
         n.reply
-          ? `[看板] 用户在秘书页上等你回话（任务 ${n.id}）：用 message_user 工具回他。这个问题是从秘书页来的，他在那里看回答，不在这个对话里。`
+          ? `[看板] 用户在等你回话（任务 ${n.id}）：在回复里答他。`
           : n.out.length
           ? `[看板] 你把活派出去了，但没有等它（任务 ${n.id}）：${n.out.join("；")}。\n` +
               `派活的人要自己盯着：现在用 wait_for 等它，what 写等谁做什么，wake 里一定要有 {"type":"time","minutes":N} 作超时（按它要做多久估）。` +
@@ -188,8 +189,10 @@ export async function list(input: unknown, ctx: Ctx) {
           `- 在等别人（同事回话、job / 发布跑完）：用 wait_for 说等什么、在哪个对话等回复，一定带 {"type":"time"} 超时，然后结束这一轮；\n` +
           `- 还有能做的：接着做，别停。\n` +
           `只补汇报，别重复聊天里说过的话。`,
+        { fold } as any,
       )
       .catch(() => {});
+  }
   // A reminded worker is running again: its card is back in 进行中 now, not on the next refresh
   for (const n of nudge) live[n.session] = ctx.sessions.get(n.session) ?? live[n.session];
   await closeRouters(ctx, live);
@@ -725,6 +728,7 @@ export async function message(input: { id: string; to?: string[]; text: string; 
     const others = targets.filter((x) => x !== m);
     await wake(ctx, m.id, {
       how: "你发了消息",
+      fold: `[看板] 你在秘书那里问：${cutLine(text, 50)}`,
       text:
         `[看板] 用户在秘书那里问你：\n\n${text}${list}\n\n` +
         `在回复里答就行：你这一轮的回复会原样转到秘书的对话里，他在那里看。`,

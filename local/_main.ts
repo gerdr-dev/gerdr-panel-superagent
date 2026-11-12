@@ -20,7 +20,7 @@ import { allAgents } from "./_agents";
 import { textOf } from "./playbooks";
 import { DATA, migrate } from "./_user";
 import { activity, find, load as loadTasks, note, update as updateTasks, type Task } from "./_store";
-import { wake } from "./_wake";
+import { cutLine, wake } from "./_wake";
 import { windowText } from "./_log";
 import { isOutside, waitingOn } from "./_waits";
 
@@ -224,6 +224,7 @@ export async function followUp(ctx: Ctx, id: string, e: Ev) {
   const head = e.reply ? `${e.source} 上${by}接着说` : e.title || `${e.source}/${e.kind}`;
   return wake(ctx, id, {
     how: e.reply ? `${by || "有人"}回复了` : e.title || `${e.source}/${e.kind}`,
+    fold: `[${e.source}] ${by}${e.reply ? "接着说" : ""}：${cutLine(text, 50)}`,
     text:
       `[${head}]（任务 ${id}，消息 ${e.id}）\n\n${text}\n\n` +
       `是这个任务的事就照常做、用 task_update 汇报${e.reply ? "（汇报是给用户看的，不会转给他；要回他什么、什么时候回，你自己判断，用你手上能在这段对话里发消息的工具回，写成对他说的话）" : ""}；超出这个任务、或者是别的任务的事，用 hand_back 交回，不要自己答。`,
