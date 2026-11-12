@@ -1,5 +1,5 @@
 import { tellInbox } from "./_inbox";
-import { skillFile } from "./_user";
+import { DATA, skillFile } from "./_user";
 import { workflow } from "./_config";
 import { forWorker } from "./memory";
 import { activity, blockersDone, find, load, members, newTask, note, reqOf, splitRef, update, type Question, type Store, type Task } from "./_store";
@@ -33,6 +33,18 @@ This is task ${id} on the user's Superagent task panel: opening it there opens t
 in your replies, conclusion first. How to work on it (waiting on others, asking them, sessions you start) is their
 my-workflow skill: read ${skillFile(ctx, "my-workflow/references/task.md")} first.
 `;
+}
+
+/** A worker's system file (relative to the panel): its task's rules and the user's memory, see start. */
+const workerSystemPath = (id: string) => `${DATA}/workers/${id}.md`;
+
+/** Writes task `id`'s worker system file when what it says changed (memory learned since). Returns its path. */
+function writeWorkerSystem(ctx: Ctx, id: string, repo: string) {
+  const p = workerSystemPath(id);
+  const text = (workerProtocol(ctx, id) + forWorker(ctx, repo)).replace(/^\s*-{3,}\s*/, "").trim() + "\n";
+  const st = ctx.fs.stat(p);
+  if (!st || ctx.fs.read(p) !== text) ctx.fs.write(p, text, st ? { etag: st.etag } : undefined);
+  return p;
 }
 
 /** The last ```gerdr-task``` block in a reply, parsed; null when there's none or it isn't JSON. */
@@ -183,6 +195,8 @@ export async function list(input: unknown, ctx: Ctx) {
       )
       .catch(() => {});
   }
+  // Workers' system files follow the user's memory (a worker restarted later reads what was learned since)
+  for (const t of s.tasks) if (t.owner === "agent" && t.session && t.repo && t.status !== "done" && t.status !== "dropped" && ctx.fs.stat(workerSystemPath(t.id))) writeWorkerSystem(ctx, t.id, t.repo);
   // A reminded worker is running again: its card is back in 进行中 now, not on the next refresh
   for (const n of nudge) live[n.session] = ctx.sessions.get(n.session) ?? live[n.session];
   await closeRouters(ctx, live);
@@ -498,18 +512,27 @@ export async function start(
     }
   }
   const who = workerOf(ctx, t, input);
+  // Its rules and the user's memory go to its system prompt (a file Gerdr re-reads when the agent starts again), not
+  // its first message: that one is the user's own words, shown whole in the chat they read (2026-11-12, the user: "我肯定
+  // 是想要看到我发的消息的，下半段才是我不关心的"). Started empty, so we know whether this Gerdr took the file.
+  const sys = writeWorkerSystem(ctx, t.id, repo);
   const sess = await ctx.sessions.start({
     cwd,
     ...who,
     title: t.title,
-    prompt: (prompt || "看附件，照里面的做。") + workerProtocol(ctx, t.id) + forWorker(ctx, repo),
-    attachments: (t.attachments ?? []).map((a) => a.path),
+    systemFile: `${ctx.workspace.dir}/${sys}`,
     tags: { task: t.id },
     // Followed on the board (its drawer shows the chat), not in Code: no tab of it appears there
     workspace: "none",
     // No reportTo: the user follows the board, not the panel's agent, and the worker updates the board itself (panel
     // tools). A report would only have the panel's agent repeat the worker's reply to nobody, a turn each time.
-  });
+  } as any);
+  // A Gerdr that took the system file says it back; an older one ignored it, so the rules ride on the message as before
+  const took = (sess as any).systemFile === `${ctx.workspace.dir}/${sys}`;
+  await ctx.sessions.send(sess.id, (prompt || "看附件，照里面的做。") + (took ? "" : workerProtocol(ctx, t.id) + forWorker(ctx, repo)), {
+    attachments: (t.attachments ?? []).map((a) => a.path),
+    show: true,
+  } as any);
   const out = update(ctx, (s) => {
     const x = find(s, t.id);
     Object.assign(x, { status: "running", routing: undefined, prompt, repo, session: sess.id, sessions: [...(x.sessions ?? []), sess.id], updatedAt: Date.now() });

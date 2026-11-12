@@ -62,6 +62,11 @@
 - **唯一留下的提醒**：worker 把活交给别的会话、却没用 `wait_for` 等它（以后没东西叫醒它），提醒一次；再停就进待验收，卡片上是它说的话。
 - worker 的规矩剩一句：在回复里说全、结论在第一段；等别人 `wait_for`，要用户定的 `ask_human`（`references/task.md`）。
 
+- **worker 的第一条消息只有用户的话**：交代（`workerProtocol`）和用户的记忆（`forWorker`）进它的系统提示词
+  （`user/data/workers/<id>.md`，Gerdr 的 `systemFile`；记忆变了 `tasks.list` 重写，worker 下次起进程时读到）。第一条消息带 `show`
+  整段显示。起因：Gerdr 把不是人打的消息折成一行后，用户自己写的需求和后面那段交代一起被折了，「我肯定是想要看到我发的消息的，
+  下半段才是我不关心的」。不认 `systemFile` 的旧 Gerdr 照旧把交代接在消息后面。
+
 下面「worker 怎么汇报」和「停下了却没在看板上汇报，要被发现」是之前的做法，留着说明为什么曾经那样。
 
 ## worker 怎么汇报：工具，不是文字（2026-11-12 以前）
