@@ -106,6 +106,8 @@ export async function briefing(input: unknown, ctx: Ctx) {
     ctx,
     [`[简报] 到了写简报的时间${last ? `（上一次是 ${when(last)}）` : ""}。照「简报」的写法写给用户；下面是现在的事实，「完成的」是上次简报以来的。\n\n${facts}`],
     "brief",
+    undefined,
+    "[简报] 到点了：秘书照看板现状写简报",
   );
   updateState(ctx, (s) => {
     s.briefAt = Date.now();
@@ -153,6 +155,6 @@ export async function checkStuck(input: { hours?: number; dry?: boolean } | null
   });
   if (!stuck.length) return `没有卡住的任务（${hours} 小时为界），没叫秘书`;
   const lines = stuck.map((x) => `- ${x.line}${before.has(x.id) ? "（上次检查也报过）" : ""}`).join("\n");
-  await toMain(ctx, [`[检查] 定时检查（${hours} 小时为界）发现这些任务卡住了，照「检查卡住的任务」的写法告诉用户：\n${lines}`], "brief");
+  await toMain(ctx, [`[检查] 定时检查（${hours} 小时为界）发现这些任务卡住了，照「检查卡住的任务」的写法告诉用户：\n${lines}`], "brief", undefined, `[检查] ${stuck.length} 个任务卡住了：${stuck.map((x) => x.id).join("、")}`);
   return `${stuck.length} 个卡住的任务，已交给秘书汇报`;
 }

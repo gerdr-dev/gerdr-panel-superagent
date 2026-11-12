@@ -399,18 +399,20 @@ export function isMain(ctx: Ctx, id?: string) {
 
 /**
  * Hands the secretary messages: `blocks` are items in the formats the brief describes, `why` what they are (kept for
- * callers; the chat shows every message anyway). The brief goes to its system file first. One conversation goes on
+ * callers; the chat shows every message anyway). `fold`: the one line its chat shows instead (Gerdr's send fold), for
+ * inputs the user reads past — outside messages to triage, tasks to route, a check, a briefing's facts; never what
+ * they should read (their own words, a worker's answer). The brief goes to its system file first. One conversation goes on
  * and is compacted (secretary.compact), never replaced by time. A new one only when there's none, it failed, or
  * 设置 changed who runs it: it carries the old one on (continueFrom), so the page still reads as one conversation.
  * When the rules changed while it runs, one line says so: its agent only re-reads the system file when it starts again.
  */
-export async function toMain(ctx: Ctx, blocks: string[], why: Why = "route", attachments?: string[]): Promise<string> {
+export async function toMain(ctx: Ctx, blocks: string[], why: Why = "route", attachments?: string[], fold?: string): Promise<string> {
   void why;
   const body = blocks.join("\n\n");
-  const { id, changed, hash: h } = await ensureMain(ctx, body, attachments);
+  const { id, changed, hash: h } = await ensureMain(ctx, body, attachments, fold);
   if (id.fresh) return id.id;
   const text = changed ? `[看板] 你的规则有更新：重读一遍 ${abs(ctx, SYSTEM)}，以它为准。\n\n${body}` : body;
-  await ctx.sessions.send(id.id, text, attachments?.length ? { attachments } : undefined);
+  await ctx.sessions.send(id.id, text, { ...(attachments?.length ? { attachments } : {}), ...(fold ? { fold } : {}) } as any);
   if (changed) updateState(ctx, (x) => void (x.brief = h));
   return id.id;
 }
@@ -436,7 +438,7 @@ async function writeSystem(ctx: Ctx): Promise<{ hash: string; changed: boolean }
  * The secretary's session, started when there's none (or it failed, or 设置 changed who runs it). `first`: what a
  * new one is sent first (nothing: it just opens, for the page). fresh: it was started now, with `first`.
  */
-export async function ensureMain(ctx: Ctx, first?: string, attachments?: string[]): Promise<{ id: { id: string; fresh: boolean }; changed: boolean; hash: string }> {
+export async function ensureMain(ctx: Ctx, first?: string, attachments?: string[], fold?: string): Promise<{ id: { id: string; fresh: boolean }; changed: boolean; hash: string }> {
   const { hash: h, changed } = await writeSystem(ctx);
   const s = state(ctx);
   const cur = s.main ? ctx.sessions.get(s.main) : null;
@@ -469,7 +471,7 @@ export async function ensureMain(ctx: Ctx, first?: string, attachments?: string[
   updateState(ctx, (x) => {
     Object.assign(x, { main: sess.id, mains: [...(x.mains ?? []), sess.id], brief: h, who, compactedAt: undefined, system });
   });
-  if (lead || attachments?.length) await ctx.sessions.send(sess.id, lead || "", attachments?.length ? { attachments } : undefined);
+  if (lead || attachments?.length) await ctx.sessions.send(sess.id, lead || "", { ...(attachments?.length ? { attachments } : {}), ...(fold ? { fold } : {}) } as any);
   // The one it replaces finished its last turn: let it go (still readable, as every one before it)
   if (cur && cur.status !== "running") await ctx.sessions.close(cur.id).catch(() => {});
   return { id: { id: sess.id, fresh: true }, changed: false, hash: h };
@@ -556,6 +558,18 @@ function taskBlock(t: Task, agents: { id: string; name: string }[]) {
     .join("\n");
 }
 
+/** One outside message as the fold line of the chat: "[消息 c21] slack-me · 林刚：好，等我看个线上问题". */
+function eventLine(it: Item) {
+  const e = it.event;
+  return `[消息 ${it.id}] ${e.source}${who(e) ? ` · ${who(e)}` : ""}：${cut(e.text || e.title || "", 40)}`;
+}
+
+/** A one-line cut, for fold lines. */
+function cut(text: string, n: number) {
+  const t = text.replace(/\s+/g, " ").trim();
+  return [...t].length > n ? [...t].slice(0, n).join("") + "…" : t;
+}
+
 function eventBlock(it: Item, tasks: Task[]) {
   const e = it.event;
   const related = tasks.filter((t) => follows(t).some((x) => x.source === e.source && x.key === e.key));
@@ -579,7 +593,7 @@ function eventBlock(it: Item, tasks: Task[]) {
 export async function routeTask(ctx: Ctx, id: string) {
   const agents = await allAgents(ctx);
   const t = find(loadTasks(ctx).store, id);
-  const main = await toMain(ctx, [taskBlock(t, agents)]);
+  const main = await toMain(ctx, [taskBlock(t, agents)], "route", undefined, `[任务 ${t.id}] 派活：${cut(t.title, 40)}`);
   return updateTasks(ctx, (s) => Object.assign(find(s, id), { routing: Date.now(), router: main, routerClosed: undefined, updatedAt: Date.now() }));
 }
 
@@ -588,7 +602,7 @@ export async function routeTask(ctx: Ctx, id: string) {
  * reroute). The block (the card's workers, what they said, the feedback) is built by tasks.reroute.
  */
 export async function rerouteTask(ctx: Ctx, id: string, block: string) {
-  const main = await toMain(ctx, [block]);
+  const main = await toMain(ctx, [block], "route", undefined, `[重新安排 ${id}] 你对这张卡的安排有意见`);
   return updateTasks(ctx, (s) => {
     const t = find(s, id);
     if (t.reroute) t.reroute.router = main;
@@ -603,6 +617,9 @@ export async function evaluate(ctx: Ctx, ids: string[], tasks: Task[]) {
   await toMain(
     ctx,
     items.map((it) => eventBlock(it, tasks)),
+    "route",
+    undefined,
+    items.length === 1 ? eventLine(items[0]) : `${items.length} 条外面来的消息：${items.map((it) => eventLine(it)).join("；")}`,
   );
   updateState(ctx, (x) => {
     for (const id of ids) Object.assign(findItem(x, id), { state: "pending", sentAt: Date.now(), reason: undefined });
