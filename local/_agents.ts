@@ -1,7 +1,8 @@
 // The agents and roles Gerdr can start a worker with: for @-mentions on the board and the router's prompt.
 // ctx.sessions.agents() where Gerdr has it; an older Gerdr only has the CLI.
 
-export type AgentInfo = { id: string; name: string; base?: string; prompt?: string };
+/** models: what `model` takes, with the picker's name (`fable` = `Fable 5.2`); only from a Gerdr that lists them. */
+export type AgentInfo = { id: string; name: string; base?: string; prompt?: string; models?: { id: string; name: string }[] };
 
 export async function allAgents(ctx: Ctx): Promise<AgentInfo[]> {
   let raw: any[] = [];
@@ -16,7 +17,13 @@ export async function allAgents(ctx: Ctx): Promise<AgentInfo[]> {
   }
   return raw
     .filter((a) => a.available !== false)
-    .map((a) => ({ id: a.id, name: a.name ?? a.id, ...(a.base ? { base: a.base } : {}), ...(a.prompt ? { prompt: a.prompt } : {}) }));
+    .map((a) => ({
+      id: a.id,
+      name: a.name ?? a.id,
+      ...(a.base ? { base: a.base } : {}),
+      ...(a.prompt ? { prompt: a.prompt } : {}),
+      ...(a.models?.length ? { models: a.models.map((m: any) => ({ id: m.id, name: m.name ?? m.id })) } : {}),
+    }));
 }
 
 /** `@id` / `@name` in a task's text, as agent ids (each once, in order). */

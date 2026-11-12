@@ -259,7 +259,12 @@ async function brief(ctx: Ctx): Promise<string> {
     `${x.agent || "Gerdr 的默认 agent"}，模型 ${x.model || "它的默认"}，思考强度 ${x.effort || "它的默认"}`;
   const modelText =
     `worker 默认：${def(w.worker)}。parts 里不写 agent / model / effort 就用这个；换了别的 agent 而没写模型，用那个 agent 自己的默认。\n` +
-    `模型名要是那个 agent 的模型菜单里有的（claude：sonnet / haiku / fable 这类），写错了命令会报错并列出可选的。`;
+    `model 填下面「可选的模型」里那个 agent 的 id（括号里是界面上显示的名字和版本）；写错了命令会报错并列出可选的。` +
+    `用户点名某个模型或版本（「fable 5.2」）：找名字对得上的 id 填；没有对得上的就告诉他有哪些，不要换一个凑合。`;
+  // The real list from Gerdr (ids are often aliases: "fable" alone doesn't say it is Fable 5.2)
+  const modelLines = agents
+    .filter((a) => a.models?.length)
+    .map((a) => `- ${a.id}：${a.models!.map((m) => (m.name && m.name !== m.id ? `${m.id}（${m.name}）` : m.id)).join("、")}`);
   // The user's own routing rules (how they pick a repository, when a stronger or cheaper model): their prose, whole
   const rules = textOf(ctx, ROUTING);
   const ex = (o: unknown) => JSON.stringify(o);
@@ -293,7 +298,8 @@ async function brief(ctx: Ctx): Promise<string> {
       `- 命令报错就按错误改了再发那几条。`,
     `## 可选的 agent\n${agentLines.join("\n")}`,
     `## 仓库（用户的设置）\n${repoText}`,
-    `## agent 和模型\n${modelText}`,
+    `## agent 和模型\n${modelText}` +
+      (modelLines.length ? `\n\n可选的模型（Gerdr 上次见到的；没列出的 agent 还没在这台电脑上跑过）：\n${modelLines.join("\n")}` : ""),
     rules && `## 怎么派（用户自己写的规则）\n${rules}`,
     forRouter(ctx),
     proactiveText(ctx),
@@ -332,13 +338,15 @@ function talkText(ctx: Ctx) {
       `\`gerdr panel run tasks.message '${ex({ id: "t12", text: "用户的原话" })}'\`，` +
       `再用 message_user 带 \`"follow": "t12"\` 说一句「问了 t12，它的回答会接在下面」。它的回答会显示在秘书页上，你不用转述。` +
       `跨需求的、要汇总的（哪些在等他、进度、日报）才由你自己答。\n` +
-      `- 用户交给你一件事：是活就派（\`tasks.add\` 带 \`"start": true\`，你知道去哪个仓库就给 \`repo\`，不知道就不给，交给下面的派活）；` +
+      `- 用户交给你一件事：是活就派（\`tasks.add\` 带 \`"start": true\`，知道去哪个仓库就给 \`repo\`；不知道就按下面「怎么派」挑，挑不出来就先问他再派）；` +
       `他要亲手做的步骤记成人工任务（\`tasks.add\` 带 \`"owner": "human"\`）。派完一句话告诉他交给了谁。\n` +
       `- 替用户回答 worker：问题 \`tasks.answerQuestion ${ex({ id: "t5", q: "1", value: "选项或他的原话" })}\`；` +
       `验收 \`tasks.accept ${ex({ id: "t5" })}\` / 打回 \`tasks.reject ${ex({ id: "t5", feedback: "…" })}\`；` +
       `他做完了自己的步骤 \`tasks.complete ${ex({ id: "t5", value: "要交回的值（没有就不写）" })}\`；` +
       `转告 worker \`tasks.say ${ex({ id: "t5", text: "…" })}\`；不做了 \`tasks.drop ${ex({ id: "t5", reason: "…" })}\`。\n` +
-      `- 不要用你自带的提问工具（AskUserQuestion）：有要问用户的，用 message_user 问，他会在秘书页上答你。\n` +
+      `- 不要用你自带的提问工具（AskUserQuestion）：有要问用户的，用 message_user 问，他会在秘书页上答你。` +
+      `问了就先不派，这一轮到此为止，他的回答会作为 [用户] 消息到来。\n` +
+      `- **仓库拿不准就先问，不要先派了再说明**（包括这件事不属于仓库列表里的任何一个）：带上你的建议问他，怎么挑、怎么建议见「怎么派」。\n` +
       `- **要用户回答的问题会作为卡片出现在秘书页的对话里**（secretary.status 里带着问题、选项和交答案的命令）：` +
       `他可以直接点卡片，也可以对你说。你说一句要他决定什么、为什么要紧就行，不用重复选项，更不要让他去看板或 worker 的对话里答。` +
       `他用文字答了，你用给出的命令替他交（一个问题一条命令），再告诉他交了。密钥不经过对话：卡片上会让他在看板上填。\n` +
