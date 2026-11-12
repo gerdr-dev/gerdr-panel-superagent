@@ -33,9 +33,11 @@ export type Assigned = {
   draft?: string;
   /** Where to put what whoever asked should see: the source's shared folder, the same path on their computer. */
   shareDir?: string;
+  /** 无人值守: nobody reviews here — it started without agreeing, and the agent's delivery note delivers. */
+  unattended?: boolean;
 };
 
-type AssignData = { title?: string; body?: string; by?: string; agreed?: boolean; how?: "agent" | "self"; agent?: string; repos?: string[]; shareDir?: string };
+type AssignData = { title?: string; body?: string; by?: string; agreed?: boolean; how?: "agent" | "self"; agent?: string; repos?: string[]; shareDir?: string; unattended?: boolean };
 
 /** An event carrying an assignment or an update to one: handled here (true), or not one (false). */
 export async function onAssignEvent(ctx: Ctx, e: GerdrEvent): Promise<{ handled: boolean; task?: string; note?: string }> {
@@ -50,7 +52,7 @@ export async function onAssignEvent(ctx: Ctx, e: GerdrEvent): Promise<{ handled:
   const origin = { id: e.id, source: e.source, kind: e.kind, key: e.key, title: e.title, url: e.url, reply: e.reply };
   const title = (a!.title || e.title || "").trim();
   const body = (a!.body ?? e.text ?? "").trim();
-  const assigned: Assigned = { state: a!.agreed ? "agreed" : "ask", by: a!.by || ev.who, how: a!.how, agent: a!.agent, repos: a!.repos, shareDir: a!.shareDir };
+  const assigned: Assigned = { state: a!.agreed ? "agreed" : "ask", by: a!.by || ev.who, how: a!.how, agent: a!.agent, repos: a!.repos, shareDir: a!.shareDir, unattended: a!.unattended };
   const threads = e.key ? [{ source: e.source, key: e.key }] : undefined;
   if (a!.agreed && a!.how === "self") {
     const t = await add({ owner: "human", title, steps: body, origin, threads, assigned } as any, ctx);

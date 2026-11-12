@@ -445,6 +445,12 @@ export async function reply_requester(input: { text: string; deliver?: boolean }
   if (!t.assigned || !t.origin?.reply) throw new Error(`${t.id} 不是别人请用户做的任务：结论写在回复里就行`);
   const text = input.text?.trim();
   if (!text) throw new Error("text 不能为空");
+  if (input.deliver && t.assigned.unattended) {
+    // 无人值守: nobody here to look first — it goes to whoever asked, who accepts or returns it
+    if (t.assigned.state !== "agreed") throw new Error(`${t.id} 已经交付过了：要补充就 deliver false 说给对方`);
+    await replyOrigin({ id: t.id, text, deliver: true }, ctx);
+    return `无人值守：已经交付给 ${t.assigned.by ?? "对方"}，等对方验收；打回的话你会收到消息。`;
+  }
   if (input.deliver) {
     if (t.assigned.state !== "agreed") throw new Error(t.assigned.state === "ask" ? "用户还没同意做这件事" : `${t.id} 已经交付过了：要补充就 deliver false 说给对方`);
     update(ctx, (s) => {
