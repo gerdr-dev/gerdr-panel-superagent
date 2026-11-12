@@ -4,7 +4,7 @@
 // block couldn't do: take back a human step the user no longer needs to do, and answer with ids.
 
 import { applyBlock } from "./_apply";
-import { activity, find, load, members, note, reqOf, splitRef, teamOf, update, type Store, type Task } from "./_store";
+import { activity, find, load, note, reqOf, splitRef, update, type Store, type Task } from "./_store";
 import { handBack, isMain } from "./_main";
 import { waitCard } from "./waits";
 import { eventCard } from "./_cards";
@@ -51,11 +51,11 @@ const STEP = {
 export const tools = {
   task_update: {
     description:
-      "Put where your board task stands on the board. state: working (still at it: summary / links), done (finished, nothing for the user to judge), review (the result is for the user to judge). Only you (or the user) say a task is done: a merged MR or a passed pipeline is news for you, not the end. Waiting on an MR, a colleague or a job: wait_for. links are artifacts (MR, docs, pipelines): kept, so add new ones only. When to report: the my-workflow skill, references/board.md.",
+      "Put where your board task stands on the board. state: working (still at it: summary / links), review (you finished, or have a result: the user looks at it and marks it done). Only the user marks a task done, never you: \"done\" is taken as review. A merged MR or a passed pipeline is news for you, not the end. Waiting on an MR, a colleague or a job: wait_for. links are artifacts (MR, docs, pipelines): kept, so add new ones only. When to report: the my-workflow skill, references/board.md.",
     input: {
       type: "object",
       properties: {
-        state: { type: "string", enum: ["working", "done", "review"] },
+        state: { type: "string", enum: ["working", "review"] },
         summary: { type: "string", description: "Where it stands in 1-3 sentences, for the board card" },
         links: { type: "array", items: { type: "object", properties: { label: { type: "string" }, url: { type: "string" } }, required: ["url"] } },
       },
@@ -132,21 +132,20 @@ export function mine(s: Store, ctx: Ctx): Task {
 
 export async function task_update(input: { state: string; summary?: string; links?: { label?: string; url: string }[]; mr?: string }, ctx: Ctx) {
   const sess = ctx.caller.session ? ctx.sessions.get(ctx.caller.session) : null;
-  let closing: string[] = [];
   const out = update(ctx, (s) => {
-    closing = [];
     const t = mine(s, ctx);
     if (t.status === "done" || t.status === "dropped") throw new Error(`${t.id} 已经${t.status === "done" ? "完成" : "放弃"}了`);
-    let state = input.state === "working" ? undefined : input.state;
+    // Only the user says a task is done (DESIGN.md「只有用户能标完成」): a worker's "done" (older workers, habit) is review
+    let state = input.state === "working" ? undefined : input.state === "done" ? "review" : input.state;
     // "Come and look" while the user still has to choose something of yours reads as two different asks (t52: a review
     // line "有结论了，等你看" next to the choice it was really waiting on). The choice is what's next.
     const asking = s.tasks.filter((h) => h.owner === "human" && h.status === "todo" && (h.askedBy === t.id || t.blockedBy?.includes(h.id)));
-    if ((state === "review" || state === "done") && asking.length)
-      throw new Error(`你还有要用户决定 / 做的 ${asking.map((h) => h.id).join("、")}：等他答了再报${state === "review" ? "验收" : "完成"}（答案会发给你）。只是说进展就用 working 或 message_user`);
-    if ((state === "review" || state === "done") && input.summary && questionsIn(input.summary))
+    if (state === "review" && asking.length)
+      throw new Error(`你还有要用户决定 / 做的 ${asking.map((h) => h.id).join("、")}：等他答了再报验收（答案会发给你）。只是说进展就用 working 或 message_user`);
+    if (state === "review" && input.summary && questionsIn(input.summary))
       throw new Error(
         `summary 里有要用户回答的问题：写在结论里他没法答，也容易漏。要他定的用 ask_human（每个问题一项，带 options），结论和方案用 message_user 写全；` +
-          `等他答完再报${state === "review" ? "验收" : "完成"}。如果那些只是陈述、不是问他，改成不带问号的写法再报。`,
+          `等他答完再报验收。如果那些只是陈述、不是问他，改成不带问号的写法再报。`,
       );
     // Answering the user's own question in the chat: they read it there; don't move the task to "come and look"
     if (state === "review" && sess?.byPerson && t.status === "running") state = undefined;
@@ -162,34 +161,15 @@ export async function task_update(input: { state: string; summary?: string; link
       endWaits(t, isOutside, "worker 报了新进展");
     }
     const root = reqOf(s, t);
-    if (root && (state === "done" || state === "review")) {
-      const lead = root.id === t.id;
-      const alone = !teamOf(s, t);
-      activity(s, t, { by: t.id, kind: state, text: `${state === "review" ? "有结论了，等你看" : alone ? "做完了" : lead ? "整个需求做完了" : "这部分做完了"}${input.summary ? `：${input.summary}` : ""}` });
-      // The lead says the whole requirement is done: every member's part with it (DESIGN.md「需求和队友」)
-      if (lead && state === "done") closing = finishMembers(s, root, "负责人报了整个需求完成");
-    }
+    if (root && state === "review") activity(s, t, { by: t.id, kind: state, text: `有结论了，等你看${input.summary ? `：${input.summary}` : ""}` });
     const fresh = open(t).filter((w) => isOutside(w) && !before.has(w.id));
     const stale = staleAsks(s, t);
     // One card per call: a wait it just started is what's next, so that one; otherwise what it changed on the card
-    const kind = state === "review" || state === "done" ? state : "working";
-    const said = input.summary?.trim() || (kind === "review" ? "有结论了，等你看" : kind === "done" ? "做完了" : "");
+    const kind = state === "review" ? state : "working";
+    const said = input.summary?.trim() || (kind === "review" ? "有结论了，等你看" : "");
     const gerdrCard = fresh.length ? waitCard(ctx, t, fresh) : said || input.links?.length ? eventCard(ctx, t.id, kind, said || "加了链接", { links: input.links }) : undefined;
     return { id: t.id, status: t.status, column: question(t) ? "等你" : t.status, ...(stale ? { reminder: stale } : {}), ...(gerdrCard ? { gerdrCard } : {}) };
   });
-  await closeSessions(ctx, closing);
-  return out;
-}
-
-/** Every member of `root` still going is done with it (their sessions to close: returned). */
-export function finishMembers(s: Store, root: Task, why: string): string[] {
-  const out: string[] = [];
-  for (const m of members(s, root)) {
-    if (m.id === root.id || m.status === "done" || m.status === "dropped") continue;
-    note(m, why);
-    Object.assign(m, { status: "done", doneAt: Date.now(), updatedAt: Date.now() });
-    if (m.session) out.push(m.session);
-  }
   return out;
 }
 

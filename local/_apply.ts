@@ -19,12 +19,11 @@ export function applyBlock(s: Store, t: Task, b: any): Task | null {
       }
   }
   switch (b.state) {
+    // Only the user says a task is done (DESIGN.md「只有用户能标完成」): a worker's "done" is a result to look at
     case "review":
+    case "done":
       t.status = "review";
       endQuestions(t, "worker 交了结论");
-      break;
-    case "done":
-      Object.assign(t, { status: "done", doneAt: Date.now() });
       break;
     // Older workers' "delivering" (an MR out, waiting on it): the same as wait_for on the MR — no state of its own
     case "delivering": {
