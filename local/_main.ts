@@ -77,6 +77,8 @@ export type Item = {
   handBacks?: { task: string; reason: string; at: number }[];
   sentAt?: number;
   decidedAt?: number;
+  /** Closed by the user in 去向 (superagent.dismiss) instead of decided: a late decision on it is a no-op. */
+  dismissed?: boolean;
 };
 
 /** Why the secretary is having a turn: the user's words, a briefing (both owe the user a message), its own news, routing. */
@@ -621,7 +623,7 @@ export async function evaluate(ctx: Ctx, ids: string[], tasks: Task[]) {
     items.length === 1 ? eventLine(items[0]) : `${items.length} 条外面来的消息：${items.map((it) => eventLine(it)).join("；")}`,
   );
   updateState(ctx, (x) => {
-    for (const id of ids) Object.assign(findItem(x, id), { state: "pending", sentAt: Date.now(), reason: undefined });
+    for (const id of ids) Object.assign(findItem(x, id), { state: "pending", sentAt: Date.now(), reason: undefined, dismissed: undefined });
   });
 }
 

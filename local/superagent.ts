@@ -35,6 +35,8 @@ export async function decide(input: { decisions: Decision[] }, ctx: Ctx) {
 async function one(d: Decision, ctx: Ctx) {
   if (/^t\d+$/.test(d?.item ?? "")) return boardTask(d, ctx);
   const it = findItem(state(ctx), d?.item ?? "");
+  // Closed by the user from 去向 while it was being judged: nothing left to do, not an error for the secretary
+  if (it.dismissed && it.state === "ignored") return { item: it.id, note: "用户已经手动关掉了这条，不用再处理" };
   if (it.state !== "pending" && it.state !== "unavailable") throw new Error(`已经处理过了（${it.state}）`);
   const e = it.event;
   const settle = (patch: Partial<Item>) =>
@@ -300,6 +302,22 @@ export function log(input: { limit?: number }, ctx: Ctx) {
       .reverse()
       .map((it) => ({ ...it, event: { ...it.event, text: (it.event.text ?? "").slice(0, 600) } })),
   };
+}
+
+/**
+ * Closes events by hand: { ids } — pending (still being judged) or unavailable ones the user doesn't want handled.
+ * They become 没接 with the user as the reason, so they leave the board's alert and can still be judged again.
+ */
+export function dismiss(input: { ids: string[] }, ctx: Ctx) {
+  const ids = input?.ids ?? [];
+  updateState(ctx, (s) => {
+    for (const id of ids) {
+      const it = findItem(s, id);
+      if (it.state !== "pending" && it.state !== "unavailable") throw new Error(`${id} 已经处理过了（${it.state}）`);
+    }
+    for (const id of ids) Object.assign(findItem(s, id), { state: "ignored", dismissed: true, reason: "你手动关掉了", decidedAt: Date.now() });
+  });
+  return { closed: ids };
 }
 
 /** Sends events to the main session again: { ids } — ignored / filtered / unavailable ones, by a person's say-so. */

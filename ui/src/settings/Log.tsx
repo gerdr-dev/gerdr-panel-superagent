@@ -1,4 +1,4 @@
-import { ExternalLink, Loader2, Play, RotateCcw } from "lucide-react";
+import { ExternalLink, Loader2, Play, RotateCcw, X } from "lucide-react";
 import clsx from "clsx";
 import { useState } from "react";
 import { Button } from "../components/Button";
@@ -77,6 +77,7 @@ function Row({ x, onTask, onRetried }: { x: Item; onTask: (id: string) => void; 
   const e = x.event;
   const again = x.state === "ignored" || x.state === "filtered" || x.state === "unavailable";
   const doIt = x.state === "observed" && !!x.would;
+  const close = x.state === "pending" || x.state === "unavailable";
   const call = async (fn: string, input: unknown) => {
     setBusy(true);
     setErr("");
@@ -124,7 +125,7 @@ function Row({ x, onTask, onRetried }: { x: Item; onTask: (id: string) => void; 
           {h.task} 交回：{h.reason}
         </p>
       ))}
-      {(again || doIt || err) && (
+      {(again || doIt || close || err) && (
         <div className="flex items-center gap-2">
           {doIt && (
             <Button disabled={busy} onClick={() => call("superagent.execute", { id: x.id })} title="照它判断的建任务、派出去">
@@ -136,6 +137,12 @@ function Row({ x, onTask, onRetried }: { x: Item; onTask: (id: string) => void; 
             <Button variant="outline" disabled={busy} onClick={() => call("superagent.retry", { ids: [x.id] })} title="交给 Superagent 重新判断">
               {busy ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCcw className="size-3.5" />}
               重新判断
+            </Button>
+          )}
+          {close && (
+            <Button variant="ghost" disabled={busy} onClick={() => call("superagent.dismiss", { ids: [x.id] })} title="不用 Superagent 处理了：记成没接，之后还能重新判断">
+              <X className="size-3.5" />
+              关掉
             </Button>
           )}
           {err && <span className="text-[12px] text-bad">{err}</span>}
