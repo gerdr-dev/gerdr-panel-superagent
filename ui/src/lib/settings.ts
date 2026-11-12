@@ -43,6 +43,12 @@ export type Settings = {
   ack: "accept" | "dispatch" | "never";
   /** What they hear: {id} and {title} are the task's. */
   ackText: string;
+  /**
+   * The secretary's conversation is compacted (schedules/compact.json, hourly by default, once it has sat idle an
+   * hour) when its context holds at least this many tokens. 0 = whenever the schedule runs and something was said
+   * since the last compaction: by time (set the schedule to, say, 04:00). DESIGN.md「秘书」「一个会话，靠压缩」.
+   */
+  compactTokens: number;
 };
 
 export const ACK_TEXT = "收到，建了任务 {id}「{title}」，有结果会在这里说。";
@@ -56,6 +62,7 @@ export const DEFAULTS: Settings = {
   followUps: "worker",
   ack: "dispatch",
   ackText: ACK_TEXT,
+  compactTokens: 80_000,
 };
 
 const str = (v: unknown, d: string) => (typeof v === "string" ? v.trim() : d);
@@ -82,5 +89,6 @@ export function normalize(raw: any): Settings {
     followUps: oneOf(r.followUps, ["worker", "secretary"] as const, d.followUps),
     ack: oneOf(r.ack, ["accept", "dispatch", "never"] as const, d.ack),
     ackText: str(r.ackText, "") || d.ackText,
+    compactTokens: Number.isFinite(Number(r.compactTokens)) && Number(r.compactTokens) >= 0 && r.compactTokens !== "" && r.compactTokens != null ? Math.round(Number(r.compactTokens)) : d.compactTokens,
   };
 }

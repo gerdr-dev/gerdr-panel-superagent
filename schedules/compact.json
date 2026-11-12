@@ -1,0 +1,1 @@
+{ "fn": "secretary.compact", "every": "1h", "name": "压缩秘书的对话：闲了一小时、上下文太长时把早先的聊天压成摘要" }

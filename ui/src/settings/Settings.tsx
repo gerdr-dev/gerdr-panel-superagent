@@ -83,6 +83,23 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
         <>
           <Section title="秘书" note="你在秘书页上跟它说话；看板上没指定仓库的任务、外面来的消息，也都由它判断接不接、挑仓库和 agent 再派出去。它只说话和派活、不写代码；它要听懂你、写简报，别用太弱的模型。">
             <WhoFields who={s.router} onChange={(v) => put("router", v)} />
+            <Field
+              label="压缩对话"
+              hint={
+                s.compactTokens > 0
+                  ? `对话闲了一小时以上、上下文超过 ${s.compactTokens} token 时，把早先的聊天压缩成摘要（定时任务「压缩秘书的对话」决定多久看一次）`
+                  : "按时间：每次到点（定时任务「压缩秘书的对话」里改时间，比如 04:00），上次压缩之后又聊过就压缩"
+              }
+            >
+              <input
+                className={input}
+                type="number"
+                min={0}
+                step={10000}
+                value={s.compactTokens}
+                onChange={(e) => put("compactTokens", Math.max(0, Math.round(Number(e.target.value) || 0)))}
+              />
+            </Field>
           </Section>
 
           <Section

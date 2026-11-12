@@ -7,7 +7,7 @@ import { applyBlock } from "./_apply";
 import { askUser, endQuestions, endWaits, isOutside, open, question, syncAgents, syncSessions, wakeText, type Wait } from "./_waits";
 import { wake } from "./_wake";
 import { allAgents, mentionsIn } from "./_agents";
-import { isMain, rerouteTask, routeTask, settle, sweep } from "./_main";
+import { isMain, rerouteTask, routeTask, sweep, toMain } from "./_main";
 
 export type { Task };
 
@@ -78,8 +78,11 @@ export async function list(input: unknown, ctx: Ctx) {
   const kids: Record<string, ReturnType<typeof kidsOf>> = {};
   for (const t of store.tasks) if (t.owner === "agent" && t.status !== "done" && t.status !== "dropped") kids[t.id] = kidsOf(t);
   const nudge: { session: string; id: string; out: string[]; reply?: boolean }[] = [];
+  // Answers to questions the secretary passed on (tasks.message): into its chat, where the user asked
+  const answered: { id: string; asked: string; text: string }[] = [];
   const s = update(ctx, (s) => {
     nudge.length = 0; // update retries this function on a write race: decide afresh each time
+    answered.length = 0;
     for (const t of s.tasks) {
       const sess = t.session && live[t.session];
       // The user wrote to a finished worker in its chat and it's at it again (t54, 2026-11-05: "把这个做了" after it
@@ -127,7 +130,11 @@ export async function list(input: unknown, ctx: Ctx) {
       t.synced = sess.updatedAt;
       // The user spoke to it from the feed and its turn ended without a message back: reminded once to answer with
       // the message tool (they read the feed, not its chat); after that it's left to the checks below
-      if (t.asked && sess.status === "idle" && sess.updatedAt > t.asked.at + 1000 && !cancelled) {
+      if (t.asked?.relay && sess.status === "idle" && sess.updatedAt > t.asked.at + 1000) {
+        // Asked through the secretary: whatever it answered in its reply goes to the secretary's chat as written
+        if (!cancelled) answered.push({ id: t.id, asked: t.asked.relay, text: [t.asked.said, String(sess.reply ?? "").trim()].filter(Boolean).join("\n\n") });
+        t.asked = undefined;
+      } else if (t.asked && sess.status === "idle" && sess.updatedAt > t.asked.at + 1000 && !cancelled) {
         if (!t.asked.nudged) {
           t.asked.nudged = true;
           nudge.push({ session: sess.id, id: t.id, out: [], reply: true });
@@ -218,11 +225,10 @@ export async function list(input: unknown, ctx: Ctx) {
   // Here because the board's sync runs every minute with or without the page open; a failure mustn't break the board.
   // Task changes aren't sent to the secretary any more (2026-11-11, the user: the board is where they work, the secretary
   // helps; it looks at tasks when a schedule asks it to, secretary.checkStuck)
-  try {
-    await settle(ctx);
-  } catch (err: any) {
-    ctx.log(`秘书那边没跟上：${err?.message ?? err}`);
-  }
+  for (const a of answered)
+    await toMain(ctx, [`[${a.id} 的回答]（用户问的：${a.asked.length > 80 ? a.asked.slice(0, 80) + "…" : a.asked}）\n\n${a.text || "（它这一轮没说话）"}`], "notice").catch((err: any) =>
+      ctx.log(`${a.id} 的回答没转给秘书：${err?.message ?? err}`),
+    );
   const board = teams(s, tasks);
   const id = (input as { id?: string } | null)?.id;
   if (!id) return { tasks: board, at: Date.now() };
@@ -720,8 +726,8 @@ export async function message(input: { id: string; to?: string[]; text: string; 
     await wake(ctx, m.id, {
       how: "你发了消息",
       text:
-        `[看板] 用户在秘书页上问你：\n\n${text}${list}\n\n` +
-        `回他用 message_user 工具：这个问题是从秘书页来的，他在那里看你的回答。`,
+        `[看板] 用户在秘书那里问你：\n\n${text}${list}\n\n` +
+        `在回复里答就行：你这一轮的回复会原样转到秘书的对话里，他在那里看。`,
       files: files.map((a) => a.path),
       resume: true,
       // One line for all of them, written with the first
@@ -729,9 +735,9 @@ export async function message(input: { id: string; to?: string[]; text: string; 
       feedFiles: i === 0 ? files : undefined,
     });
   }
-  // Each of them owes the user an answer now (board.ts message_user clears it; list reminds once)
+  // Each one's next reply goes back to the secretary's chat, where the user asked (tasks.list sync)
   update(ctx, (s) => {
-    for (const m of targets) find(s, m.id).asked = { at: Date.now() };
+    for (const m of targets) find(s, m.id).asked = { at: Date.now(), relay: text };
   });
   return { sent: targets.map((m) => m.id) };
 }

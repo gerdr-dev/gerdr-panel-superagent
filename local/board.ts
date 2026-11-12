@@ -5,7 +5,7 @@
 
 import { applyBlock } from "./_apply";
 import { activity, find, load, members, note, reqOf, splitRef, teamOf, update, type Store, type Task } from "./_store";
-import { handBack, isMain, secretaryMessage } from "./_main";
+import { handBack, isMain } from "./_main";
 import { waitCard } from "./waits";
 import { eventCard } from "./_cards";
 import { endWaits, isOutside, open, question } from "./_waits";
@@ -83,15 +83,12 @@ export const tools = {
   },
   message_user: {
     description:
-      "Only for the secretary's page: a message reaches you from there (\"[看板] 用户在秘书页上…\") and the user reads your answer there, not in this chat — answer it with this. The secretary itself says everything to the user with it. Anything else you have to say (a result, a plan, where things stand), say in your reply as usual: opening your task on the board opens this chat. In their language, Markdown; a file to look at as ![](/absolute/path).",
+      "A line in your task's feed on the board, for the user. Rarely needed: what you have to say (a result, a plan, where things stand, an answer to a question passed on from the secretary) goes in your reply as usual — opening your task on the board opens this chat. Not for the secretary: the user reads its chat, so it just replies. In their language, Markdown; a file to look at as ![](/absolute/path).",
     input: {
       type: "object",
       properties: {
         text: { type: "string" },
         files: { type: "array", items: { type: "object", properties: { path: { type: "string" }, name: { type: "string" } }, required: ["path"] }, description: "Files that go with it (absolute paths)" },
-        brief: { type: "boolean", description: "The secretary's briefing (only the secretary)" },
-        quote: { type: "string", description: "Only the secretary: a task's id (t12). Its worker's last reply (a result, a plan) is shown under your message as the worker wrote it; your text says why it matters / what the user has to do, not the content again" },
-        follow: { type: "string", description: "Only the secretary: the member task you passed the user's question to with tasks.message. Its answer shows under your message on the secretary's page" },
       },
       required: ["text"],
     },
@@ -371,52 +368,31 @@ export function my_task(input: unknown, ctx: Ctx) {
 
 /**
  * A message to the user (DESIGN.md「消息」): the one way an agent says anything to the user — an answer, a result,
- * where things stand — a feed line drawn in its chat too, so the feed stays a part of the chat. From the secretary it
- * goes on the secretary's page. Answers the user's words in the feed (asked is cleared). It was two tools until
+ * where things stand — a feed line drawn in its chat too, so the feed stays a part of the chat. The secretary
+ * doesn't use it: its chat is the page. Answers the user's words in the feed (asked is cleared). It was two tools until
  * 2026-11-10 (post_progress for progress, this for answers); to the user both were the agent talking, and the agent
  * had to pick one each time.
  */
-export function message_user(input: { text: string; files?: { path: string; name?: string }[]; brief?: boolean; quote?: string; follow?: string }, ctx: Ctx) {
+export function message_user(input: { text: string; files?: { path: string; name?: string }[] }, ctx: Ctx) {
   const text = input?.text?.trim();
   if (!text) throw new Error("text 是空的");
   const files = (input.files ?? []).filter((f) => f?.path);
-  if (isMain(ctx, ctx.caller.session)) {
-    const { store } = load(ctx);
-    const quote = input.quote ? quoteOf(ctx, store, input.quote) : undefined;
-    const follow = input.follow ? find(store, input.follow).id : undefined;
-    secretaryMessage(ctx, { text, files, brief: !!input.brief, quote, follow });
-    return { ok: true, gerdrCard: eventCard(ctx, undefined, "message", text) };
-  }
-  if (input.quote || input.follow) throw new Error("quote / follow 只给秘书用");
+  // The secretary's page is its chat (2026-11-12): what it writes in its reply is what the user reads
+  if (isMain(ctx, ctx.caller.session)) return { ok: false, note: "秘书不用这个工具：用户看的就是你的对话，直接在回复里说。" };
   return update(ctx, (s) => {
     const t = mine(s, ctx);
     activity(s, t, { by: t.id, kind: "message", text, ...(files.length ? { files } : {}) });
-    Object.assign(t, { asked: undefined, viaTools: true, reportedAt: Date.now() });
+    // A question passed on by the secretary stays open: the answer goes to its chat when the turn ends (tasks.ts),
+    // with this message in it
+    const asked = t.asked?.relay ? { ...t.asked, said: [t.asked.said, text].filter(Boolean).join("\n\n") } : undefined;
+    Object.assign(t, { asked, viaTools: true, reportedAt: Date.now() });
     const stale = staleAsks(s, t);
     const gerdrCard = eventCard(ctx, t.id, "message", text);
     return stale ? { ok: true, reminder: stale, gerdrCard } : { ok: true, gerdrCard };
   });
 }
 
-/** Gerdr's note at the end of a reply on how the turn ended (tasks.ts ENDING): not the worker's words. */
-const ENDING = /^(这一轮结束：|Turn ended: |出错：|Error: )/;
 
-/**
- * What the worker of `id` said in its last reply, as written, for the secretary to show under its message: { task, at,
- * text }. Its chat is where the user reads a worker (opening the task opens it), so that's what is quoted, not a
- * summary of it.
- */
-function quoteOf(ctx: Ctx, s: Store, id: string) {
-  const t = find(s, id);
-  if (t.owner !== "agent" || !t.session) throw new Error(`${id} 没有 worker 的对话可以引用`);
-  const reply = String(ctx.sessions.get(t.session)?.reply ?? "")
-    .split(/\n\s*\n/)
-    .filter((p) => !ENDING.test(p.trim()))
-    .join("\n\n")
-    .trim();
-  if (!reply) throw new Error(`${id} 的 worker 最近还没说什么可以引用`);
-  return { task: t.id, at: Date.now(), text: reply };
-}
 
 /**
  * Questions for the user in a result's summary (t74, 2026-11-11: "要你定的四件事", four questions as prose under

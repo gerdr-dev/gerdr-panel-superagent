@@ -9,9 +9,9 @@
 // never waits and never does the work itself, and gets everything as messages (a batch arriving while it decides
 // waits for its next pause): the user's words from the page (secretary.ts say), board tasks and outside messages to
 // route, news about tasks that need the user (notice), and the briefing on its schedule. What the user sees of it is
-// what it sends with its message tool (board.ts message_user → secretaryMessage, _log.ts), as a worker's feed lines; a turn
-// the user waited on that sent nothing gets one reminder (settle). It replaced a
-// one-off router per task and the panel's own chat on the right. Every event is logged with where it went
+// its own conversation (the 秘书 page is that chat): its replies, and the messages the board sent it. Its rules are
+// in its system prompt (a file Gerdr re-reads, SYSTEM), not in the chat; one conversation that is compacted, never
+// replaced by time (DESIGN.md「秘书」). It replaced a one-off router per task and the panel's own chat on the right. Every event is logged with where it went
 // (user/data/superagent.json items), so "what happened to that message" always has an answer.
 
 import { workflow } from "./_config";
@@ -21,18 +21,20 @@ import { textOf } from "./playbooks";
 import { DATA, migrate } from "./_user";
 import { activity, find, load as loadTasks, note, update as updateTasks, type Task } from "./_store";
 import { wake } from "./_wake";
-import { append, windowText, SECRETARY as SECRETARY_ID } from "./_log";
+import { windowText } from "./_log";
 import { isOutside, waitingOn } from "./_waits";
 
 const STATE = `${DATA}/superagent.json`;
 /**
- * A fresh session once the current one has been idle this long: the model's prompt cache is gone by then, so going on
- * would re-read its whole context at full price anyway, and a new one re-reads less (the brief, the last 7 days of the
- * conversation). DESIGN.md「秘书」「一个对话框，后面换会话」.
+ * The secretary's rules (the brief): its system prompt, through Gerdr's systemFile, re-read whenever its agent starts
+ * again. Kept out of the chat, which is the 秘书 page: every new session used to open with them, the last 7 days of
+ * talk and the message, one long first message the user had to scroll past (2026-11-12).
  */
+const SYSTEM = `${DATA}/secretary-system.md`;
+/** The page's own log of the talk from before the secretary's chat was the page (_log.ts), for it to look up. */
+const HISTORY = `${DATA}/secretary-history.md`;
+/** Idle this long, its prompt cache is gone: a compaction then costs no more than the next message would. */
 const COLD = 3600_000;
-/** And after this many messages without ever going cold (a busy inbox): its context mustn't grow without end. */
-const ROTATE = 150;
 /** Items kept in the log. */
 const KEEP = 300;
 
@@ -86,15 +88,16 @@ type State = {
   stuck?: string[];
   mains: string[];
   brief?: string;
-  handled: number;
+  /** Before 2026-11-12, messages since its session started (it was replaced after 150). Unused now. */
+  handled?: number;
+  /** When it was last compacted (secretary.compact): with compactTokens 0, compacted again once something was said since. */
+  compactedAt?: number;
+  /** Its session reads its rules from the system file (since 2026-11-12): one from before is replaced once, fresh. */
+  system?: boolean;
   next: number;
   items: Item[];
-  /**
-   * Messages sent since its last turn ended: what the turn is for (the strongest reason wins), for the page's "busy"
-   * and for the one reminder when a turn the user (or a briefing) waited on ends without a message to them.
-   */
-  awaiting?: { why: Why; /** when the last message went in */ sent: number; /** reminded once already */ nudged?: boolean };
-  /** When it last sent the user a message (its message tool): a turn that sent one needs no reminder. */
+  /** Before 2026-11-12 (when the page drew its own log): what a turn owed the user, and when it last sent a message. Unused now. */
+  awaiting?: unknown;
   messageAt?: number;
   /** Before 2026-11-10's status news: what was told as needing the user. Unused now. */
   noticed?: Record<string, string>;
@@ -114,7 +117,7 @@ type State = {
 function load(ctx: Ctx): { s: State; etag?: string; text?: string } {
   migrate(ctx);
   const st = ctx.fs.stat(STATE);
-  if (!st) return { s: { mains: [], handled: 0, next: 1, items: [] } };
+  if (!st) return { s: { mains: [], next: 1, items: [] } };
   const text = ctx.fs.read(STATE);
   return { s: JSON.parse(text), etag: st.etag, text };
 }
@@ -312,6 +315,7 @@ async function brief(ctx: Ctx): Promise<string> {
 const SECRETARY = "my-workflow/references/secretary.md";
 const ROUTING = "my-workflow/references/routing.md";
 const DISPATCH = "my-workflow/references/dispatch.md";
+const COMPACT = "my-workflow/references/compact.md";
 const PROACTIVE = "my-workflow/references/proactive.md";
 
 /**
@@ -323,20 +327,22 @@ function talkText(ctx: Ctx) {
   const ex = (o: unknown) => JSON.stringify(o);
   return [
     `## 和用户说话\n` +
-      `- 你收到的消息有几种：[用户] 是用户在秘书页上对你说的话；[任务 tN] / [消息 cN] / [重新安排 tN] 是要派的活（见下面）；` +
-      `[检查] 是定时检查发现了卡住的任务；[简报] 是到了写简报的时间。\n` +
+      `- **秘书页就是你这段对话**：用户在这里对你打字，你回复里写的就是他看到的。直接在回复里说，不用任何工具发消息；` +
+      `调了哪些命令他也看得见（折起来的一行），所以结论写在回复的正文里。\n` +
+      `- 别的消息也会出现在这段对话里，开头标着是什么：[任务 tN] / [消息 cN] / [重新安排 tN] 是要派的活（见下面）；` +
+      `[检查] 是定时检查发现了卡住的任务；[简报] 是到了写简报的时间；[tN 的回答] 是你转给 worker 的问题它答了；[看板] 是看板的提醒；` +
+      `[用户] 是用户在面板助手那里说、转给你的。` +
+      `用户能看到它们，所以派活、分拣这种不用说话的，回复只写一句结论（「派给了 t12」「没接：道谢」），别把过程再讲一遍。\n` +
       `- **看板是用户自己盯的，你是辅助**：任务的状态变化不会发给你，你也不去盯、不去推进任务。用户问起、或者定时任务（[检查]、[简报]）交给你时，才去看看板。` +
       `用户交代的才做：他让你催、让你转告，你再用下面的命令去做。\n` +
-      `- **对用户说话一律用 message_user 工具**（简报带 \`"brief": true\`）：秘书页上只有它发的消息，你回复里的文字和中间过程用户都看不到。` +
-      `没有要告诉他的（派活、分拣）就不调用。他问你的、交代你的，每次都要用 message 回一句。\n` +
       `- 用户问到的、你要说的，先查事实再说：\`gerdr panel run secretary.status\` 给出等他的事（带问题的 id 和选项）、在做的、待验收的、最近完成的。` +
-      `不要凭记忆说「做完了」。问到某一件事的细节（做到哪、动态里写了什么、开了哪个 MR、它最后说了什么）：` +
+      `不要凭记忆说「做完了」。问到某一件事的细节（做到哪、开了哪个 MR、它最后说了什么）：` +
       `\`gerdr panel run tasks.list '${ex({ id: "t12" })}'\` 只给这一件（和它的成员），别不带 id 拉整块看板。\n` +
-      `- **说到某个任务的结果、方案、结论时，附上 worker 的原话**：message_user 带 \`"quote": "t12"\`，它 worker 最后一轮的回复会原样显示在你的消息下面，` +
-      `用户能展开、能直接回它。你只说一句为什么要他看、要他做什么，不要把内容再缩写一遍（缩写会丢掉他要的细节）。\n` +
+      `- **说到某个任务的结果、方案、结论时，别缩写 worker 的话**（缩写会丢掉他要的细节）：说一句为什么要他看、要他做什么，` +
+      `让他在看板上打开 tN 看 worker 的原话。\n` +
       `- **用户追问某个任务里的细节**（方案里为什么这样、某个数字哪来的、它具体改了什么）：别凭你看到的摘要答，转给做它的 worker —— ` +
-      `\`gerdr panel run tasks.message '${ex({ id: "t12", text: "用户的原话" })}'\`，` +
-      `再用 message_user 带 \`"follow": "t12"\` 说一句「问了 t12，它的回答会接在下面」。它的回答会显示在秘书页上，你不用转述。` +
+      `\`gerdr panel run tasks.message '${ex({ id: "t12", text: "用户的原话" })}'\`，说一句「问了 t12」就结束这一轮。` +
+      `它答完，原话会作为 [t12 的回答] 出现在这段对话里，用户直接看得到：你不用转述，有要补的（下一步要他做什么）再说一句。` +
       `跨需求的、要汇总的（哪些在等他、进度、日报）才由你自己答。\n` +
       `- 用户交给你一件事：是活就派（\`tasks.add\` 带 \`"start": true\`，知道去哪个仓库就给 \`repo\`；不知道就按下面「怎么派」挑，挑不出来就先问他再派）；` +
       `他要亲手做的步骤记成人工任务（\`tasks.add\` 带 \`"owner": "human"\`）。派完一句话告诉他交给了谁。\n` +
@@ -344,15 +350,14 @@ function talkText(ctx: Ctx) {
       `验收 \`tasks.accept ${ex({ id: "t5" })}\` / 打回 \`tasks.reject ${ex({ id: "t5", feedback: "…" })}\`；` +
       `他做完了自己的步骤 \`tasks.complete ${ex({ id: "t5", value: "要交回的值（没有就不写）" })}\`；` +
       `转告 worker \`tasks.say ${ex({ id: "t5", text: "…" })}\`；不做了 \`tasks.drop ${ex({ id: "t5", reason: "…" })}\`。\n` +
-      `- 不要用你自带的提问工具（AskUserQuestion）：有要问用户的，用 message_user 问，他会在秘书页上答你。` +
-      `问了就先不派，这一轮到此为止，他的回答会作为 [用户] 消息到来。\n` +
+      `- 不要用你自带的提问工具（AskUserQuestion）：有要问用户的，直接在回复里问，他会在这里答你。` +
+      `问了就先不派，这一轮到此为止，他的回答会是他的下一条消息。\n` +
       `- **仓库拿不准就先问，不要先派了再说明**（包括这件事不属于仓库列表里的任何一个）：带上你的建议问他，怎么挑、怎么建议见「怎么派」。\n` +
-      `- **要用户回答的问题会作为卡片出现在秘书页的对话里**（secretary.status 里带着问题、选项和交答案的命令）：` +
-      `他可以直接点卡片，也可以对你说。你说一句要他决定什么、为什么要紧就行，不用重复选项，更不要让他去看板或 worker 的对话里答。` +
-      `他用文字答了，你用给出的命令替他交（一个问题一条命令），再告诉他交了。密钥不经过对话：卡片上会让他在看板上填。\n` +
+      `- **worker 要用户回答的问题**（secretary.status 里带着问题、选项和交答案的命令）：页面顶上「等你」那一栏列着，他能点开去答，也可以对你说。` +
+      `你问他的时候说清要他决定什么、为什么要紧、有哪几个选项，他答了，你用给出的命令替他交（一个问题一条命令），再告诉他交了。密钥不经过对话：让他在看板上那张卡里填。\n` +
       `- 改这个面板本身（设置、流程、触发器、定时任务、页面）不归你：告诉用户去面板右边的面板助手那里说。\n` +
-      `- 你的对话每隔一阵会换成新的会话，只带最近 7 天的聊天：要长期记住的事当场记下 —— 用户交代的活进看板（任务），` +
-      `他的偏好和规矩用 \`remember\` 记进记忆，做事方式写进流程（skill）。只留在聊天里的，过几天就忘了。`,
+      `- 这段对话一直用下去，长了会被压缩：早先的聊天变成一段摘要，细节会丢。要长期记住的事当场记下 —— 用户交代的活进看板（任务），` +
+      `他的偏好和规矩用 \`remember\` 记进记忆，做事方式写进流程（skill）。只留在聊天里的，压缩之后就只剩个大概。`,
     textOf(ctx, SECRETARY),
   ]
     .filter(Boolean)
@@ -392,113 +397,117 @@ export function isMain(ctx: Ctx, id?: string) {
   return !!id && (state(ctx).mains ?? []).includes(id);
 }
 
-/** Which reason for a turn wins when several messages go into one: the user's question is answered first. */
-const RANK: Record<Why, number> = { route: 0, notice: 1, brief: 2, user: 3 };
-
 /**
- * Hands the secretary messages: `blocks` are items in the formats the brief describes, `why` what they are (what its
- * reply will be taken as). Starts a session (the brief, the last 7 days of the conversation, then the messages) when
- * there's none, it failed, or it is idle and cold (COLD) or long (ROTATE); otherwise it's a message, which a running
- * session reads at its next pause. When the user's rules changed since it was told them (repositories, models,
- * roles), the new brief goes first.
+ * Hands the secretary messages: `blocks` are items in the formats the brief describes, `why` what they are (kept for
+ * callers; the chat shows every message anyway). The brief goes to its system file first. One conversation goes on
+ * and is compacted (secretary.compact), never replaced by time. A new one only when there's none, it failed, or
+ * 设置 changed who runs it: it carries the old one on (continueFrom), so the page still reads as one conversation.
+ * When the rules changed while it runs, one line says so: its agent only re-reads the system file when it starts again.
  */
 export async function toMain(ctx: Ctx, blocks: string[], why: Why = "route", attachments?: string[]): Promise<string> {
-  const b = await brief(ctx);
+  void why;
+  const body = blocks.join("\n\n");
+  const { id, changed, hash: h } = await ensureMain(ctx, body, attachments);
+  if (id.fresh) return id.id;
+  const text = changed ? `[看板] 你的规则有更新：重读一遍 ${abs(ctx, SYSTEM)}，以它为准。\n\n${body}` : body;
+  await ctx.sessions.send(id.id, text, attachments?.length ? { attachments } : undefined);
+  if (changed) updateState(ctx, (x) => void (x.brief = h));
+  return id.id;
+}
+
+const abs = (ctx: Ctx, p: string) => `${ctx.workspace.dir}/${p}`;
+
+/**
+ * The brief, written where Gerdr reads the secretary's system prompt from. Returns whether it changed since the
+ * session was told (state.brief).
+ */
+async function writeSystem(ctx: Ctx): Promise<{ hash: string; changed: boolean }> {
+  migrateLog(ctx);
+  let b = await brief(ctx);
+  if (ctx.fs.stat(HISTORY))
+    b += `\n\n## 以前的聊天\n秘书页还是面板自己画的那阵子（2026-11-12 以前）你和用户说过的话，在 ${abs(ctx, HISTORY)}：用户提起那时候的事再去读。`;
   const h = hash(b);
+  const st = ctx.fs.stat(SYSTEM);
+  if (!st || hash(ctx.fs.read(SYSTEM)) !== h) ctx.fs.write(SYSTEM, b, st ? { etag: st.etag } : undefined);
+  return { hash: h, changed: !!state(ctx).brief && state(ctx).brief !== h };
+}
+
+/**
+ * The secretary's session, started when there's none (or it failed, or 设置 changed who runs it). `first`: what a
+ * new one is sent first (nothing: it just opens, for the page). fresh: it was started now, with `first`.
+ */
+export async function ensureMain(ctx: Ctx, first?: string, attachments?: string[]): Promise<{ id: { id: string; fresh: boolean }; changed: boolean; hash: string }> {
+  const { hash: h, changed } = await writeSystem(ctx);
   const s = state(ctx);
   const cur = s.main ? ctx.sessions.get(s.main) : null;
-  const body = blocks.join("\n\n");
-  const idle = cur?.status === "idle";
-  const cold = !!cur && idle && Date.now() - cur.updatedAt > COLD;
   const r = workflow(ctx).router;
   // Who it runs as (agent, model, effort, mode) is fixed when a session starts: changed in 设置, the next one takes it
   const who = JSON.stringify(r);
-  const changed = idle && !!s.who && s.who !== who;
-  let id: string;
-  if (!cur || cur.status === "error" || cold || changed || (idle && s.handled >= ROTATE)) {
-    const past = windowText(ctx);
-    const sess = await ctx.sessions.start({
-      cwd: ctx.workspace.dir,
-      agent: r.agent || undefined,
-      model: r.model || undefined,
-      effort: r.effort || undefined,
-      mode: r.mode || undefined,
-      title: "Superagent 秘书",
-      prompt: [b, past && `## 最近 7 天你和用户的对话（之前的会话里说的，现在接着）\n\n${past}`, body].filter(Boolean).join("\n\n---\n\n"),
-      tags: { superagent: "main" },
-      workspace: "none",
-      attachments,
-    });
-    updateState(ctx, (x) => {
-      Object.assign(x, { main: sess.id, mains: [...(x.mains ?? []), sess.id], brief: h, handled: blocks.length, who });
-    });
-    // The one it replaces finished its last turn: let it go (still readable, as every one before it)
-    if (cur && cur.status === "idle") await ctx.sessions.close(cur.id).catch(() => {});
-    id = sess.id;
-  } else {
-    const text = h !== s.brief ? `（用户的规则有更新，以这份为准）\n\n${b}\n\n---\n\n${body}` : body;
-    await ctx.sessions.send(cur.id, text, attachments?.length ? { attachments } : undefined);
-    updateState(ctx, (x) => {
-      x.handled = (x.handled ?? 0) + blocks.length;
-      x.brief = h;
-    });
-    id = cur.id;
-  }
+  const idle = cur?.status === "idle" || cur?.status === "error";
+  // From before the system file (its rules were its first message): replaced once, not carried on — that chat is
+  // the old page's backstage, and what was said is in HISTORY. Only on a Gerdr that takes a system file: sessions
+  // carry `context` from the same Gerdr version on, and an older one would start the new session without its rules
+  const old = !!cur && !s.system && (cur as any).context !== undefined;
+  const replace = !!cur && (old || (idle && (cur.status === "error" || (!!s.who && s.who !== who))));
+  if (cur && !replace) return { id: { id: cur.id, fresh: false }, changed, hash: h };
+  const sess = await ctx.sessions.start({
+    cwd: ctx.workspace.dir,
+    agent: r.agent || undefined,
+    model: r.model || undefined,
+    effort: r.effort || undefined,
+    mode: r.mode || undefined,
+    title: "Superagent 秘书",
+    systemFile: abs(ctx, SYSTEM),
+    // The conversation goes on in the new one: its chat above, the agent told what was said
+    continueFrom: cur && !old && cur.status !== "running" ? cur.id : undefined,
+    tags: { superagent: "main" },
+    workspace: "none",
+  } as any);
+  // A Gerdr that took the system file says so; an older one ignored it, so the rules go in front of the first message
+  const system = (sess as any).systemFile === abs(ctx, SYSTEM);
+  const lead = system ? first : [await brief(ctx), first].filter(Boolean).join("\n\n---\n\n");
   updateState(ctx, (x) => {
-    const was = x.awaiting;
-    x.awaiting = { why: was && RANK[was.why] > RANK[why] ? was.why : why, sent: Date.now() };
+    Object.assign(x, { main: sess.id, mains: [...(x.mains ?? []), sess.id], brief: h, who, compactedAt: undefined, system });
   });
-  return id;
-}
-
-/** Its message to the user (board.ts message_user, called from the secretary's session): a line on the secretary's page. */
-export function secretaryMessage(ctx: Ctx, input: { text: string; files?: { path: string; name?: string }[]; brief?: boolean; quote?: { task: string; at: number; text: string }; follow?: string }) {
-  const e = append(ctx, {
-    kind: input.brief ? "brief" : "message",
-    by: SECRETARY_ID,
-    text: input.text,
-    ...(input.files?.length ? { files: input.files } : {}),
-    ...(input.quote ? { quote: input.quote } : {}),
-    ...(input.follow ? { follow: input.follow } : {}),
-    session: ctx.caller.session || undefined,
-  });
-  updateState(ctx, (s) => {
-    s.messageAt = e.at;
-  });
-  return e;
+  if (lead || attachments?.length) await ctx.sessions.send(sess.id, lead || "", attachments?.length ? { attachments } : undefined);
+  // The one it replaces finished its last turn: let it go (still readable, as every one before it)
+  if (cur && cur.status !== "running") await ctx.sessions.close(cur.id).catch(() => {});
+  return { id: { id: sess.id, fresh: true }, changed: false, hash: h };
 }
 
 /**
- * When a turn is over: what the user (or a briefing) waited on got a message, or the secretary is reminded once to send
- * one — its reply text shows nowhere (the user: a reply taken from the turn can't tell which of several messages it
- * answers, when they come in mid-turn; so the secretary says things with its message tool, as a worker reports).
- * Routing and news turns need no message. Called from the page's refreshes and the board's (tasks.list, also on a
- * schedule), so it happens whether or not anyone has the page open.
+ * The page's own log (_log.ts, before 2026-11-12) to a file the secretary can read when asked about that time: the
+ * new conversation starts without it, so its first message isn't a week of pasted talk. Once.
  */
-export async function settle(ctx: Ctx) {
+function migrateLog(ctx: Ctx) {
+  if (ctx.fs.stat(HISTORY)) return;
+  const past = windowText(ctx, Infinity);
+  if (past) ctx.fs.write(HISTORY, `# 秘书页上以前的聊天（2026-11-12 以前，面板自己存的那份）\n\n${past}\n`);
+}
+
+/**
+ * Compacts the secretary's conversation (schedules/compact.json; DESIGN.md「秘书」「一个会话，靠压缩」): only once
+ * it has sat idle an hour (its prompt cache is gone, so this costs what its next message would anyway) and its context
+ * holds compactTokens or more (设置); compactTokens 0 = by time: whenever this runs and something was said since the
+ * last time. What to keep is the user's prose (流程 → compact.md). { force?: true — now, whatever the size and idle time }
+ */
+export async function compactMain(ctx: Ctx, input?: { force?: boolean }) {
   const s = state(ctx);
-  if (!s.main || !s.awaiting) return;
-  const m = ctx.sessions.get(s.main);
-  if (!m) return;
-  // Right after a message went in it can still read idle, before the turn starts: not over until a while has passed
-  const over = (m.status === "idle" || m.status === "error") && (m.updatedAt > s.awaiting.sent + 1000 || Date.now() - s.awaiting.sent > 30_000);
-  if (!over) return;
-  const a = s.awaiting;
-  const owed = (a.why === "user" || a.why === "brief") && (s.messageAt ?? 0) < a.sent && !a.nudged && m.status === "idle";
-  const go = updateState(ctx, (x) => {
-    if (!x.awaiting || x.main !== m.id || x.awaiting.sent !== a.sent) return false;
-    x.awaiting = owed ? { ...x.awaiting, sent: Date.now(), nudged: true } : undefined;
-    return owed;
-  });
-  if (go)
-    await ctx.sessions
-      .send(
-        m.id,
-        a.why === "brief"
-          ? `[看板] 简报还没发给用户：用 message_user 工具发（带 "brief": true）。你回复里的文字他看不到。`
-          : `[看板] 用户在等你回话：用 message_user 工具回他。你回复里的文字他看不到。`,
-      )
-      .catch(() => {});
+  const m = s.main ? ctx.sessions.get(s.main) : null;
+  if (!m) return "没有秘书的对话";
+  if (m.status !== "idle") return `秘书正在${m.status === "running" ? "忙" : "等人"}，下次再看`;
+  const force = !!input?.force;
+  if (!force && Date.now() - m.updatedAt < COLD) return "一小时内说过话，先不压缩（提示缓存还在）";
+  const limit = workflow(ctx).compactTokens;
+  const used = (m as any).context?.tokens as number | undefined;
+  if (!force) {
+    if (limit > 0 && !(used && used >= limit)) return `上下文 ${used ?? "?"} token，不到 ${limit}，不压缩`;
+    if (limit === 0 && s.compactedAt && m.updatedAt <= s.compactedAt) return "上次压缩之后没聊过，不压缩";
+  }
+  const how = textOf(ctx, COMPACT).replace(/^#.*\n+/, "").trim();
+  await ctx.sessions.send(m.id, `/compact ${how}`.trim());
+  updateState(ctx, (x) => void (x.compactedAt = Date.now()));
+  return `已压缩秘书的对话（压缩前 ${used ?? "?"} token）`;
 }
 
 /**

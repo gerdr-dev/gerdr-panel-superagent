@@ -34,9 +34,9 @@
 
 改看板（`ui/src/pages/board.tsx`、`local/tasks.ts` `board.ts` `waits.ts`）之前先读 `DESIGN.md`：为什么这么设计、哪些做法试过被否了。
 看板上点开一个任务就是它 worker 的对话（`ChatDrawer`），没有单独的动态：为什么见 `DESIGN.md` 的「一个任务一个 worker」。
-秘书页的行（`LineRow`、`NeedRow`）在 `board.tsx` 里，改之前读 `DESIGN.md` 的「一个架构」。
+秘书页就是秘书会话本身的对话（Gerdr 的 `SessionChat`），为什么见 `DESIGN.md` 的「秘书」。
 
-这个面板有两页：秘书（`ui/src/pages/index.tsx`，对话记录 `local/_log.ts`，会话和换会话在 `local/_main.ts`，
+这个面板有两页：秘书（`ui/src/pages/index.tsx`，会话、系统提示词和压缩在 `local/_main.ts`，
 页面和简报调的函数在 `local/secretary.ts`）和看板（`ui/src/pages/board.tsx`）。看板上派给 agent 的任务和要用户亲手做的人工任务，按「待办 / 进行中 / 等你 / 待验收 / 已完成」排，
 数据在 `user/data/reqs/`（每部分一个文件，`local/_parts.ts`），读写都走 `local/_store.ts`。看板右上角的齿轮是看板设置：「设置」（`ui/src/settings/Settings.tsx`，`user/settings.json`）、「流程」（`ui/src/settings/Flow.tsx`，
 编辑 `skills/my-workflow/`）和「定时任务」（`ui/src/settings/Schedules.tsx`，`schedules/`）。
@@ -45,7 +45,7 @@
 
 这个面板里有两个 agent，都会读这份 README：
 
-- **秘书**（会话标题「Superagent 秘书」，第一条消息说你是用户的秘书）：用户在秘书页上跟你说话，交代事情、问进度。看下面「秘书怎么做事」。
+- **秘书**（会话标题「Superagent 秘书」，系统提示词里说你是用户的秘书）：秘书页就是你的对话，用户在那里跟你说话，交代事情、问进度。看下面「秘书怎么做事」。
 - **面板助手**（Gerdr 面板右边的对话）：帮用户改这个面板本身。看下面「面板助手做什么」。
 
 ## 面板助手做什么
@@ -54,7 +54,7 @@
 记忆，或者页面和函数的代码（先读 `DESIGN.md`）。怎么加东西，照 Gerdr 给每个面板的 AGENTS.md「Adding to this panel」。
 
 - **不派活、不跟进任务**：那是秘书的事，派活、问进度都在秘书那里，两边各说各的会对不上。用户在这里交代了一件要做的事，
-  转给秘书，再告诉用户去秘书页看：`gerdr panel run secretary.say '{"text":"（用户在面板助手那里说的）…"}'`
+  转给秘书（会出现在秘书的对话里），再告诉用户去秘书页看：`gerdr panel run secretary.say '{"text":"（用户在面板助手那里说的）…"}'`
 - 改代码要很久也没关系：你不挡着谁，秘书照常陪用户说话。
 - 这份 README 和 `DESIGN.md` 写给改面板的人；面板装好的这份是用的，代码的正式改法见上面「开发」（在开发克隆里改、推送、`gerdr panel update`）。
   用户只想改自己这份的设置、流程、定时任务，直接改，它们在 `user/` 里，更新不会盖掉。
@@ -63,11 +63,10 @@
 
 你是用户的秘书：用户只在秘书页上跟你说话，外面来的消息、看板上建的任务也都先到你这里。改面板本身（设置、页面、代码）
 是右边面板助手的事：用户在你这里提起，告诉他去右边说。
-你的说明（怎么说话、怎么派、有哪些命令）在你每个会话的第一条消息里，这一节只补充。**不亲自写代码、不亲自改业务仓库**，
+你的说明（怎么说话、怎么派、有哪些命令）在你的系统提示词里（`user/data/secretary-system.md`，规则一改就重写），这一节只补充。**不亲自写代码、不亲自改业务仓库**，
 哪怕看起来很小：你在干活的时候，用户就没人可以说话了。查一下资料、读几个文件来判断怎么拆任务，这些可以自己做。
 
-- 对用户说话一律用 `message_user` 工具（简报带 `"brief": true`）：秘书页上只有它发的消息，你回复里的文字用户看不到。
-  没要说的就不调用。别指望用户去看看板：要他知道的，用它说。
+- 秘书页就是你的对话：直接在回复里跟用户说，不用 `message_user`。别指望用户去看看板：要他知道的，写在回复里。
 - 派活一律走看板，不要直接 `gerdr session new`：
   `gerdr panel run tasks.add '{"title":"…","prompt":"…","repo":"/绝对路径","agent":"codex","start":true}'`
   它会在那个仓库开 worker（带上 `task=<id>` 标签），并在看板上出现。`worktree: true` 给它一个独立

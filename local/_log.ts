@@ -1,6 +1,10 @@
 import { DATA } from "./_user";
 
-// The secretary's conversation with the user, as the user sees it (DESIGN.md「秘书」): what they said, the messages
+// Before 2026-11-12: the secretary's conversation with the user as the page drew it (DESIGN.md「秘书」). The page is the
+// secretary's own chat now; this log is only read once more, copied to a file the secretary can look things up in
+// (_main.ts migrateLog). What follows is how it was.
+//
+// The secretary's conversation with the user, as the user sees it: what they said, the messages
 // the secretary sent them (its message tool, board.ts), and the briefings. The same lines as a requirement's feed
 // (Activity in _store.ts), so both pages draw them alike. Kept by the panel, not read from the agent's transcript, because the agent
 // session behind it is replaced whenever the old one's prompt cache has expired anyway (_main.ts toMain): the page
@@ -90,9 +94,13 @@ function stamp(ms: number) {
   return `${d.getMonth() + 1}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-/** The last WINDOW of the conversation as text, for a new session's first message; "" when there's none. */
-export function windowText(ctx: Ctx): string {
-  const from = Date.now() - WINDOW;
+/**
+ * The last `window` ms of the conversation as text (newest WINDOW_CHARS kept, unless `window` is Infinity: all of
+ * it); "" when there's none. Since 2026-11-12 only for the one-time copy the secretary can read (_main.ts migrateLog).
+ */
+export function windowText(ctx: Ctx, window = WINDOW): string {
+  const from = Date.now() - window;
+  const cap = window === Infinity ? Infinity : WINDOW_CHARS;
   const lines: string[] = [];
   let size = 0;
   for (const e of [...entries(ctx)].reverse()) {
@@ -100,7 +108,7 @@ export function windowText(ctx: Ctx): string {
     const who = e.kind === "user" ? (e.follow ? `用户（在秘书页上直接对 ${e.follow} 说）` : "用户") : e.kind === "brief" ? "你（简报）" : e.quote ? `你（附上了 ${e.quote.task} 的原话）` : e.follow ? `你（转给了 ${e.follow}）` : "你";
     const files = e.files?.length ? `\n（附件：${e.files.map((f) => f.path).join("、")}）` : "";
     const line = `[${stamp(e.at)}] ${who}：${e.text}${files}`;
-    if (size + line.length > WINDOW_CHARS) break;
+    if (size + line.length > cap) break;
     size += line.length;
     lines.push(line);
   }

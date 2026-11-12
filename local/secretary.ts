@@ -1,22 +1,9 @@
-// The secretary (DESIGN.md「秘书」): what the 秘书 page calls (feed, say) and what the secretary itself and its
-// briefing schedule call (status, briefing). The session behind it, and how its replies are taken, are _main.ts.
+// The secretary (DESIGN.md「秘书」): what the 秘书 page calls (open), what the secretary itself and its schedules call
+// (status, briefing, checkStuck, compact), and say for the panel's assistant. The page is the secretary's own chat;
+// the session behind it is _main.ts.
 
-import { list, message } from "./tasks";
-import { append, entries, type Entry } from "./_log";
-import { askText, mainId, settle, state, toMain, updateState, type Item } from "./_main";
-
-/** A line the page folds: what happened to an outside message (the 去向 log), drawn between the messages. */
-type Note = { id: string; at: number; who: "note"; text: string; state: Item["state"]; tasks?: string[] };
-
-const STATE: Partial<Record<Item["state"], string>> = {
-  accepted: "接了",
-  attached: "并进",
-  stopped: "停掉",
-  ignored: "没接",
-  delivered: "交给",
-  unavailable: "没判断成",
-  observed: "只记录",
-};
+import { list } from "./tasks";
+import { askText, compactMain, ensureMain, state, toMain, updateState } from "./_main";
 
 const cut = (s: string, n: number) => {
   const t = s.replace(/\s+/g, " ").trim();
@@ -24,66 +11,31 @@ const cut = (s: string, n: number) => {
 };
 
 /**
- * The conversation for the page: { entries (oldest first: the user's and the secretary's messages, and the outside
- * messages it handled as notes), main (its session now: running / waiting) }. Reminds it first if a turn ended owing
- * the user a message (settle).
+ * For the page: the secretary's session, opened if there's none yet (it starts with no message; its rules are in its
+ * system prompt). { main: its id }.
  */
-export async function feed(input: { limit?: number }, ctx: Ctx) {
-  await settle(ctx);
-  const all = entries(ctx);
-  const log = all.slice(-(input?.limit ?? 300));
-  // Outside messages only from when the secretary began (state.since, set the first time), and not older than the
-  // oldest message shown when the conversation is cut
-  const since = state(ctx).since ?? updateState(ctx, (s) => (s.since ??= Math.min(Date.now(), all[0]?.at ?? Infinity)));
-  const from = Math.max(since, log.length < all.length ? log[0].at : 0);
-  const notes: Note[] = state(ctx)
-    .items.filter((it) => STATE[it.state] && (it.decidedAt ?? it.at) >= from)
-    .map((it) => {
-      const e = it.event;
-      const who = e.who || e.actor || "";
-      return {
-        id: it.id,
-        at: it.decidedAt ?? it.at,
-        who: "note" as const,
-        state: it.state,
-        tasks: it.tasks,
-        text: `${e.source}${who ? ` · ${who}` : ""}：${cut(e.text || e.title || "", 60)} → ${STATE[it.state]}${it.tasks?.length ? ` ${it.tasks.join("、")}` : ""}${it.reason ? `（${cut(it.reason, 40)}）` : ""}`,
-      };
-    });
-  const merged: (Entry | Note)[] = [...log, ...notes].sort((a, b) => a.at - b.at);
-  const id = mainId(ctx);
-  const m = id ? ctx.sessions.get(id) : null;
-  const s = state(ctx);
-  return {
-    entries: merged,
-    main: m ? { id: m.id, status: m.status, waiting: m.waiting, waitingKind: m.waitingKind, error: m.error } : null,
-    // It's on something: the page shows it working, as a requirement's feed shows a member running
-    busy: !!s.awaiting,
-  };
+export async function open(_input: unknown, ctx: Ctx) {
+  const { id } = await ensureMain(ctx);
+  return { main: id.id };
 }
 
-/** The user says something to the secretary: { text, files? (paths on this machine) }. */
+/**
+ * Something said to the secretary from elsewhere (the panel's assistant passing on what the user asked it): { text,
+ * files? (paths on this machine) }. On the page the user types into the secretary's chat itself.
+ */
 export async function say(input: { text: string; files?: { path: string; name?: string; mime?: string }[] }, ctx: Ctx) {
   const text = (input?.text ?? "").trim();
   const files = (input?.files ?? []).filter((f) => f?.path);
   if (!text && !files.length) throw new Error("说点什么");
-  const e = append(ctx, { kind: "user", text, ...(files.length ? { files } : {}) });
-  await toMain(ctx, [`[用户] ${text}`], "user", files.map((f) => f.path));
-  return e;
+  const id = await toMain(ctx, [`[用户] ${text}`], "user", files.map((f) => f.path));
+  return { main: id };
 }
 
 /**
- * The user replies to a worker's line on the secretary's page: { to: the member task, text, files? }. It goes to that
- * worker as words from its requirement's feed (tasks.message: the feed has them, it owes a message_user back), not
- * through the secretary, and the page keeps it with `follow` so the worker's answer is drawn under it there too.
+ * Compacts the secretary's conversation (schedules/compact.json): see _main.ts compactMain. { force?: true }
  */
-export async function reply(input: { to: string; text: string; files?: { path: string; name?: string; mime?: string }[] }, ctx: Ctx) {
-  const text = (input?.text ?? "").trim();
-  const files = (input?.files ?? []).filter((f) => f?.path);
-  if (!input?.to) throw new Error("回复给谁？");
-  if (!text && !files.length) throw new Error("说点什么");
-  await message({ id: input.to, to: [input.to], text, attachments: files }, ctx);
-  return append(ctx, { kind: "user", text, follow: input.to, ...(files.length ? { files } : {}) });
+export async function compact(input: { force?: boolean } | null, ctx: Ctx) {
+  return compactMain(ctx, input ?? undefined);
 }
 
 function when(ms?: number) {

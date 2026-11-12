@@ -54,7 +54,7 @@ export type Task = {
    * The user spoke to it from the requirement's feed (tasks.message) and is owed a message back (board.ts message);
    * nudged: reminded once already. Cleared by its message.
    */
-  asked?: { at: number; nudged?: boolean };
+  asked?: { at: number; nudged?: boolean; /** Asked through the secretary (its words): the answer goes back to its chat. */ relay?: string; /** What it sent with message_user meanwhile. */ said?: string };
   /** Dropped by the board because nothing it unblocked was still going (tasks.ts dropOrphans), not by anyone: a handover can take it back. */
   orphaned?: number;
   /**
