@@ -928,8 +928,8 @@ function ReplyBox({ t, act }: { t: Task; act: Act }) {
         {delivered
           ? `已交付给 ${t.assigned?.by ?? "发起人"}，等对方验收；还可以接着回复`
           : draft && text === draft
-            ? `agent 写好了交付说明：看过它的工作、改好下面的话，再点「回复并交付」`
-            : `回复 ${t.assigned?.by ?? "发起人"}：worker 做完先到你这里看，你觉得完成了再交付`}
+            ? `agent 写好了交付说明，交付时一起发给 ${t.assigned?.by ?? "发起人"}（可以先改）`
+            : `回复 ${t.assigned?.by ?? "发起人"}；看过 worker 的结果、觉得完成了，点「标为已交付」（不用写字）`}
       </p>
       <textarea
         rows={draft && text === draft ? 6 : 2}
@@ -943,8 +943,9 @@ function ReplyBox({ t, act }: { t: Task; act: Act }) {
           {busy === "say" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}回复
         </Button>
         {!delivered && (
-          <Button disabled={!text.trim() || !!busy} onClick={() => send(true)}>
-            {busy === "deliver" ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}回复并交付
+          <Button disabled={!!busy} title="完成了：交给发起人验收。框里有字就一起发过去" onClick={() => send(true)}>
+            {busy === "deliver" ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+            {text.trim() ? "回复并交付" : "标为已交付"}
           </Button>
         )}
       </div>

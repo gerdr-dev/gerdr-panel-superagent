@@ -194,18 +194,20 @@ export async function decline(input: { id: string; reason: string }, ctx: Ctx) {
 
 /**
  * The user answers whoever asked: { id, text, deliver? }. deliver: it's done as far as they're concerned (after they
- * looked at the work themselves); it waits for whoever asked to accept or return it.
+ * looked at the work themselves); it waits for whoever asked to accept or return it. Delivering needs no text: the
+ * agent's delivery note (draft) goes along when there is one.
  */
 export async function replyOrigin(input: { id: string; text: string; deliver?: boolean; byAgent?: string }, ctx: Ctx) {
   const t = assignedTask(ctx, input.id);
-  const text = input.text?.trim();
-  if (!text) throw new Error(input.deliver ? "交付要写一句：做了什么、怎么看结果" : "说点什么");
+  // Delivering is one action: no words needed; the agent's delivery note goes along when it wrote one
+  const text = (input.text?.trim() || (input.deliver ? (t.assigned?.draft ?? "").trim() : "")) as string;
+  if (!text && !input.deliver) throw new Error("说点什么");
   if (input.deliver && t.assigned!.state !== "agreed") throw new Error(t.assigned!.state === "ask" ? "还没同意" : `${t.id} 已经交付过了`);
   if (input.deliver && input.byAgent) throw new Error("只有人能交付");
   tell(ctx, t, text, { step: input.deliver ? "deliver" : "say", ...(input.byAgent ? { byAgent: input.byAgent } : {}) });
   return update(ctx, (s) => {
     const x = find(s, t.id);
-    note(x, `${input.byAgent ? `${input.byAgent} ` : ""}${input.deliver ? "交付了" : "回复了"}：${text}`);
+    note(x, `${input.byAgent ? `${input.byAgent} ` : ""}${input.deliver ? "交付了" : "回复了"}${text ? `：${text}` : ""}`);
     if (input.deliver) {
       x.assigned = { ...(x.assigned as Assigned), state: "delivered", draft: undefined };
       // Woken by whatever happens on that conversation (accepted, returned, a question): it's theirs now
