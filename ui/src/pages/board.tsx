@@ -856,7 +856,6 @@ function AssignBox({ t, act, save }: { t: Task; act: Act; save: () => Promise<bo
   const { busy, err, go } = useAction(act);
   const [no, setNo] = useState(false);
   const [why, setWhy] = useState("");
-  const [share, setShare] = useShareChoice();
   return (
     <div className="space-y-2 rounded-md border border-warn/40 bg-warn/5 p-3">
       <p className="text-[13px]">
@@ -880,12 +879,11 @@ function AssignBox({ t, act, save }: { t: Task; act: Act; save: () => Promise<bo
           <Button variant="outline" disabled={!!busy} title="变成你自己的任务：你来安排，可以再拆成几个交给 agent" onClick={async () => (await save()) && go("self", "agree", { id: t.id, how: "self" })}>
             {busy === "self" ? <Loader2 className="size-3.5 animate-spin" /> : <Hand className="size-3.5" />}同意，我自己安排
           </Button>
-          <Button disabled={!!busy} title={t.repo ? `交给 agent，在 ${t.repo.split("/").pop()} 里做` : "交给 agent；仓库由秘书挑"} onClick={async () => (await save()) && go("agent", "agree", { id: t.id, how: "agent", share })}>
+          <Button disabled={!!busy} title={t.repo ? `交给 agent，在 ${t.repo.split("/").pop()} 里做` : "交给 agent；仓库由秘书挑"} onClick={async () => (await save()) && go("agent", "agree", { id: t.id, how: "agent" })}>
             {busy === "agent" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}同意，交给 agent 做
           </Button>
         </div>
       )}
-      {!no && <ShareChoice by={t.assigned?.by} value={share} onChange={setShare} />}
       {err && <p role="alert" className="text-[12px] text-bad">{err}</p>}
     </div>
   );
@@ -936,36 +934,6 @@ function ReplyBox({ t, act }: { t: Task; act: Act }) {
   );
 }
 
-type Share = "" | "view" | "talk";
-const SHARE_KEY = "superagent.assignShare";
-
-/** What the user last chose for sharing an agent's conversation with whoever asked: the default next time. */
-function useShareChoice(): [Share, (v: Share) => void] {
-  const [v, setV] = useState<Share>(() => {
-    const x = localStorage.getItem(SHARE_KEY);
-    return x === "view" || x === "talk" ? x : "";
-  });
-  return [v, (x) => (localStorage.setItem(SHARE_KEY, x), setV(x))];
-}
-
-/**
- * When an agent does work someone asked for: whether they may read its conversation (on their team panel), and say
- * things straight to it. Nothing leaves this computer unless shared. Changeable later on the team panel.
- */
-function ShareChoice({ by, value, onChange }: { by?: string; value: Share; onChange: (v: Share) => void }) {
-  const who = by ?? "发起人";
-  return (
-    <label className="flex items-center justify-end gap-2 text-[12px] text-muted-foreground">
-      交给 agent 时
-      <select value={value} onChange={(e) => onChange(e.target.value as Share)} className="h-7 rounded-md border bg-background px-1.5 text-[12px] text-foreground outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]">
-        <option value="">不分享对话</option>
-        <option value="view">{who} 能看 agent 的对话</option>
-        <option value="talk">{who} 能看，也能直接对 agent 说</option>
-      </select>
-    </label>
-  );
-}
-
 function HumanCard({ t, byId, act, onGo }: { t: Task; byId: Record<string, Task>; act: Act; onGo: (id: string) => void }) {
   const { busy, err, go } = useAction(act);
   const [value, setValue] = useState("");
@@ -990,7 +958,7 @@ function HumanCard({ t, byId, act, onGo }: { t: Task; byId: Record<string, Task>
         <div className="flex justify-end gap-2">
           <DropButton busy={!!busy} onDrop={() => go("drop", "drop", { id: t.id })} />
           {t.assigned.state === "agreed" && t.assigned.how === "self" && (
-            <Button variant="outline" disabled={!!busy} title="让 agent 按上面的说明去做；仓库由秘书挑。做完先回到你这里看" onClick={() => go("agent", "agree", { id: t.id, how: "agent", share: localStorage.getItem(SHARE_KEY) ?? "" })}>
+            <Button variant="outline" disabled={!!busy} title="让 agent 按上面的说明去做；仓库由秘书挑。做完先回到你这里看" onClick={() => go("agent", "agree", { id: t.id, how: "agent" })}>
               {busy === "agent" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}交给 agent 做
             </Button>
           )}

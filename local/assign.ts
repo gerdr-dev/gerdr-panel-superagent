@@ -5,7 +5,7 @@
 //     not agreed: a card under 等你 — 同意 (an agent does it: picks agent and repository, sent out at once; or 我自己安排:
 //       a task of their own, split as they like) or 拒绝 (with why).
 //     agreed: no one to ask (their own, or agreed elsewhere): taken as `how` says at once.
-//   data.update = { state: "agreed" | "rejected" | "returned" | "accepted" | "dropped", text? } on the same key: what
+//   data.update = { state: "agreed" | "rejected" | "returned" | "accepted" | "dropped" | "taken", text? } on the same key: what
 //     happened there since (agreed / rejected elsewhere: this card goes; returned: back to work, the worker told why).
 //
 // Everything said back goes through the event's own reply address with what step it is: `data.step` agree (with
@@ -93,6 +93,17 @@ async function onUpdate(ctx: Ctx, mine: Task[], u: { state?: string; text?: stri
         break;
       case "dropped":
         if (t.status !== "done") await drop({ id: t.id, reason: `对方不要了${text ? `：${text}` : ""}` }, ctx);
+        break;
+      case "taken":
+        // Someone else took it over: off the user's hands, but its worker stays (not closed) — whoever took it may
+        // read its conversation and ask it things (the team panel hands those to it)
+        if (t.status === "done" || t.status === "dropped") break;
+        update(ctx, (s) => {
+          const x = find(s, t.id);
+          Object.assign(x, { status: "done", doneAt: Date.now(), updatedAt: Date.now(), assigned: { ...x.assigned, state: "done" } });
+          endWaits(x, () => true, "被接手了");
+          note(x, text || "被别人接手了");
+        });
         break;
     }
   }
