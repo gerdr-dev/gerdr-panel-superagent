@@ -14,7 +14,7 @@
 // Other messages on the same key are follow-ups, like any conversation a task follows (_main.ts followUp).
 
 import { find, load, update, note, type Task } from "./_store";
-import { add, drop, start } from "./tasks";
+import { add, drop, folder, start } from "./tasks";
 import { wake } from "./_wake";
 import { addWait, endWaits } from "./_waits";
 import { compact } from "./_main";
@@ -200,7 +200,9 @@ export async function replyOrigin(input: { id: string; text: string; deliver?: b
   if (!text) throw new Error(input.deliver ? "交付要写一句：做了什么、怎么看结果" : "说点什么");
   if (input.deliver && t.assigned!.state !== "agreed") throw new Error(t.assigned!.state === "ask" ? "还没同意" : `${t.id} 已经交付过了`);
   if (input.deliver && input.byAgent) throw new Error("只有人能交付");
-  tell(ctx, t, text, { step: input.deliver ? "deliver" : "say", ...(input.byAgent ? { byAgent: input.byAgent } : {}) });
+  // A delivery carries what the work made: the task's folder, whose files the source sends along (the team panel)
+  const dir = input.deliver ? folder({ id: t.id }, ctx) : null;
+  tell(ctx, t, text, { step: input.deliver ? "deliver" : "say", ...(input.byAgent ? { byAgent: input.byAgent } : {}), ...(dir?.exists ? { dir: dir.path } : {}) });
   return update(ctx, (s) => {
     const x = find(s, t.id);
     note(x, `${input.byAgent ? `${input.byAgent} ` : ""}${input.deliver ? "交付了" : "回复了"}：${text}`);

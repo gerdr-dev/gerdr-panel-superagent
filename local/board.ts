@@ -69,7 +69,7 @@ export const tools = {
   },
   reply_requester: {
     description:
-      "Only for a task someone asked of the user (my_task shows requestedBy): answer whoever asked, through where the task came from (the team panel). deliver false: said to them now (a question for them, how it's going). deliver true: your delivery note — what was done, the result, how to check it — which is NOT sent: it fills the user's 回复并交付 box on their task panel, and they send it after looking at your work (only a person delivers). Write it once your work is done, then end your turn as usual. Never ask the user which channel to report on: this is it.",
+      "Only for a task someone asked of the user (my_task shows requestedBy): answer whoever asked, through where the task came from (the team panel). deliver false: said to them now (a question for them, how it's going). deliver true: your delivery note — what was done, the result, how to check it — which is NOT sent: it fills the user's 回复并交付 box on their task panel, and they send it after looking at your work (only a person delivers). Write it once your work is done, then end your turn as usual. What you made that they should see (a screenshot, the HTML, a report) must be in the task's folder (your artifactsDir): its files go with the delivery, and they see them. Never ask the user which channel to report on: this is it.",
     input: {
       type: "object",
       properties: {
