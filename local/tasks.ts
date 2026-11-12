@@ -17,7 +17,7 @@ export type { Task };
 //
 // Workers don't report (2026-11-12): the task panel follows their sessions, and a turn that ends waiting on nothing
 // puts the task before the user (待验收). What they still tell it goes through the panel tools (board.ts: wait_for,
-// ask_human, cancel_human; task_update only for links), which Gerdr gives them over MCP. Older workers ended replies
+// ask_human, cancel_human), which Gerdr gives them over MCP. Older workers ended replies
 // with a ```gerdr-task``` JSON block; `list` still reads those.
 
 // What a worker is told besides its task: short, since it shows in the chat as part of the first message. How to

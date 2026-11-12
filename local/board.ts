@@ -49,18 +49,8 @@ const STEP = {
 };
 
 export const tools = {
-  task_update: {
-    description:
-      "Optional, and not a report: the task panel follows your conversation, and your turn ending puts the task before the user (待验收) with what you said last. Use it only to put artifacts on the task's card (links: an MR, a doc, a pipeline; kept, so add new ones only) or a better one-line summary than your reply's first paragraph. Waiting on something: wait_for; something for the user to decide or do: ask_human.",
-    input: {
-      type: "object",
-      properties: {
-        state: { type: "string", enum: ["working", "review"], description: "Leave it out (working). review: what you have is for the user to judge now, even if you go on" },
-        summary: { type: "string", description: "The task card's line, 1-3 sentences" },
-        links: { type: "array", items: { type: "object", properties: { label: { type: "string" }, url: { type: "string" } }, required: ["url"] } },
-      },
-    },
-  },
+  // task_update was taken out on 2026-11-12: the card's line is the reply's first paragraph, links are in the reply.
+  // A worker started before that and still calling it gets "no such tool" and says it in its reply instead
   ask_human: {
     description:
       "Put something on the user's task panel that needs them: a step only they can do (give steps), or a decision (give options). Their answer / 'done' comes to you as a message, maybe days later. Decisions and values asked while earlier ones are unanswered go in one item: you get all the answers together once every one is answered. cancel_human takes one back. When and how to ask: the my-workflow skill, references/human.md and task.md.",

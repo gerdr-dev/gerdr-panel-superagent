@@ -58,7 +58,9 @@
   **这一轮结束、什么都没在等 = 待验收**（`tasks.list` 里置 `status: "review"`，`summary` 取它最后一轮回复的第一段，`firstWords`）。
   用户按了停止（`cancelled`）、出错，留在「等你」并写原因。标为完成只有用户能做（前一天已改）。
 - **留下的两个工具不是汇报**：`wait_for`（叫醒机制：没有它，worker 停下就没人再管）、`ask_human`（要用户定的事放成卡片，几天后点着答）。
-  `task_update` 只用来挂产物链接、换一句更好的摘要，可选；`message_user` / `post_progress` 只为老 worker 留着。
+  `task_update` 也去掉了（2026-11-12，同一天稍后）：用户问「这个摘要在哪里看、有什么用」—— 卡片那一行本来就取回复的第一段，
+  挂上的链接在有对话的任务里哪儿都不显示，只多一轮工具和对话里一行「更新概要」。老 worker 再调它会得到「没有这个工具」，在回复里说就行；
+  `message_user` / `post_progress` 同样只为老 worker 留着。
 - **唯一留下的提醒**：worker 把活交给别的会话、却没用 `wait_for` 等它（以后没东西叫醒它），提醒一次；再停就进待验收，卡片上是它说的话。
 - worker 的规矩剩一句：在回复里说全、结论在第一段；等别人 `wait_for`，要用户定的 `ask_human`（`references/task.md`）。
 
