@@ -91,17 +91,18 @@ function Row({ x, onTask, onRetried }: { x: Item; onTask: (id: string) => void; 
   };
   return (
     <article className="space-y-1 rounded-xl border bg-card px-3 py-2.5">
-      <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
+      {/* Wraps as whole pieces on a phone: without it each span squeezed into a column of one or two characters. */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px] whitespace-nowrap text-muted-foreground">
         <span className={clsx("font-medium", st.tone)}>{st.label}</span>
         {x.tasks?.map((t) => (
           <button key={t} className="rounded-sm bg-muted px-1 font-mono text-[11px] text-foreground hover:bg-accent" onClick={() => onTask(t)}>
             {t}
           </button>
         ))}
-        <span className="font-mono">
+        <span className="min-w-0 truncate font-mono">
           {e.source}/{e.kind}
         </span>
-        {(e.who || e.actor) && <span>· {e.who || e.actor}</span>}
+        {(e.who || e.actor) && <span className="min-w-0 truncate">· {e.who || e.actor}</span>}
         {x.inferred && <span className="rounded-sm bg-muted px-1 text-[10px]">不是找你的</span>}
         <span className="ml-auto shrink-0">{since(x.at)}前</span>
         {e.url && (
@@ -110,7 +111,7 @@ function Row({ x, onTask, onRetried }: { x: Item; onTask: (id: string) => void; 
           </a>
         )}
       </div>
-      <p className="line-clamp-3 text-[13px] whitespace-pre-wrap">{e.text || e.title}</p>
+      <p className="line-clamp-3 text-[13px] break-words whitespace-pre-wrap">{e.text || e.title}</p>
       {x.rule && <p className="text-[12px] text-muted-foreground">按规则：{x.rule}</p>}
       {x.would && x.state === "observed" && (
         <p className="text-[12px] text-muted-foreground">
