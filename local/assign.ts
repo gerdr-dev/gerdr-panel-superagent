@@ -29,6 +29,8 @@ export type Assigned = {
   repos?: string[];
   /** Whoever asked may read the agent's conversation (view) and talk to it (talk): the user's choice when agreeing. */
   share?: "" | "view" | "talk";
+  /** The worker's delivery note (board.ts reply_requester), filling the user's 回复并交付 box until they send it. */
+  draft?: string;
 };
 
 type AssignData = { title?: string; body?: string; by?: string; agreed?: boolean; how?: "agent" | "self"; agent?: string; repos?: string[] };
@@ -161,17 +163,18 @@ export async function decline(input: { id: string; reason: string }, ctx: Ctx) {
  * The user answers whoever asked: { id, text, deliver? }. deliver: it's done as far as they're concerned (after they
  * looked at the work themselves); it waits for whoever asked to accept or return it.
  */
-export async function replyOrigin(input: { id: string; text: string; deliver?: boolean }, ctx: Ctx) {
+export async function replyOrigin(input: { id: string; text: string; deliver?: boolean; byAgent?: string }, ctx: Ctx) {
   const t = assignedTask(ctx, input.id);
   const text = input.text?.trim();
   if (!text) throw new Error(input.deliver ? "交付要写一句：做了什么、怎么看结果" : "说点什么");
   if (input.deliver && t.assigned!.state !== "agreed") throw new Error(t.assigned!.state === "ask" ? "还没同意" : `${t.id} 已经交付过了`);
-  tell(ctx, t, text, { step: input.deliver ? "deliver" : "say" });
+  if (input.deliver && input.byAgent) throw new Error("只有人能交付");
+  tell(ctx, t, text, { step: input.deliver ? "deliver" : "say", ...(input.byAgent ? { byAgent: input.byAgent } : {}) });
   return update(ctx, (s) => {
     const x = find(s, t.id);
-    note(x, `${input.deliver ? "交付了" : "回复了"}：${text}`);
+    note(x, `${input.byAgent ? `${input.byAgent} ` : ""}${input.deliver ? "交付了" : "回复了"}：${text}`);
     if (input.deliver) {
-      x.assigned = { ...(x.assigned as Assigned), state: "delivered" };
+      x.assigned = { ...(x.assigned as Assigned), state: "delivered", draft: undefined };
       // Woken by whatever happens on that conversation (accepted, returned, a question): it's theirs now
       addWait(x, { kind: "reply", what: `${DELIVERED}${x.assigned.by ? `（${x.assigned.by}）` : ""}`, ...(x.origin?.key ? { on: { source: x.origin.source, key: x.origin.key } } : {}) } as any);
     }

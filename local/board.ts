@@ -11,6 +11,7 @@ import { eventCard } from "./_cards";
 import { endWaits, isOutside, open, question } from "./_waits";
 import { GENERAL, MEMORY, nameOf } from "./_memory";
 import { skillFile } from "./_user";
+import { replyOrigin } from "./assign";
 
 const STEP = {
   type: "object",
@@ -66,6 +67,18 @@ export const tools = {
       "Give back a message that reached your task from its conversation (a Slack thread, a DM) but isn't for it: it asks for something beyond your task, or is about another one. The Superagent then decides what it is (a new task, another task's, nothing). Don't answer it yourself. event: the message id given with it.",
     input: { type: "object", properties: { event: { type: "string" }, reason: { type: "string", description: "Why it isn't this task's, in a sentence" } }, required: ["event", "reason"] },
   },
+  reply_requester: {
+    description:
+      "Only for a task someone asked of the user (my_task shows requestedBy): answer whoever asked, through where the task came from (the team panel). deliver false: said to them now (a question for them, how it's going). deliver true: your delivery note — what was done, the result, how to check it — which is NOT sent: it fills the user's 回复并交付 box on their task panel, and they send it after looking at your work (only a person delivers). Write it once your work is done, then end your turn as usual. Never ask the user which channel to report on: this is it.",
+    input: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: "Markdown, for the person who asked (they don't see this chat)" },
+        deliver: { type: "boolean", description: "true: the delivery note for the user to send; false (default): said to them now" },
+      },
+      required: ["text"],
+    },
+  },
   my_task: {
     description: "Your task as the task panel sees it: status, summary, artifacts, the human steps you asked for (open or done, with what was handed back).",
     input: { type: "object", properties: {} },
@@ -108,7 +121,13 @@ export function instructions(input: unknown, ctx: Ctx) {
     `is their my-workflow skill, ${skillFile(ctx, "my-workflow/references/task.md")}: read it before you stop. my_task shows the task as the panel sees it. ` +
     `What the user's memory says about this repository and all of them came in your first message; the files are ` +
     `${ctx.fs.root}/${MEMORY}/${t.repo ? nameOf(t.repo) : "…"}.md and ${GENERAL}.md there — add to them with remember ` +
-    `(when: ${skillFile(ctx, "my-workflow/references/memory.md")}).`
+    `(when: ${skillFile(ctx, "my-workflow/references/memory.md")}).` +
+    (t.assigned
+      ? ` ${t.assigned.by ?? "Someone"} asked the user for this task (through ${t.origin?.source ?? "another panel"}): they ` +
+        `don't see this chat. Once the work is done, write the delivery note for them with reply_requester (deliver ` +
+        `true): the user looks at it and sends it. Questions for them: reply_requester (deliver false). Don't ask the ` +
+        `user where to report.`
+      : "")
   );
 }
 
@@ -329,6 +348,7 @@ export function my_task(input: unknown, ctx: Ctx) {
     title: t.title,
     status: t.status,
     summary: t.summary,
+    ...(t.assigned ? { requestedBy: t.assigned.by ?? t.origin?.source, requestState: t.assigned.state, deliveryDraft: t.assigned.draft } : {}),
     question: question(t),
     waits: open(t).map((w) => ({ kind: w.kind, what: w.what, since: w.since })),
     artifacts: t.links ?? [],
@@ -409,4 +429,26 @@ function questionCard(h: Task, ctx: Ctx) {
       choose: { project: ctx.workspace.project, fn: "tasks.answerQuestion", input: { id: h.id, q: q.id }, field: "value", options: q.options ?? [], multi: q.multi, other: true },
     },
   };
+}
+
+/**
+ * The worker answers whoever asked for its task (assign.ts): said now, or (deliver) its delivery note, kept on the
+ * task for the user to send with 回复并交付 — only a person delivers.
+ */
+export async function reply_requester(input: { text: string; deliver?: boolean }, ctx: Ctx) {
+  const t = mine(load(ctx).store, ctx);
+  if (!t.assigned || !t.origin?.reply) throw new Error(`${t.id} 不是别人请用户做的任务：结论写在回复里就行`);
+  const text = input.text?.trim();
+  if (!text) throw new Error("text 不能为空");
+  if (input.deliver) {
+    if (t.assigned.state !== "agreed") throw new Error(t.assigned.state === "ask" ? "用户还没同意做这件事" : `${t.id} 已经交付过了：要补充就 deliver false 说给对方`);
+    update(ctx, (s) => {
+      const x = find(s, t.id);
+      x.assigned = { ...x.assigned!, draft: text };
+      x.updatedAt = Date.now();
+    });
+    return `交付说明写好了，在用户的「回复并交付」框里等他看过再发；他改了或打回，你会收到消息。`;
+  }
+  await replyOrigin({ id: t.id, text, byAgent: t.agent || "agent" }, ctx);
+  return `已发给 ${t.assigned.by ?? "对方"}。`;
 }

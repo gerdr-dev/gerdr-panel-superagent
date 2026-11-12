@@ -897,16 +897,25 @@ function AssignBox({ t, act, save }: { t: Task; act: Act; save: () => Promise<bo
  */
 function ReplyBox({ t, act }: { t: Task; act: Act }) {
   const { busy, err, go } = useAction(act);
-  const [text, setText] = useState("");
+  const draft = t.assigned?.draft ?? "";
+  const [text, setText] = useState(draft);
+  // The worker's delivery note (reply_requester) fills an empty box, also when it comes while the card is open
+  useEffect(() => {
+    if (draft) setText((x) => x.trim() ? x : draft);
+  }, [draft]);
   const delivered = t.assigned?.state === "delivered" || t.assigned?.state === "done";
   const send = async (deliver: boolean) => (await go(deliver ? "deliver" : "say", "replyOrigin", { id: t.id, text, deliver })) && setText("");
   return (
     <div className="space-y-1.5">
       <p className="text-[12px] text-muted-foreground">
-        {delivered ? `已交付给 ${t.assigned?.by ?? "发起人"}，等对方验收；还可以接着回复` : `回复 ${t.assigned?.by ?? "发起人"}：worker 做完先到你这里看，你觉得完成了再交付`}
+        {delivered
+          ? `已交付给 ${t.assigned?.by ?? "发起人"}，等对方验收；还可以接着回复`
+          : draft && text === draft
+            ? `agent 写好了交付说明：看过它的工作、改好下面的话，再点「回复并交付」`
+            : `回复 ${t.assigned?.by ?? "发起人"}：worker 做完先到你这里看，你觉得完成了再交付`}
       </p>
       <textarea
-        rows={2}
+        rows={draft && text === draft ? 6 : 2}
         value={text}
         onChange={(e) => setText(e.target.value)}
         placeholder={`写给 ${t.assigned?.by ?? "发起人"} 的话`}
