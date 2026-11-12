@@ -14,7 +14,7 @@
 // Other messages on the same key are follow-ups, like any conversation a task follows (_main.ts followUp).
 
 import { find, load, update, note, type Task } from "./_store";
-import { add, drop, folder, start } from "./tasks";
+import { add, drop, start } from "./tasks";
 import { wake } from "./_wake";
 import { addWait, endWaits } from "./_waits";
 import { compact } from "./_main";
@@ -31,9 +31,11 @@ export type Assigned = {
   share?: "" | "view" | "talk";
   /** The worker's delivery note (board.ts reply_requester), filling the user's 回复并交付 box until they send it. */
   draft?: string;
+  /** Where to put what whoever asked should see: the source's shared folder, the same path on their computer. */
+  shareDir?: string;
 };
 
-type AssignData = { title?: string; body?: string; by?: string; agreed?: boolean; how?: "agent" | "self"; agent?: string; repos?: string[] };
+type AssignData = { title?: string; body?: string; by?: string; agreed?: boolean; how?: "agent" | "self"; agent?: string; repos?: string[]; shareDir?: string };
 
 /** An event carrying an assignment or an update to one: handled here (true), or not one (false). */
 export async function onAssignEvent(ctx: Ctx, e: GerdrEvent): Promise<{ handled: boolean; task?: string; note?: string }> {
@@ -48,7 +50,7 @@ export async function onAssignEvent(ctx: Ctx, e: GerdrEvent): Promise<{ handled:
   const origin = { id: e.id, source: e.source, kind: e.kind, key: e.key, title: e.title, url: e.url, reply: e.reply };
   const title = (a!.title || e.title || "").trim();
   const body = (a!.body ?? e.text ?? "").trim();
-  const assigned: Assigned = { state: a!.agreed ? "agreed" : "ask", by: a!.by || ev.who, how: a!.how, agent: a!.agent, repos: a!.repos };
+  const assigned: Assigned = { state: a!.agreed ? "agreed" : "ask", by: a!.by || ev.who, how: a!.how, agent: a!.agent, repos: a!.repos, shareDir: a!.shareDir };
   const threads = e.key ? [{ source: e.source, key: e.key }] : undefined;
   if (a!.agreed && a!.how === "self") {
     const t = await add({ owner: "human", title, steps: body, origin, threads, assigned } as any, ctx);
@@ -200,9 +202,7 @@ export async function replyOrigin(input: { id: string; text: string; deliver?: b
   if (!text) throw new Error(input.deliver ? "交付要写一句：做了什么、怎么看结果" : "说点什么");
   if (input.deliver && t.assigned!.state !== "agreed") throw new Error(t.assigned!.state === "ask" ? "还没同意" : `${t.id} 已经交付过了`);
   if (input.deliver && input.byAgent) throw new Error("只有人能交付");
-  // A delivery carries what the work made: the task's folder, whose files the source sends along (the team panel)
-  const dir = input.deliver ? folder({ id: t.id }, ctx) : null;
-  tell(ctx, t, text, { step: input.deliver ? "deliver" : "say", ...(input.byAgent ? { byAgent: input.byAgent } : {}), ...(dir?.exists ? { dir: dir.path } : {}) });
+  tell(ctx, t, text, { step: input.deliver ? "deliver" : "say", ...(input.byAgent ? { byAgent: input.byAgent } : {}) });
   return update(ctx, (s) => {
     const x = find(s, t.id);
     note(x, `${input.byAgent ? `${input.byAgent} ` : ""}${input.deliver ? "交付了" : "回复了"}：${text}`);

@@ -929,7 +929,7 @@ function ReplyBox({ t, act }: { t: Task; act: Act }) {
           ? `已交付给 ${t.assigned?.by ?? "发起人"}，等对方验收；还可以接着回复`
           : draft && text === draft
             ? `agent 写好了交付说明：看过它的工作、改好下面的话，再点「回复并交付」`
-            : `回复 ${t.assigned?.by ?? "发起人"}：worker 做完先到你这里看，你觉得完成了再交付（任务文件夹里的文件会一起交过去）`}
+            : `回复 ${t.assigned?.by ?? "发起人"}：worker 做完先到你这里看，你觉得完成了再交付`}
       </p>
       <textarea
         rows={draft && text === draft ? 6 : 2}

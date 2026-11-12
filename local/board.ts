@@ -69,7 +69,7 @@ export const tools = {
   },
   reply_requester: {
     description:
-      "Only for a task someone asked of the user (my_task shows requestedBy): answer whoever asked, through where the task came from (the team panel). deliver false: said to them now (a question for them, how it's going). deliver true: your delivery note — what was done, the result, how to check it — which is NOT sent: it fills the user's 回复并交付 box on their task panel, and they send it after looking at your work (only a person delivers). Write it once your work is done, then end your turn as usual. What you made that they should see (a screenshot, the HTML, a report) must be in the task's folder (your artifactsDir): its files go with the delivery, and they see them. Never ask the user which channel to report on: this is it.",
+      "Only for a task someone asked of the user (my_task shows requestedBy): answer whoever asked, through where the task came from (the team panel). deliver false: said to them now (a question for them, how it's going). deliver true: your delivery note — what was done, the result, how to check it — which is NOT sent: it fills the user's 回复并交付 box on their task panel, and they send it after looking at your work (only a person delivers). Write it once your work is done, then end your turn as usual. What you made that they should see (a screenshot, the HTML, a report) goes in the shared folder my_task names (shareDir): only what is there reaches them, at the same path on their computer, so write that path in your note. Never ask the user which channel to report on: this is it.",
     input: {
       type: "object",
       properties: {
@@ -126,7 +126,12 @@ export function instructions(input: unknown, ctx: Ctx) {
       ? ` ${t.assigned.by ?? "Someone"} asked the user for this task (through ${t.origin?.source ?? "another panel"}): they ` +
         `don't see this chat. Once the work is done, write the delivery note for them with reply_requester (deliver ` +
         `true): the user looks at it and sends it. Questions for them: reply_requester (deliver false). Don't ask the ` +
-        `user where to report.`
+        `user where to report.` +
+        (t.assigned.shareDir
+          ? ` What they should see (a screenshot, the page, a report) goes in the shared folder ${t.assigned.shareDir}: ` +
+            `copy it or write it there. It is the same path on their computer and is synced to them within seconds; ` +
+            `nothing else of yours leaves this computer. Write paths there in your replies and the delivery note.`
+          : "")
       : "")
   );
 }
@@ -348,7 +353,7 @@ export function my_task(input: unknown, ctx: Ctx) {
     title: t.title,
     status: t.status,
     summary: t.summary,
-    ...(t.assigned ? { requestedBy: t.assigned.by ?? t.origin?.source, requestState: t.assigned.state, deliveryDraft: t.assigned.draft } : {}),
+    ...(t.assigned ? { requestedBy: t.assigned.by ?? t.origin?.source, requestState: t.assigned.state, deliveryDraft: t.assigned.draft, shareDir: t.assigned.shareDir } : {}),
     question: question(t),
     waits: open(t).map((w) => ({ kind: w.kind, what: w.what, since: w.since })),
     artifacts: t.links ?? [],

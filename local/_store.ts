@@ -97,7 +97,7 @@ export type Task = {
    * Work someone asked of the user through its origin (assign.ts): whether they agreed, delivered, and who asked.
    * Only these are agreed to, replied to and delivered from the task panel.
    */
-  assigned?: { state: "ask" | "agreed" | "delivered" | "done"; by?: string; how?: "agent" | "self"; agent?: string; repos?: string[]; share?: "" | "view" | "talk"; draft?: string };
+  assigned?: { state: "ask" | "agreed" | "delivered" | "done"; by?: string; how?: "agent" | "self"; agent?: string; repos?: string[]; share?: "" | "view" | "talk"; draft?: string; shareDir?: string };
   /**
    * A member of requirement `team` (the task whose card the user sees; its own worker is the lead, 负责人): it works
    * in its own repository next to the others and talks to them straight (board.ts tell), not through the router.
