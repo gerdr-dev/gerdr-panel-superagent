@@ -631,6 +631,8 @@ export async function answer(input: { id: string; answer: string }, ctx: Ctx) {
   const q = question(cur) ?? "";
   return wake(ctx, input.id, {
     how: `你答了：${ans}`,
+    // The user's own words: shown whole in the worker's chat
+    fold: false,
     text: `关于你的问题，用户的决定：${ans}`,
     ends: (w) => w.kind === "user" && !w.item,
     also: (t) => note(t, `问：${q}\n答：${ans}`),
@@ -665,7 +667,7 @@ export async function complete(input: { id: string; value?: string }, ctx: Ctx) 
       ? `你问的「${h.title}」（${h.id}），用户的决定：${h.handedBack}\n照这个接着做。`
       : `人工任务「${h.title}」（${h.id}）用户做完了。${back}\n先按你说的方式核验${h.verify ? `（${h.verify}）` : ""}，没问题再继续；核验不过就用 ask_human 再登记一个，说明哪里不对。`;
   // Its wait on h ended in the write above (_waits.ts sync); this only tells the worker, the one way every wake goes
-  for (const t of woken) await wake(ctx, t.id, { how: h.handBack?.kind === "choice" ? `你答了：${h.handedBack}` : "你做完了", text });
+  for (const t of woken) await wake(ctx, t.id, { how: h.handBack?.kind === "choice" ? `你答了：${h.handedBack}` : "你做完了", text, fold: false });
   return { task: h, woke: woken.map((t) => t.id) };
 }
 
@@ -755,7 +757,7 @@ export async function message(input: { id: string; to?: string[]; text: string; 
     const others = targets.filter((x) => x !== m);
     await wake(ctx, m.id, {
       how: "你发了消息",
-      fold: `[任务面板] 你在秘书那里问：${cutLine(text, 50)}`,
+      fold: false, // the user's question, as they asked it
       text:
         `[任务面板] 用户在秘书那里问你：\n\n${text}${list}`,
       files: files.map((a) => a.path),
@@ -1165,7 +1167,7 @@ async function deliver(ctx: Ctx, h: Task) {
     `你问的问题（${h.id}），用户${asked(h).length ? "答了" : "都没答"}：\n${asked(h).map((q, i) => `${i + 1}. ${q.title}\n   → ${q.answer}`).join("\n")}` +
     (skipped.length ? `\n用户说不用答了（已经过时，别再按它们做）：${skipped.map((q) => `「${q.title}」`).join("、")}` : "") +
     `\n照这些接着做。`;
-  for (const t of workers.filter((t) => blockersDone(store, t) || t.id === h.askedBy)) await wake(ctx, t.id, { how: `你答了 ${h.id}`, text }).catch(() => {});
+  for (const t of workers.filter((t) => blockersDone(store, t) || t.id === h.askedBy)) await wake(ctx, t.id, { how: `你答了 ${h.id}`, text, fold: false }).catch(() => {});
 }
 
 /**
@@ -1221,6 +1223,7 @@ export async function sendAnswered(input: { id: string }, ctx: Ctx) {
   if (w)
     await wake(ctx, w, {
       how: `你先发了 ${h.id} 已答的`,
+      fold: false,
       text:
         `用户先把答了的发给你（${h.id}）：\n${fresh.map((q) => `- ${q.title}\n  → ${q.answer}`).join("\n")}\n` +
         `还没答、之后再答的：${rest.map((q) => `${h.id}#${q.id}「${q.title}」`).join("、")}（答了会再发给你）。能照已答的先做的就先做；还没答的里已经不用问的，cancel_human 它。`,

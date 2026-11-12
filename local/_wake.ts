@@ -69,6 +69,7 @@ export async function wake(ctx: Ctx, id: string, m: Wake): Promise<Task> {
     return x;
   });
   const fold = m.fold === false ? undefined : m.fold || `[任务面板] ${cutLine(m.how, 80)}`;
-  if (t.session) await ctx.sessions.send(t.session, m.text, { now: true, attachments: m.files, ...(fold ? { fold } : {}) } as any);
+  // fold false: shown whole (Gerdr folds a message from code by default)
+  if (t.session) await ctx.sessions.send(t.session, m.text, { now: true, attachments: m.files, ...(m.fold === false ? { show: true } : { fold }) } as any);
   return t;
 }

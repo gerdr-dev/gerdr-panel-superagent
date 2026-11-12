@@ -411,8 +411,9 @@ export async function toMain(ctx: Ctx, blocks: string[], why: Why = "route", att
   const body = blocks.join("\n\n");
   const { id, changed, hash: h } = await ensureMain(ctx, body, attachments, fold);
   if (id.fresh) return id.id;
-  const text = changed ? `[任务面板] 你的规则有更新：重读一遍 ${abs(ctx, SYSTEM)}，以它为准。\n\n${body}` : body;
-  await ctx.sessions.send(id.id, text, { ...(attachments?.length ? { attachments } : {}), ...(fold ? { fold } : fold === false ? { show: true } : {}) } as any);
+  // The rules changed: a line of its own, folded, so it doesn't sit on top of what the user wrote
+  if (changed) await ctx.sessions.send(id.id, `[任务面板] 你的规则有更新：重读一遍 ${abs(ctx, SYSTEM)}，以它为准。`, { fold: "[任务面板] 规则有更新" } as any);
+  await ctx.sessions.send(id.id, body, { ...(attachments?.length ? { attachments } : {}), ...(fold ? { fold } : fold === false ? { show: true } : {}) } as any);
   if (changed) updateState(ctx, (x) => void (x.brief = h));
   return id.id;
 }
@@ -591,7 +592,7 @@ function eventBlock(it: Item, tasks: Task[]) {
 export async function routeTask(ctx: Ctx, id: string) {
   const agents = await allAgents(ctx);
   const t = find(loadTasks(ctx).store, id);
-  const main = await toMain(ctx, [taskBlock(t, agents)], "route", undefined, `[任务 ${t.id}] 派活：${cut(t.title, 40)}`);
+  const main = await toMain(ctx, [taskBlock(t, agents)], "route", undefined, false); // the user's own task, as they wrote it
   return updateTasks(ctx, (s) => Object.assign(find(s, id), { routing: Date.now(), router: main, routerClosed: undefined, updatedAt: Date.now() }));
 }
 
@@ -600,7 +601,7 @@ export async function routeTask(ctx: Ctx, id: string) {
  * reroute). The block (the card's workers, what they said, the feedback) is built by tasks.reroute.
  */
 export async function rerouteTask(ctx: Ctx, id: string, block: string) {
-  const main = await toMain(ctx, [block], "route", undefined, `[重新安排 ${id}] 你对这张卡的安排有意见`);
+  const main = await toMain(ctx, [block], "route", undefined, false); // the user's feedback
   return updateTasks(ctx, (s) => {
     const t = find(s, id);
     if (t.reroute) t.reroute.router = main;
