@@ -412,6 +412,20 @@ function useLiveMain<T extends { id: string; status: string; waiting?: string }>
 /** Opens a conversation in the drawer, from anywhere on the page (set by BoardPage). */
 let openChat: (session: string, task?: string) => void = () => {};
 
+/**
+ * Steps only the user can do that hold this task up, one line each ("t124 待你答：…"): under the drawer's title and on
+ * the card, so the board says what it waits for without opening it.
+ */
+function userSteps(t: Task, byId: Record<string, Task>): ChatItem[] {
+  const mine = (t.blockedBy ?? []).map((id) => byId[id]).filter((h) => h && h.owner === "human" && h.status !== "done" && h.status !== "dropped");
+  return mine.flatMap((h) => {
+    // Several questions in one item: a row each (each has its card in the chat), still one thing on the board
+    if (h.questions) return unanswered(h).map((q) => ({ text: `${h.id} 待你答：${q.title}`, jump: `${h.id}#${q.id}` }));
+    const left = h.expiresAt ? (h.expiresAt > Date.now() ? `（还剩 ${Math.round((h.expiresAt - Date.now()) / 60000)} 分钟）` : "（已过期）") : "";
+    return [{ text: `${h.id} ${h.handBack?.kind === "choice" ? "待决定" : "要你做"}：${h.title}${left}`, jump: h.id }];
+  });
+}
+
 /** The line and buttons on a worker's conversation, by where its task stands. */
 function chatPanel(t: Task, byId: Record<string, Task>): { label: string; actions: ChatAction[]; items?: ChatItem[] } {
   const drop: ChatAction = { id: "drop", label: "放弃", confirm: "确定放弃？" };
@@ -422,19 +436,14 @@ function chatPanel(t: Task, byId: Record<string, Task>): { label: string; action
   if (t.status === "dropped") return { label: `${t.id} · 已放弃${t.summary ? `：${t.summary}` : ""}`, actions: [{ id: "restore", label: "恢复这个任务", kind: "primary" }] };
   const c = colOf(t);
   // Steps only the user can do that hold this task up: shown here, where they are, with a way to go and do them
-  const mine = (t.blockedBy ?? []).map((id) => byId[id]).filter((h) => h && h.owner === "human" && h.status !== "done" && h.status !== "dropped");
-  if (mine.length)
+  const steps = userSteps(t, byId);
+  if (steps.length)
     return {
       // A short line, then one row per thing (Gerdr draws them with a yellow edge and a jump icon): the run-on text and
       // a row of buttons left nothing readable on a phone. Each row jumps to its card in this chat.
-      label: `${t.id} 在等你处理 ${mine.reduce((n, h) => n + (h.questions ? unanswered(h).length : 1), 0)} 件`,
+      label: `${t.id} 在等你处理 ${steps.length} 件`,
       actions: [drop, done],
-      items: mine.flatMap((h) => {
-        // Several questions in one item: a row each (each has its card in the chat), still one thing on the board
-        if (h.questions) return unanswered(h).map((q) => ({ text: `${h.id} 待你答：${q.title}`, jump: `${h.id}#${q.id}` }));
-        const left = h.expiresAt ? (h.expiresAt > Date.now() ? `（还剩 ${Math.round((h.expiresAt - Date.now()) / 60000)} 分钟）` : "（已过期）") : "";
-        return [{ text: `${h.id} ${h.handBack?.kind === "choice" ? "待决定" : "要你做"}：${h.title}${left}`, jump: h.id }];
-      }),
+      items: steps,
     };
   if (c === "review") {
     return { label: `${t.id} · 待验收：没问题就通过；要改直接在下面说，它会接着改`, actions: [drop, { id: "accept", label: "通过", kind: "primary" }] };
@@ -464,7 +473,9 @@ function chatPanel(t: Task, byId: Record<string, Task>): { label: string; action
 
 /** A task as a small card in its column: what it is, where, and how it's doing. Click for everything else. */
 function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, Task>; active: boolean; onOpen: () => void }) {
-  const blockers = (t.blockedBy ?? []).filter((b) => byId[b] && byId[b].status !== "done" && byId[b].status !== "dropped");
+  const steps = t.status === "done" || t.status === "dropped" ? [] : userSteps(t, byId);
+  // The user's own steps are spelled out above (steps); the chips are for the rest (another task it waits for)
+  const blockers = (t.blockedBy ?? []).filter((b) => byId[b] && byId[b].status !== "done" && byId[b].status !== "dropped" && !steps.some((x) => x.jump?.split("#")[0] === b));
   const live = t.owner === "agent" ? liveText(t) : "";
   // A human step / question: the agent task that asked for it, when its conversation can be opened
   const by = t.owner === "human" ? (t.askedBy && byId[t.askedBy]) || Object.values(byId).find((x) => x.owner === "agent" && x.blockedBy?.includes(t.id)) : undefined;
@@ -508,6 +519,11 @@ function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, T
       </div>
       <p className={clsx("line-clamp-2 text-[13px] font-medium", t.status === "dropped" && "text-muted-foreground line-through")}>{t.title}</p>
       {t.question && waitsOnUser(t) && <p className="line-clamp-2 text-[12px] text-warn">{t.question}</p>}
+      {steps.map((x) => (
+        <p key={x.jump} className="line-clamp-2 border-l-2 border-warn pl-2 text-[12px] text-warn">
+          {x.text}
+        </p>
+      ))}
       {!t.question && t.stopped && <p className="line-clamp-2 text-[12px] text-warn">{t.stopWhy ?? "停下了"}{t.said ? `：${t.said}` : ""}</p>}
       {/* Where it stands in its worker's words (task_update's summary): the one line a card has for it */}
       {t.owner === "agent" && t.summary && !t.question && !t.stopped && <p className="line-clamp-2 text-[12px] text-muted-foreground">{t.summary}</p>}
