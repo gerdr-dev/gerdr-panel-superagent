@@ -78,6 +78,11 @@ export async function list(input: unknown, ctx: Ctx) {
   // Read sessions outside the write: ctx.sessions.get is cheap, but keep the locked part small
   // Done ones too: the user may give a finished worker more to do in its chat (below)
   for (const t of store.tasks) if (t.session && t.status !== "dropped") live[t.session] = ctx.sessions.get(t.session);
+  // Gerdr named an auto-titled task's conversation (or renamed it as the talk went on): the task takes that name
+  for (const t of store.tasks) {
+    const name = t.autoTitle && t.session ? String(live[t.session]?.title ?? "").trim() : "";
+    if (name && name !== t.title) edit({ id: t.id, title: name, autoTitle: true }, ctx);
+  }
   // Sessions the workers handed work to (reportTo / parent / a task tag), here or on another computer: waits of their
   // task (_waits.ts syncSessions)
   const all = ctx.sessions.list() as (Session & { parent?: string; reportTo?: string })[];
@@ -442,7 +447,8 @@ export async function add(input: Partial<Task> & { title?: string; start?: boole
     if (m.length) rest.mentions = m;
   }
   if (rest.mentions?.length === 1 && !rest.agent) rest.agent = rest.mentions[0];
-  const t = update(ctx, (s) => newTask(s, { ...rest, title, id: undefined } as any));
+  const auto = !input?.title && rest.owner !== "human" ? { autoTitle: true } : {};
+  const t = update(ctx, (s) => newTask(s, { ...rest, ...auto, title, id: undefined } as any));
   if (go && t.owner === "agent") {
     // Blocked by something still going: started by the board once it's done (startUnblocked), not now
     if (!blockersDone(load(ctx).store, t)) return edit({ id: t.id, startWhenFree: true }, ctx);
@@ -501,6 +507,8 @@ export function edit(input: Partial<Task> & { id: string }, ctx: Ctx) {
   return update(ctx, (s) => {
     const t = find(s, input.id);
     const { id, createdAt, ...rest } = input as any;
+    // Named by someone (the user in the drawer, an agent): no longer follows its conversation's auto title
+    if (rest.title && !("autoTitle" in rest)) rest.autoTitle = undefined;
     // Marked done here (a board task that was only an instruction, carried out): when, as every other way to done does
     if ((rest.status === "done" || rest.status === "dropped") && !t.doneAt) rest.doneAt = Date.now();
     Object.assign(t, rest, { updatedAt: Date.now() });
@@ -549,7 +557,8 @@ export async function start(
   const sess = await ctx.sessions.start({
     cwd,
     ...who,
-    title: t.title,
+    // Fixed to the task's name, unless the task waits for Gerdr's auto title (autoTitle)
+    ...(t.autoTitle ? {} : { title: t.title }),
     systemFile: `${ctx.workspace.dir}/${sys}`,
     // What it makes that isn't committed goes in the task's folder (Gerdr names it in the worker's prompt and lets its
     // sandbox write there); an older Gerdr ignores the option and the worker uses its repository's

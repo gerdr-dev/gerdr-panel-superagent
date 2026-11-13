@@ -31,6 +31,12 @@ export type Activity = { at: number; by?: string; kind: "progress" | "tell" | "j
 export type Task = {
   id: string;
   title: string;
+  /**
+   * No title was given (the board's 新任务 only asks what to do): the title is a stopgap cut from the prompt, and the
+   * worker's conversation is started without a fixed name so Gerdr names it from what was asked; list() then takes
+   * that name for the task. Cleared once the task is renamed by anyone else.
+   */
+  autoTitle?: boolean;
   owner: "agent" | "human";
   /**
    * todo → running → done (nothing for the user to judge) | review (the user judges the result); dropped. Only the

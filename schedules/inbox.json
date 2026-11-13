@@ -1,1 +1,1 @@
-{ "fn": "tasks.sync", "every": "1m", "name": "看板跟上 worker 的状态，等你的事放进收件箱" }
+{ "fn": "tasks.sync", "every": "5m", "name": "兜底：看板跟上 worker 的状态（平时由 triggers/sessions.json 在 worker 状态变化时即时同步）" }
