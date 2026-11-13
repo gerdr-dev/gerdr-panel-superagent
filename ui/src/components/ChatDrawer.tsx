@@ -148,7 +148,7 @@ export function ChatDrawer({
     </Button>
   );
   const header = (toggle: ReactNode) => (
-    <div className="relative z-30 flex h-10 shrink-0 items-center gap-1 border-b px-3">
+    <div className="relative z-30 flex h-10 shrink-0 items-center gap-1 border-b px-4">
       {back && (
         <Button variant="ghost" className="-ml-1.5 h-7 shrink-0 gap-1 px-1.5 text-[12px] text-muted-foreground" title={back.label} onClick={back.onBack}>
           <ArrowLeft className="size-3.5" />
@@ -189,7 +189,7 @@ export function ChatDrawer({
         {trail ? <Trail {...trail} header={header} /> : header(null)}
         {extra}
         {(label || shown.length > 0 || items?.length || where) && (
-          <div className="shrink-0 space-y-1 border-b bg-muted/40 px-3 py-1.5">
+          <div className="shrink-0 space-y-1 border-b bg-muted/40 px-4 py-1.5">
             {/* Where it works on a line of its own: beside the line and the buttons it squeezed both (2026-11-13) */}
             {where}
             {(label || shown.length > 0) && (

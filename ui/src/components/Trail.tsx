@@ -104,7 +104,7 @@ export function Trail({
     <>
       {header(toggle)}
       {(open || rules) && (
-    <div className="shrink-0 border-b px-3 py-1">
+    <div className="shrink-0 border-b px-2.5 py-1">
       {open && <div className="truncate px-1.5 pt-0.5 text-[11px] text-muted-foreground">{summary}</div>}
       {open && (
         <div className="max-h-[200px] space-y-0.5 overflow-y-auto pt-1 pb-1.5">
