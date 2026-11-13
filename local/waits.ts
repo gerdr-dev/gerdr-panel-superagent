@@ -25,7 +25,7 @@ import { isOutside, mrConversation, open, waitOn, wakeItem, wakeText, type Wait,
 
 const sessionTitle = (w: Wait) => w.what.replace(/^它派出的「(.*?)」.*$/, "$1");
 import { cutLine, wake } from "./_wake";
-import { followUp, follows, record, subscribers, compact, type Ev } from "./_main";
+import { evaluate, followUp, follows, record, sharers, subscribers, compact, type Ev } from "./_main";
 import { mine, staleAsks } from "./board";
 import { USER } from "./_user";
 
@@ -346,7 +346,13 @@ export async function onFollowed(input: { event: GerdrEvent }, ctx: Ctx) {
   if (store.tasks.some((t) => t.origin?.id === e.id || t.followups?.includes(e.id))) return { duplicate: true };
   const ev = compact(e);
   const owners = subscribers(store.tasks, ev);
-  if (!owners.length) return { nobody: true };
+  if (!owners.length) {
+    // Its tasks all ended: a person saying more there is the secretary's to judge (more work on one, or not)
+    if (!ev.actor || !sharers(store.tasks, ev).length) return { nobody: true };
+    const it = record(ctx, ev, { state: "pending", sentAt: Date.now() });
+    await evaluate(ctx, [it.id], store.tasks);
+    return { item: it.id, pending: true };
+  }
   for (const t of owners) await followUp(ctx, t.id, ev);
   const it = record(ctx, ev, { state: "delivered", tasks: owners.map((t) => t.id) });
   return { item: it.id, delivered: it.tasks };

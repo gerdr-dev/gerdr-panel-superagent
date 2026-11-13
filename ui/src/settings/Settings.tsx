@@ -128,7 +128,7 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
             </Field>
             <Field
               label="任务对话里的后续"
-              hint={{ worker: "已有任务那段对话里又来的消息，直接交给那个任务的 worker；那段对话里有过不止一个任务（包括已完成的）时，还是先给秘书判断是哪个", secretary: "先交给秘书判断：可以不理，交给这个任务，或者交给别的任务" }[s.followUps]}
+              hint={{ worker: "已有任务那段对话里又来的消息，直接交给那个任务的 worker。这些情况还是先给秘书判断：那段对话里有过不止一个任务、任务已经完成、worker 把消息交回过（交回后它就不再跟着这段对话）", secretary: "先交给秘书判断：可以不理，交给这个任务，或者交给别的任务" }[s.followUps]}
             >
               <Choice value={s.followUps} options={[["worker", "交给那个 worker"], ["secretary", "先给秘书判断"]]} onChange={(v) => put("followUps", v)} />
             </Field>

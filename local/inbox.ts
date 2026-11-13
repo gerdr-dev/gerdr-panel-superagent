@@ -176,8 +176,10 @@ export async function onEvent(input: { event: GerdrEvent; trigger?: string; allo
   const owners = subscribers(store.tasks, ev);
   // 设置 → 任务对话里的后续: straight to the task's worker, or judged by the secretary first (it sees the tasks of this
   // conversation, done ones too, and can attach it to one, pick an ended one up again, leave it, or make it new). A
-  // conversation that held more than one task is always judged: which one it is about is in the words, not the key
-  if (owners.length && (workflow(ctx).followUps === "secretary" || sharers(store.tasks, ev).length > 1)) {
+  // conversation that held more than one task is always judged: which one it is about is in the words, not the key.
+  // One whose tasks all ended is too (nothing goes straight to a finished task), whoever the sender
+  const known = sharers(store.tasks, ev);
+  if ((owners.length && (workflow(ctx).followUps === "secretary" || known.length > 1)) || (!owners.length && known.length)) {
     const it = record(ctx, ev, { state: "pending", sentAt: Date.now() });
     await evaluate(ctx, [it.id], store.tasks);
     return { item: it.id, pending: true, followUpOf: owners.map((t) => t.id) };

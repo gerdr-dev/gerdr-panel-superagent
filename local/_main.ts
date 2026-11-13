@@ -181,7 +181,8 @@ export function findItem(s: State, id: string): Item {
 
 /** The conversations a task follows: what it was started from, and any attached since (dsh's Subscription). */
 export function threadsOf(t: Task): { source: string; key: string }[] {
-  if (t.threads?.length) return t.threads;
+  // An empty list is "none" (handed back: hand_back leaves the conversation), not "its origin's"
+  if (t.threads) return t.threads;
   return t.origin?.key ? [{ source: t.origin.source, key: t.origin.key }] : [];
 }
 
@@ -193,19 +194,14 @@ export function follows(t: Task): { source: string; key: string }[] {
 }
 
 /**
- * The tasks a message in this conversation goes to without Eval: every live task following it; when none is live,
- * the latest one that ended (a person speaking in its conversation picks it up again, as dsh resumes an ended
- * Ticket). Dropped tasks get nothing: the person stopped them, so the message is new work to judge.
+ * The tasks a message in this conversation goes to without the secretary: every live task following it. An ended
+ * one gets nothing straight: whether a word after it was accepted is more work on it, about something else or just
+ * "thanks" is the secretary's to judge (it sees the ended ones: sharers), and attaching it picks the task up again
+ * (2026-11-13, the user: "已经完成的任务一律先给秘书判断"). Dropped tasks get nothing either.
  */
 export function subscribers(tasks: Task[], e: { source: string; key?: string; actor?: string }): Task[] {
   if (!e.key) return [];
-  const on = tasks.filter((t) => t.status !== "dropped" && follows(t).some((x) => x.source === e.source && x.key === e.key));
-  const live = on.filter((t) => t.status !== "done");
-  if (live.length) return live;
-  // Only a person picks an ended task up again: a bot or a pipeline (no actor) on a merged MR is no reason to
-  if (!e.actor) return [];
-  const last = on.sort((a, b) => (b.doneAt ?? b.updatedAt ?? 0) - (a.doneAt ?? a.updatedAt ?? 0))[0];
-  return last ? [last] : [];
+  return tasks.filter((t) => t.status !== "dropped" && t.status !== "done" && follows(t).some((x) => x.source === e.source && x.key === e.key));
 }
 
 /**
@@ -646,6 +642,16 @@ export async function evaluate(ctx: Ctx, ids: string[], tasks: Task[]) {
 export async function handBack(ctx: Ctx, task: string, eventId: string, reason: string, tasks: Task[]) {
   const it = state(ctx).items.filter((x) => x.event.id === eventId && x.state === "delivered").pop();
   if (!it || !it.tasks?.includes(task)) throw new Error(`消息 ${eventId} 没有交给 ${task}（看给你的消息里写的消息 id）`);
+  // The task stops following that conversation: what's said there next goes to the secretary first again, until it
+  // attaches something to this task again (thread or DM alike: some chats have no threads)
+  const ev = it.event;
+  if (ev.key) {
+    updateTasks(ctx, (st) => {
+      const t = st.tasks.find((x) => x.id === task);
+      if (t) t.threads = threadsOf(t).filter((x) => !(x.source === ev.source && x.key === ev.key));
+    });
+    tasks = loadTasks(ctx).store.tasks;
+  }
   const now = updateState(ctx, (s) => {
     const x = findItem(s, it.id);
     if (!x.handBacks?.some((h) => h.task === task)) x.handBacks = [...(x.handBacks ?? []), { task, reason, at: Date.now() }];

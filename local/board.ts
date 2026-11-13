@@ -64,7 +64,7 @@ export const tools = {
   },
   hand_back: {
     description:
-      "Give back a message that reached your task from its conversation (a Slack thread, a DM) but isn't for it: it asks for something beyond your task, or is about another one. The Superagent then decides what it is (a new task, another task's, nothing). Don't answer it yourself. event: the message id given with it.",
+      "Give back a message that reached your task from its conversation (a Slack thread, a DM) but isn't for it: it asks for something beyond your task, or is about another one. The Superagent then decides what it is (a new task, another task's, nothing). Your task also stops following that conversation: what is said there next goes to the Superagent first, and comes back to you only if it gives you something again. Don't answer it yourself. event: the message id given with it.",
     input: { type: "object", properties: { event: { type: "string" }, reason: { type: "string", description: "Why it isn't this task's, in a sentence" } }, required: ["event", "reason"] },
   },
   reply_requester: {
