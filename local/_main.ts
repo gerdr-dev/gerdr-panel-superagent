@@ -51,7 +51,18 @@ export type Ev = {
   url?: string;
   reply?: { kind: string; data?: unknown };
   files?: { path: string; name: string; mime?: string }[];
+  /**
+   * What was said just before it in the same conversation, oldest first, the user's own words included (a chat source
+   * gives them as data.context: only others' messages are events, and a reply alone often means nothing).
+   */
+  context?: { who: string; me?: boolean; text: string; at?: number }[];
 };
+
+/** The conversation before a message, as lines for whoever judges or handles it; "" when the source gave none. */
+export function contextLines(e: Ev, only?: (c: NonNullable<Ev["context"]>[number]) => boolean) {
+  const l = (e.context ?? []).filter((c) => !only || only(c));
+  return l.map((c) => `- ${c.me ? "用户本人" : c.who}${c.at ? `（${new Date(c.at).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}）` : ""}：${c.text.replace(/\s*\n\s*/g, " ")}`).join("\n");
+}
 
 /**
  * One event and where it went (dsh's Disposition): filtered by the gate, delivered to subscribed tasks, or through
@@ -149,6 +160,10 @@ export function updateState<T>(ctx: Ctx, fn: (s: State) => T): T {
 }
 
 export function compact(e: GerdrEvent): Ev {
+  const context = (Array.isArray(e.data?.context) ? e.data.context : [])
+    .filter((c: any) => c && typeof c.text === "string")
+    .slice(-8)
+    .map((c: any) => ({ who: String(c.who ?? ""), me: c.me === true || undefined, text: String(c.text).slice(0, 600), at: typeof c.at === "number" ? c.at : undefined }));
   const files = Array.isArray(e.data?.files) ? e.data.files.filter((f: any) => f?.path).map((f: any) => ({ path: f.path, name: f.name ?? f.path.split("/").pop(), mime: f.mimetype })) : [];
   return {
     id: e.id,
@@ -162,6 +177,7 @@ export function compact(e: GerdrEvent): Ev {
     url: e.url,
     reply: e.reply,
     ...(files.length ? { files } : {}),
+    ...(context.length ? { context } : {}),
   };
 }
 
@@ -231,12 +247,17 @@ export async function followUp(ctx: Ctx, id: string, e: Ev) {
   // A person in a chat (it has a reply address) "goes on"; anything else (an MR review, a failed pipeline) is headed by
   // its own title.
   const head = e.reply ? `${e.source} 上${by}接着说` : e.title || `${e.source}/${e.kind}`;
+  // What the user said there themselves right before (not through you): you'd otherwise answer without it
+  const ctxl = e.context ?? [];
+  let k = ctxl.length;
+  while (k > 0 && ctxl[k - 1].me) k--;
+  const mine = contextLines({ ...e, context: ctxl.slice(k) });
   return wake(ctx, id, {
     how: e.reply ? `${by || "有人"}回复了` : e.title || `${e.source}/${e.kind}`,
     fold: `[${e.source}] ${by}${e.reply ? "接着说" : ""}：${cutLine(text, 50)}`,
     text:
       // How to handle it is in task.md「任务面板发给你的消息」(the worker's skill), not repeated in every message
-      `[${head}]（任务 ${id}，消息 ${e.id}）\n\n${text}`,
+      `[${head}]（任务 ${id}，消息 ${e.id}）\n\n${mine ? `用户本人在那里先说了：\n${mine}\n\n${by || "对方"}接着说：\n` : ""}${text}`,
     files: files.map((f) => f.path),
     // What it waited on outside came — or something else did: it looks again either way, and waits again if it must
     ends: isOutside,
@@ -588,6 +609,7 @@ function eventBlock(it: Item, tasks: Task[]) {
   // the secretary looks tasks up when a message is about one (dispatch: attach / stop)
   return [
     `[消息 ${it.id}]${it.inferred ? "（不是找你的：只按主动工作的规则判断）" : ""} ${e.source}/${e.kind}${who(e) ? ` · ${who(e)}` : ""}`,
+    e.context?.length ? `这段对话之前说的（「用户本人」是用户自己说的，判断这条是在回什么）：\n${contextLines(e)}\n\n这一条：` : "",
     e.text || e.title || "",
     e.files?.length ? `附件：\n${e.files.map((f) => `- ${f.name}：${f.path}`).join("\n")}` : "",
     it.handBacks?.length ? `负责它的 worker 交回了：\n${it.handBacks.map((h) => `- ${h.task}：${h.reason}`).join("\n")}` : "",
