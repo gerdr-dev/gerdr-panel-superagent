@@ -228,9 +228,12 @@ async function accept(ctx: Ctx, it: Item, title: string | undefined, parts: Part
   const review = w.inboxWork === "review";
   const [first, ...rest] = parts;
   const split = parts.length > 1;
+  const named = (split ? first?.title : undefined) || title;
   const t = (await add(
     {
-      title: (split ? first?.title : undefined) || title || firstLine(text) || e.title || `${e.source}/${e.kind}`,
+      title: named || firstLine(text) || e.title || `${e.source}/${e.kind}`,
+      // Taken by hand without a name: the message's first line stands in until its worker's conversation is named
+      ...(named ? {} : { autoTitle: true }),
       prompt: `${split && first?.prompt?.trim() ? first.prompt.trim() : text}\n\n${source}${scope}`,
       attachments: e.files,
       origin: { id: e.id, source: e.source, kind: e.kind, key: e.key, title: e.title, url: e.url, reply: it.inferred ? undefined : e.reply },
