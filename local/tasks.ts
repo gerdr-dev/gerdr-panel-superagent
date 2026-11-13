@@ -1,4 +1,5 @@
 import { tellInbox } from "./_inbox";
+import { tellBadge } from "./_badge";
 import { DATA, skillFile } from "./_user";
 import { workflow } from "./_config";
 import { forWorker } from "./memory";
@@ -228,6 +229,8 @@ export async function list(input: unknown, ctx: Ctx) {
     });
   // What waits on the user, in Gerdr's inbox too (_inbox.ts): each member and step on its own, as before
   tellInbox(ctx, tasks as any);
+  // Cards that moved (or came) since the last sync: a number on the panel's rail button (_badge.ts)
+  tellBadge(ctx, tasks);
   // The secretary's side (_main.ts): its finished reply into the conversation, and news of what newly needs the user.
   // Here because the board's sync runs every minute with or without the page open; a failure mustn't break the board.
   // Task changes aren't sent to the secretary any more (2026-11-11, the user: the board is where they work, the secretary
