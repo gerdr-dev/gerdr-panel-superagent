@@ -466,7 +466,11 @@ function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, T
   const open = t.status !== "done" && t.status !== "dropped";
   const asked = t.owner === "human" && open ? `${ago(t.createdAt)}${t.handBack?.kind === "choice" || t.questions ? "问的" : "交给你"}` : "";
   return (
-    <button data-task-card="" onClick={onOpen} className={clsx("block w-full space-y-1.5 rounded-lg border bg-card p-3 text-left shadow-xs transition-[border-color,box-shadow,transform] duration-150 hover:border-ring/50 hover:shadow-sm active:scale-[0.99]", active ? "border-ring" : waitsOnUser(t) ? "border-warn/70 bg-warn/10" : notDispatched(t) && "border-warn/60")}>
+    <button data-task-card="" onClick={onOpen} className={clsx(
+        "block w-full space-y-1.5 rounded-lg border bg-card p-3 text-left shadow-xs transition-[border-color,box-shadow,transform] duration-150 hover:shadow-sm active:scale-[0.99]",
+        // A card waiting on the user stays yellow when hovered or open: only brighter, never blue.
+        waitsOnUser(t) ? clsx("bg-warn/10", active ? "border-warn" : "border-warn/35 hover:border-warn/70") : clsx("hover:border-ring/50", active ? "border-ring" : notDispatched(t) && "border-warn/60"),
+      )}>
       <div className="flex min-w-0 items-center gap-1.5 overflow-hidden text-[11px] text-muted-foreground">
         {t.owner === "human" ? t.handBack?.kind === "choice" ? <CircleHelp className="size-3 shrink-0" /> : <Hand className="size-3 shrink-0" /> : <Bot className="size-3 shrink-0" />}
         {/* Never squeezed: a long "asked by" beside it truncates instead of wrapping the id onto two lines */}
