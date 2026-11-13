@@ -19,6 +19,9 @@ type Tree = {
 };
 
 const ROLE = { router: "秘书", worker: "worker", helper: "子会话", subagent: "子 agent" };
+// The secretary's conversation is one for everything it judges: the name Gerdr gave it from its first turns says
+// nothing about this task. What opening it shows instead
+const ROUTER = "派这个任务时的判断";
 
 function count(n: Node[]): number {
   return n.reduce((k, x) => k + 1 + count(x.children), 0);
@@ -77,12 +80,12 @@ export function Trail({
       <button
         className={clsx(row, x.id === current ? "bg-accent font-medium" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground")}
         style={{ paddingLeft: 6 + depth * 14 }}
-        title={x.title}
+        title={x.role === "router" ? ROUTER : x.title}
         onClick={() => onSession(x.id)}
       >
         <span className={clsx("size-1.5 shrink-0 rounded-full", x.status === "running" ? "bg-ok" : x.status === "waiting" || x.status === "error" ? "bg-warn" : "bg-muted-foreground/40")} />
         <span className="shrink-0 rounded-sm bg-muted px-1 text-[10px]">{ROLE[x.role]}</span>
-        <span className="min-w-0 flex-1 truncate">{x.title}</span>
+        <span className="min-w-0 flex-1 truncate">{x.role === "router" ? ROUTER : x.title}</span>
         {x.agent && <span className="shrink-0 text-[10px] text-muted-foreground">{x.agent}</span>}
       </button>
       {x.children.map((c) => node(c, depth + 1))}
