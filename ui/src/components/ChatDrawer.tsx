@@ -1,7 +1,7 @@
 import { ArrowDownRight, ArrowLeft, FolderOpen, GitBranch, MessageSquare, MoreHorizontal, X } from "lucide-react";
 import { EditableTitle } from "./EditableTitle";
 import clsx from "clsx";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { Sheet, SheetContent, SheetTitle } from "./ui/sheet";
 import * as core from "@gerdr/core";
 import { SessionChat, useSession } from "@gerdr/core";
@@ -17,6 +17,11 @@ import { Trail, type TrailProps } from "./Trail";
 
 /** A button above the chat. confirm: the first click asks (the label becomes this), the second does it. */
 export type ChatAction = { id: string; label: string; kind?: "primary" | "danger"; confirm?: string };
+/**
+ * A view of the page's own beside 对话 / 文件 (the team panel's 动态, its shared folder): a tab in the title row, its
+ * content filling the drawer under the strip.
+ */
+export type ChatView = { id: string; label: string; icon?: ComponentType<{ className?: string }>; render: () => ReactNode };
 /** One thing waiting on the user: a line; jump scrolls the chat to the card with that ref. */
 export type ChatItem = { text: string; jump?: string };
 
@@ -35,7 +40,17 @@ export function ChatDrawer({
   task,
   title,
   onRename,
+  views,
+  view,
+  onView,
 }: {
+  /**
+   * Views of the page's own beside 对话 (and 文件, with task). Each is a tab; which one shows is view / onView when the
+   * page decides (opening a drawer on its 动态), else the drawer's own (对话 first).
+   */
+  views?: ChatView[];
+  view?: string;
+  onView?: (id: string) => void;
   /** The task's title instead of the conversation's, renamed in place with onRename. */
   title?: string;
   onRename?: (title: string) => Promise<unknown>;
@@ -45,7 +60,8 @@ export function ChatDrawer({
   extra?: ReactNode;
   /** Where it was opened from (a requirement's drawer, by a member's avatar): a way back there in the title row. */
   back?: { label: string; onBack: () => void };
-  session: string;
+  /** The conversation it is about; none (nobody's agent is on it here yet): the page's views only. */
+  session?: string;
   /** One of its subagents' conversation instead (a toolCallId), and where 查看对话 / the way back go (null = main). */
   sub?: string;
   onSub?: (toolCallId: string | null) => void;
@@ -65,10 +81,18 @@ export function ChatDrawer({
   useEffect(() => setFull(false), [label]);
   // 对话 / 文件. The folder view is Gerdr's (ArtifactsFolder, from 2026-11-12): an older Gerdr has none and no tab
   const Folder = (core as any).ArtifactsFolder as ((p: { dir: string }) => ReactNode) | undefined;
-  const [tab, setTab] = useState<"chat" | "files">("chat");
+  // The tabs: 对话 (with a conversation), 文件 (a task's folder), then the page's views
+  const tabList: { id: string; label: string; icon: ComponentType<{ className?: string }> }[] = [
+    ...(session ? [{ id: "chat", label: "对话", icon: MessageSquare }] : []),
+    ...(task && Folder ? [{ id: "files", label: "文件", icon: FolderOpen }] : []),
+    ...(views ?? []).map((v) => ({ id: v.id, label: v.label, icon: v.icon ?? MessageSquare })),
+  ];
+  const [own, setOwn] = useState("");
+  const tab = view ?? (tabList.some((x) => x.id === own) ? own : (tabList[0]?.id ?? "chat"));
+  const setTab = (id: string) => (onView ? onView(id) : setOwn(id));
   const [dir, setDir] = useState<string | null>(null);
   useEffect(() => {
-    setTab("chat");
+    setOwn("");
     setDir(null);
   }, [task]);
   useEffect(() => {
@@ -76,18 +100,13 @@ export function ChatDrawer({
     run<{ path: string } | null>("tasks.folder", { id: task }).then((f) => setDir(f?.path ?? ""), () => setDir(""));
   }, [tab, task, dir]);
   const tabs =
-    task && Folder ? (
+    tabList.length > 1 ? (
       <div className="mr-1 flex shrink-0 rounded-md bg-muted p-0.5 text-[12px]">
-        {(
-          [
-            ["chat", "对话", MessageSquare],
-            ["files", "文件", FolderOpen],
-          ] as const
-        ).map(([k, label, Icon]) => (
+        {tabList.map(({ id, label, icon: Icon }) => (
           <button
-            key={k}
-            onClick={() => setTab(k)}
-            className={clsx("flex items-center gap-1 rounded-sm px-2 py-0.5 text-muted-foreground", tab === k && "bg-background text-foreground shadow-xs")}
+            key={id}
+            onClick={() => setTab(id)}
+            className={clsx("flex items-center gap-1 rounded-sm px-2 py-0.5 text-muted-foreground", tab === id && "bg-background text-foreground shadow-xs")}
           >
             <Icon className="size-3.5" />
             {label}
@@ -139,9 +158,9 @@ export function ChatDrawer({
       )}
       <span className={clsx("mr-1 size-2 shrink-0 rounded-full", s?.status === "running" ? "bg-ok" : s?.status === "waiting" || s?.status === "error" ? "bg-warn" : "bg-muted-foreground/40")} />
       {onRename ? (
-        <EditableTitle value={title || s?.title || session} onSave={onRename} className="text-[13px] font-medium" />
+        <EditableTitle value={title || s?.title || session || ""} onSave={onRename} className="text-[13px] font-medium" />
       ) : (
-        <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{title || s?.title || session}</span>
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{title || s?.title || session || ""}</span>
       )}
       {tabs}
       {toggle}
@@ -167,7 +186,7 @@ export function ChatDrawer({
           if (!el?.closest?.("[data-gerdr-mount]") || el.closest("[data-task-card]")) e.preventDefault();
         }}
       >
-        <SheetTitle className="sr-only">{s?.title || session}</SheetTitle>
+        <SheetTitle className="sr-only">{title || s?.title || session || ""}</SheetTitle>
         {trail ? <Trail {...trail} header={header} /> : header(null)}
         {extra}
         {(label || shown.length > 0 || items?.length || where) && (
@@ -201,10 +220,13 @@ export function ChatDrawer({
             ))}
           </div>
         )}
-        {/* The chat stays mounted under 文件: switching back keeps its place and what was typed */}
-        <div className={clsx("min-h-0 flex-1", tab !== "chat" && "hidden")}>
-          <SessionChat id={session} focused jump={jump} sendNow sub={sub} onSub={onSub} />
-        </div>
+        {/* The chat stays mounted under the other views: switching back keeps its place and what was typed */}
+        {session && (
+          <div className={clsx("min-h-0 flex-1", tab !== "chat" && "hidden")}>
+            <SessionChat id={session} focused jump={jump} sendNow sub={sub} onSub={onSub} />
+          </div>
+        )}
+        {(views ?? []).map((v) => v.id === tab && <div key={v.id} className="min-h-0 flex-1">{v.render()}</div>)}
         {tab === "files" && Folder && (
           <div className="min-h-0 flex-1">
             {dir ? <Folder dir={dir} /> : <div className="p-6 text-center text-[13px] text-muted-foreground">{dir === "" ? "这个任务还没有文件夹" : "…"}</div>}
