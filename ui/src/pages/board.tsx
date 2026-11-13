@@ -31,29 +31,31 @@ import { useLocation } from "react-router";
 
 type Col = "todo" | "active" | "you" | "review" | "done";
 
+// No 等你 column (2026-11-13, the user: "不需要 等你 和 进行中。否则就是会跳来跳去"): a task waiting on the user stays
+// in 进行中, first and yellow, instead of jumping between two columns each time it asks and gets an answer
 const COLS: { id: Col; title: string; icon: React.ReactNode }[] = [
   { id: "todo", title: "待办", icon: <Circle className="size-3.5 text-muted-foreground" /> },
   { id: "active", title: "进行中", icon: <CircleDashed className="size-3.5 text-brand" /> },
-  { id: "you", title: "等你", icon: <AlertTriangle className="size-3.5 text-warn" /> },
   { id: "review", title: "待验收", icon: <CircleDot className="size-3.5 text-ok" /> },
   { id: "done", title: "已完成", icon: <CheckCircle2 className="size-3.5 text-muted-foreground" /> },
 ];
 
 /** Most important first: what waits on the user, then results to judge, then what's going on. */
-const PHONE_ORDER: Col[] = ["you", "review", "active", "todo", "done"];
+const PHONE_ORDER: Col[] = ["active", "review", "todo", "done"];
 
 /**
  * The columns as tabs, on a phone only: colour and count on each, the ones with nothing in them dimmed. Sideways
  * scrolling between columns was awkward on a phone (the user, 2026-11-05); a swipe on the column turns to the next
  * tab, like Gerdr's own phone overview (lib/swipe.ts).
  */
-function PhoneTabs({ cols, count, current, onPick }: { cols: typeof COLS; count: (c: Col) => number; current: Col; onPick: (c: Col) => void }) {
+function PhoneTabs({ cols, count, waitingCount, current, onPick }: { cols: typeof COLS; count: (c: Col) => number; waitingCount: (c: Col) => number; current: Col; onPick: (c: Col) => void }) {
   return (
     <div role="tablist" className="sticky top-0 z-10 flex gap-1 overflow-x-auto border-b bg-background px-2 py-1.5 [scrollbar-width:none] md:hidden [&::-webkit-scrollbar]:hidden">
       {cols.map((c) => {
         const n = count(c.id);
         const on = c.id === current;
-        const loud = n > 0 && (c.id === "you" || c.id === "review");
+        const you = c.id === "active" ? waitingCount(c.id) : 0;
+        const loud = (c.id === "active" && you > 0) || (c.id === "review" && n > 0);
         return (
           <button
             key={c.id}
@@ -63,18 +65,25 @@ function PhoneTabs({ cols, count, current, onPick }: { cols: typeof COLS; count:
             className={clsx(
               "flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[13px]",
               on ? "bg-accent font-medium text-foreground" : n ? "text-foreground" : "text-muted-foreground/60",
-              loud && !on && (c.id === "you" ? "bg-warn/10" : "bg-ok/10"),
+              loud && !on && (c.id === "active" ? "bg-warn/10" : "bg-ok/10"),
             )}
           >
             {c.icon}
             {c.title}
-            <span className={clsx("tabular-nums text-[11px]", n && c.id === "you" ? "rounded-full bg-warn px-1.5 font-medium text-background" : "text-muted-foreground")}>{n}</span>
+            <span className="tabular-nums text-[11px] text-muted-foreground">{n}</span>
+            {you > 0 && <span className="rounded-full bg-warn px-1.5 text-[11px] font-medium text-background tabular-nums">等你 {you}</span>}
           </button>
         );
       })}
     </div>
   );
 }
+
+/** Whether it waits on the user (tasks.ts's column "you"): first in 进行中, and yellow. */
+const waitsOnUser = (t: Task) => colOf(t) === "you";
+
+/** The column a card is in on the board: waiting on the user is still 进行中. */
+const boardCol = (t: Task): Col => (colOf(t) === "you" ? "active" : colOf(t));
 
 /** The board's column: tasks.ts says you / review / active / done; "active" is split into not started yet and running. */
 function colOf(t: Task): Col {
@@ -102,17 +111,17 @@ export default function BoardPage() {
   const byId = Object.fromEntries((tasks ?? []).map((t) => [t.id, t]));
   const list = (c: Col) => {
     // Members of a requirement and the steps they asked for are in its card, not cards of their own
-    const l = (tasks ?? []).filter((t) => !t.in && colOf(t) === c);
+    const l = (tasks ?? []).filter((t) => !t.in && boardCol(t) === c);
     if (c === "done") return l.sort((a, b) => Number(a.status === "dropped") - Number(b.status === "dropped") || (b.doneAt ?? 0) - (a.doneAt ?? 0));
-    // Newest first, like the other columns, by the time each card shows
-    if (c === "you") return l.sort((a, b) => waitedSince(b) - waitedSince(a));
-    return l.sort((a, b) => b.updatedAt - a.updatedAt);
+    // What waits on the user first (newest first, by when it started waiting), then the rest, newest first
+    return l.sort((a, b) => Number(waitsOnUser(b)) - Number(waitsOnUser(a)) || (waitsOnUser(a) ? waitedSince(b) - waitedSince(a) : b.updatedAt - a.updatedAt));
   };
+  const waitingCount = (c: Col) => (c === "active" ? list(c).filter(waitsOnUser).length : 0);
   // On a phone: one column, by tabs in order of what matters most to the user. It opens on the first of them that has
   // anything in it (an empty 等你 is good news, not a page to land on), until they pick one themselves.
   const [phoneTab, setPhoneTab] = useState<Col | null>(null);
   const phoneCols = PHONE_ORDER.map((id) => COLS.find((c) => c.id === id)!);
-  const phoneCol: Col = phoneTab ?? PHONE_ORDER.find((c) => list(c).length > 0) ?? "you";
+  const phoneCol: Col = phoneTab ?? PHONE_ORDER.find((c) => list(c).length > 0) ?? "active";
   const phone = usePhone();
   const pagerView = useRef<HTMLDivElement>(null);
   const pagerTrack = useRef<HTMLDivElement>(null);
@@ -187,20 +196,22 @@ export default function BoardPage() {
   const column = (c: (typeof COLS)[number]) => {
     const all = list(c.id);
     const shown = c.id === "done" ? all.slice(0, doneLimit) : all;
-    const minutes = c.id === "you" ? all.filter((t) => t.owner === "human").reduce((n, t) => n + (t.minutes ?? 0), 0) : 0;
+    const you = all.filter(waitsOnUser);
+    const minutes = you.filter((t) => t.owner === "human").reduce((n, t) => n + (t.minutes ?? 0), 0);
     return (
       <section
         key={c.id}
         className={clsx(
           "flex min-w-60 flex-1 basis-0 flex-col rounded-xl max-md:min-w-0",
           // What needs the user stands out in the board itself: 等你 with anything in it, 待验收 a little
-          c.id === "you" && all.length ? "bg-warn/10 ring-1 ring-warn/40" : c.id === "review" && all.length ? "bg-ok/5 ring-1 ring-ok/30" : "bg-muted/50",
+          you.length ? "bg-warn/5 ring-1 ring-warn/40" : c.id === "review" && all.length ? "bg-ok/5 ring-1 ring-ok/30" : "bg-muted/50",
         )}
       >
         <h2 className="flex items-center gap-2 px-3 pt-3 pb-2 text-[13px] font-medium">
           {c.icon}
           {c.title}
-          <span className={clsx("text-[12px] tabular-nums", c.id === "you" && all.length ? "rounded-full bg-warn px-1.5 font-medium text-background" : "font-normal text-muted-foreground")}>{all.length}</span>
+          <span className="text-[12px] font-normal tabular-nums text-muted-foreground">{all.length}</span>
+          {you.length > 0 && <span className="rounded-full bg-warn px-1.5 text-[12px] font-medium text-background tabular-nums">等你 {you.length}</span>}
           {minutes > 0 && <span className="text-[11px] font-normal text-muted-foreground">· 约 {minutes} 分钟</span>}
           {c.id === "todo" && (
             <button aria-label="新任务" className="ml-auto rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => setCreating(true)}>
@@ -253,7 +264,7 @@ export default function BoardPage() {
       ) : (
         <>
         <Alerts onLog={() => setSettings("log")} />
-        <PhoneTabs cols={phoneCols} count={(c) => list(c).length} current={phoneCol} onPick={setPhoneTab} />
+        <PhoneTabs cols={phoneCols} count={(c) => list(c).length} waitingCount={waitingCount} current={phoneCol} onPick={setPhoneTab} />
         {phone ? (
           // A phone: one column at a time, the tabs above or a swipe to the next (lib/swipe.ts)
           <div ref={pagerView} className="overflow-hidden">
@@ -455,7 +466,7 @@ function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, T
   const open = t.status !== "done" && t.status !== "dropped";
   const asked = t.owner === "human" && open ? `${ago(t.createdAt)}${t.handBack?.kind === "choice" || t.questions ? "问的" : "交给你"}` : "";
   return (
-    <button data-task-card="" onClick={onOpen} className={clsx("block w-full space-y-1.5 rounded-lg border bg-card p-3 text-left shadow-xs transition-[border-color,box-shadow,transform] duration-150 hover:border-ring/50 hover:shadow-sm active:scale-[0.99]", active ? "border-ring" : notDispatched(t) && "border-warn/60")}>
+    <button data-task-card="" onClick={onOpen} className={clsx("block w-full space-y-1.5 rounded-lg border bg-card p-3 text-left shadow-xs transition-[border-color,box-shadow,transform] duration-150 hover:border-ring/50 hover:shadow-sm active:scale-[0.99]", active ? "border-ring" : waitsOnUser(t) ? "border-warn/70 bg-warn/10" : notDispatched(t) && "border-warn/60")}>
       <div className="flex min-w-0 items-center gap-1.5 overflow-hidden text-[11px] text-muted-foreground">
         {t.owner === "human" ? t.handBack?.kind === "choice" ? <CircleHelp className="size-3 shrink-0" /> : <Hand className="size-3 shrink-0" /> : <Bot className="size-3 shrink-0" />}
         {/* Never squeezed: a long "asked by" beside it truncates instead of wrapping the id onto two lines */}
@@ -485,7 +496,7 @@ function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, T
         ) : null}
       </div>
       <p className={clsx("line-clamp-2 text-[13px] font-medium", t.status === "dropped" && "text-muted-foreground line-through")}>{t.title}</p>
-      {t.question && colOf(t) === "you" && <p className="line-clamp-2 text-[12px] text-warn">{t.question}</p>}
+      {t.question && waitsOnUser(t) && <p className="line-clamp-2 text-[12px] text-warn">{t.question}</p>}
       {!t.question && t.stopped && <p className="line-clamp-2 text-[12px] text-warn">{t.stopWhy ?? "停下了"}{t.said ? `：${t.said}` : ""}</p>}
       {/* Where it stands in its worker's words (task_update's summary): the one line a card has for it */}
       {t.owner === "agent" && t.summary && !t.question && !t.stopped && <p className="line-clamp-2 text-[12px] text-muted-foreground">{t.summary}</p>}
@@ -584,7 +595,7 @@ function Drawer({ t, byId, act, onClose, onGo }: { t: Task; byId: Record<string,
             <div className="flex items-center gap-2 border-b px-4 py-2.5 text-[12px] text-muted-foreground">
               {t.owner === "human" ? <Hand className="size-3.5" /> : <Bot className="size-3.5" />}
               <span className="font-mono">{t.id}</span>
-              <span className="shrink-0">· {COLS.find((c) => c.id === colOf(t))?.title}</span>
+              <span className="shrink-0">· {(waitsOnUser(t) ? "等你" : COLS.find((c) => c.id === boardCol(t))?.title)}</span>
               <EditableTitle value={t.title} onSave={(title) => renameTask(act, t, title)} className="text-[13px] font-medium text-foreground" />
               {toggle}
               <Button variant="ghost" size="icon" aria-label="关闭" onClick={onClose}>
