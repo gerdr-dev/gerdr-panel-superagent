@@ -1,0 +1,1 @@
+{ "on": "gerdr/session.*", "fn": "tasks.sync", "name": "worker 一停下、提问或出错，看板马上跟上，等你的事放进收件箱" }
