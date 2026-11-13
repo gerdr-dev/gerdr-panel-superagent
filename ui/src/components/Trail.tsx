@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronRight, ExternalLink, GitFork, Settings2 } from "lucide-react";
 import clsx from "clsx";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { run } from "../lib/gerdr";
 
 // 链路: where a task came from and every conversation behind it, as a tree of any depth — the event, who handed
@@ -53,13 +53,8 @@ export function Trail({
   onRules,
 }: TrailProps & { header: (toggle: ReactNode) => ReactNode }) {
   const [tree, setTree] = useState<Tree | null>(null);
+  // Closed until clicked, even after switching to another conversation of the task: the user found it in the way
   const [open, setOpen] = useState(false);
-  // Gone to another conversation (a subagent from 在等 or its chat card, a helper asking): the list opens, so it's clear
-  // where in the task this is and how to get back. Not on the drawer's first showing
-  const first = useRef(current);
-  useEffect(() => {
-    if (current !== first.current) setOpen(true);
-  }, [current]);
   useEffect(() => {
     run<Tree>("tasks.tree", { id: task }).then(setTree, () => setTree(null));
   }, [task, version]);
