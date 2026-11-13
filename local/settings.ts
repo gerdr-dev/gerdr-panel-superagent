@@ -16,6 +16,14 @@ export function get(input: unknown, ctx: Ctx) {
  * defaults. Pass the etag read, so two editors don't overwrite each other.
  */
 export function save(input: { settings: Settings; etag?: string }, ctx: Ctx) {
+  // Missing keys would be normalized to the defaults and the file rewritten with them: an agent that passed
+  // { repos: [...] } (no settings wrapper) once wiped every other setting and got a success back.
+  const s: any = input?.settings;
+  const missing = s && typeof s === "object" && !Array.isArray(s) ? Object.keys(DEFAULTS).filter((k) => !(k in s)) : null;
+  if (!missing || missing.length)
+    throw new Error(
+      `settings.save 要的是 { settings: 完整的设置, etag? }（settings.get 拿到的那份改完传回）${missing ? `，缺 ${missing.join(" / ")}` : ""}。只改其中几项用 settings.set`,
+    );
   const text = JSON.stringify(diff(normalize(input.settings)), null, 2) + "\n";
   try {
     return ctx.fs.write(FILE, text, input.etag && ctx.fs.stat(FILE) ? { etag: input.etag } : undefined);
