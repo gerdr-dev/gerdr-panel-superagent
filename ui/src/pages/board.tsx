@@ -204,7 +204,7 @@ export default function BoardPage() {
         className={clsx(
           "flex min-w-60 flex-1 basis-0 flex-col rounded-xl max-md:min-w-0",
           // What needs the user stands out in the board itself: 等你 with anything in it, 待验收 a little
-          you.length ? "bg-warn/5 ring-1 ring-warn/40" : c.id === "review" && all.length ? "bg-ok/5 ring-1 ring-ok/30" : "bg-muted/50",
+          you.length ? "bg-warn/[0.02] ring-1 ring-warn/25" : c.id === "review" && all.length ? "bg-ok/5 ring-1 ring-ok/30" : "bg-muted/50",
         )}
       >
         <h2 className="flex items-center gap-2 px-3 pt-3 pb-2 text-[13px] font-medium">
@@ -469,7 +469,7 @@ function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, T
     <button data-task-card="" onClick={onOpen} className={clsx(
         "block w-full space-y-1.5 rounded-lg border bg-card p-3 text-left shadow-xs transition-[border-color,box-shadow,transform] duration-150 hover:shadow-sm active:scale-[0.99]",
         // A card waiting on the user stays yellow when hovered or open: only brighter, never blue.
-        waitsOnUser(t) ? clsx("bg-warn/10", active ? "border-warn" : "border-warn/35 hover:border-warn/70") : clsx("hover:border-ring/50", active ? "border-ring" : notDispatched(t) && "border-warn/60"),
+        waitsOnUser(t) ? clsx("bg-warn/[0.04]", active ? "border-warn/80" : "border-warn/25 hover:border-warn/55") : clsx("hover:border-ring/50", active ? "border-ring" : notDispatched(t) && "border-warn/60"),
       )}>
       <div className="flex min-w-0 items-center gap-1.5 overflow-hidden text-[11px] text-muted-foreground">
         {t.owner === "human" ? t.handBack?.kind === "choice" ? <CircleHelp className="size-3 shrink-0" /> : <Hand className="size-3 shrink-0" /> : <Bot className="size-3 shrink-0" />}
