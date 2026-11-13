@@ -54,7 +54,7 @@ export const tools = {
   // A worker started before that and still calling it gets "no such tool" and says it in its reply instead
   ask_human: {
     description:
-      "Put something on the user's task panel that needs them: a step only they can do (give steps), or a decision (give options). Their answer / 'done' comes to you as a message, maybe days later. Decisions and values asked while earlier ones are unanswered go in one item: you get all the answers together once every one is answered. cancel_human takes one back. When and how to ask: the my-workflow skill, references/human.md and task.md.",
+      "Put something on the user's task panel that needs them: a step only they can do (give steps), or a decision (give options). It shows in this chat as a card with everything you put in it (the title, steps / options, what to hand back), answerable right there, and on their task panel: don't write the question or the steps again in your reply — a line on why you're asking is enough. Their answer / 'done' comes to you as a message, maybe days later. Decisions and values asked while earlier ones are unanswered go in one item: you get all the answers together once every one is answered. cancel_human takes one back. When and how to ask: the my-workflow skill, references/human.md and task.md.",
     input: STEP,
   },
   cancel_human: {
@@ -191,6 +191,9 @@ export async function closeSessions(ctx: Ctx, ids: string[]) {
   for (const id of ids) if ((ctx.sessions as any).close) await (ctx.sessions as any).close(id).catch(() => {});
 }
 
+/** What ask_human tells the worker about the card it made: the user sees it whole, so the reply needn't repeat it. */
+const SHOWN = "这一项已经作为卡片显示在这个对话里，内容和你写的一样，用户能直接在卡片上答：回复里不要再把问题、步骤写一遍，一句话说为什么要问就够了。";
+
 export function ask_human(input: any, ctx: Ctx) {
   return update(ctx, (s) => {
     const t = mine(s, ctx);
@@ -212,7 +215,7 @@ export function ask_human(input: any, ctx: Ctx) {
     if (h.handBack?.kind === "questions") {
       // Joined an item that still has earlier questions open: say which, so the moot ones are taken back now
       const earlier = (h.questions ?? []).filter((q) => !q.dropped && q.answer == null).slice(0, -1);
-      const card = questionCard(h, ctx);
+      const card = { ...questionCard(h, ctx), note: SHOWN };
       return earlier.length
         ? { ...card, stillOpen: earlier.map((q) => `${h.id}#${q.id}「${q.title}」`), note: `这个问题和还没答的 ${earlier.map((q) => `${h.id}#${q.id}`).join("、")} 在一起等用户。哪个已经不用答了，现在就 cancel_human 它` }
         : card;
@@ -224,7 +227,7 @@ export function ask_human(input: any, ctx: Ctx) {
     return {
       id: h.id,
       title: h.title,
-      note: "已放到用户任务面板的「等你」里；做完你会收到消息",
+      note: `已放到用户任务面板的「等你」里；做完你会收到消息。${SHOWN}`,
       // ref: the drawer's "跳到 tN" scrolls to this card. choose: answered right in the chat, the same tasks.complete
       // the board calls. A secret isn't: it goes through Gerdr's password box on the board, never the chat.
       // type: drawn by ui/src/cards.tsx (it shows how the step ended once the board has it); the rest is the built-in card
