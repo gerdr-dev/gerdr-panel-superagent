@@ -117,7 +117,7 @@ export function ChatDrawer({
   // Where the agent works and on which branch, as Code's pane header shows it (it can move itself: workdir)
   const dirNow = (s as any)?.workdir || s?.cwd;
   const where = dirNow ? (
-    <span className="flex max-w-[55%] min-w-0 shrink items-center gap-2 font-mono text-[11px] text-muted-foreground" title={(s as any)?.workdir ? `${dirNow}（从 ${s?.cwd} 开始）` : dirNow}>
+    <span className="flex min-w-0 items-center gap-2 font-mono text-[11px] text-muted-foreground" title={(s as any)?.workdir ? `${dirNow}（从 ${s?.cwd} 开始）` : dirNow}>
       <span className="min-w-0 truncate">{String(dirNow).replace(/^\/(Users|home)\/[^/]+/, "~")}</span>
       {(s as any)?.branch && (
         <span className="flex shrink-0 items-center gap-1" title={`分支 ${(s as any).branch}`}>
@@ -125,7 +125,6 @@ export function ChatDrawer({
           <span className="max-w-[14em] truncate">{(s as any).branch}</span>
         </span>
       )}
-      {label && <span className="shrink-0">·</span>}
     </span>
   ) : null;
   const go = (ref: string) => setJump((j) => ({ ref, seq: (j?.seq ?? 0) + 1 }));
@@ -191,9 +190,10 @@ export function ChatDrawer({
         {extra}
         {(label || shown.length > 0 || items?.length || where) && (
           <div className="shrink-0 space-y-1 border-b bg-muted/40 px-3 py-1.5">
-            {(label || shown.length > 0 || where) && (
+            {/* Where it works on a line of its own: beside the line and the buttons it squeezed both (2026-11-13) */}
+            {where}
+            {(label || shown.length > 0) && (
               <div className="flex items-center gap-2">
-                {where}
                 {label && (
                   // Clamped; a tap shows all of it
                   <button
