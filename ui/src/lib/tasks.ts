@@ -89,6 +89,8 @@ export type Task = {
  */
 export function useTasks() {
   const [tasks, setTasks] = useState<Task[] | null>(null);
+  // How many tasks are archived (local/_archive.ts): the 已完成 column offers them
+  const [archived, setArchived] = useState(0);
   const [error, setError] = useState("");
   // One tasks.list at a time; a reload asked for meanwhile runs once more right after, and its caller waits for that
   // one. It used to be dropped: on a phone (each call a round trip through the relay) the reload after sending a
@@ -104,8 +106,9 @@ export function useTasks() {
       do {
         again.current = false;
         try {
-          const r = await run<{ tasks: Task[] }>("tasks.list");
+          const r = await run<{ tasks: Task[]; archived?: number }>("tasks.list");
           setTasks(r.tasks);
+          setArchived(r.archived ?? 0);
           setError("");
         } catch (e: any) {
           setError(String(e.message || e));
@@ -155,7 +158,7 @@ export function useTasks() {
     },
     [reload],
   );
-  return { tasks, error, reload, act };
+  return { tasks, archived, error, reload, act };
 }
 
 export function since(ms?: number) {

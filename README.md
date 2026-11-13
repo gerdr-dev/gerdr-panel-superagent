@@ -38,7 +38,7 @@
 
 这个面板有两页：秘书（`ui/src/pages/index.tsx`，会话、系统提示词和压缩在 `local/_main.ts`，
 页面和简报调的函数在 `local/secretary.ts`）和任务面板（`ui/src/pages/board.tsx`）。任务面板上派给 agent 的任务和要用户亲手做的人工任务，按「待办 / 进行中 / 等你 / 待验收 / 已完成」排，
-数据在 `user/data/reqs/`（每部分一个文件，`local/_parts.ts`），读写都走 `local/_store.ts`。任务面板右上角的齿轮是任务面板设置：「设置」（`ui/src/settings/Settings.tsx`，`user/settings.json`）、「流程」（`ui/src/settings/Flow.tsx`，
+数据在 `user/data/reqs/`（每部分一个文件，`local/_parts.ts`；完成很久的移到 `user/data/archive/`，`local/_archive.ts`），读写都走 `local/_store.ts`。任务面板右上角的齿轮是任务面板设置：「设置」（`ui/src/settings/Settings.tsx`，`user/settings.json`）、「流程」（`ui/src/settings/Flow.tsx`，
 编辑 `skills/my-workflow/`）和「定时任务」（`ui/src/settings/Schedules.tsx`，`schedules/`）。
 
 ## 两个 agent：你是哪一个

@@ -5,6 +5,7 @@
 import { addWait, askUser, mrConversation, open, sync, type Wait } from "./_waits";
 import { migrate } from "./_user";
 import { readAll, split, writeChanged } from "./_parts";
+import { byCaller, unarchive } from "./_archive";
 
 /** An artifact (产物): something a step produced, kept with when it came. */
 export type Link = { label: string; url: string; at?: number };
@@ -182,8 +183,13 @@ export type Task = {
 /** v: the store's shape — 2 since wait_for stopped adding the conversations it waits on to threads. */
 export type Store = { next: number; tasks: Task[]; v?: number };
 
+/** The run's ctx, for find to bring an archived task back with (each run has its own module state). */
+let current: Ctx | undefined;
+
 export function load(ctx: Ctx) {
   migrate(ctx);
+  current = ctx;
+  byCaller(ctx);
   const loaded = readAll(ctx, reqOf);
   loaded.store = upgrade(loaded.store);
   return loaded;
@@ -320,8 +326,16 @@ export function splitRef(ref: string): [string, string | undefined] {
   return i < 0 ? [ref, undefined] : [ref.slice(0, i), ref.slice(i + 1)];
 }
 
+/**
+ * The task, brought back from the archive if it's there (_archive.ts): `s` is refilled from the files then. Inside
+ * update the write that follows sees parts it didn't read and runs the change again on the full board.
+ */
 export function find(s: Store, id: string): Task {
-  const t = s.tasks.find((x) => x.id === id);
+  let t = s.tasks.find((x) => x.id === id);
+  if (!t && current && unarchive(current, id)) {
+    Object.assign(s, load(current).store);
+    t = s.tasks.find((x) => x.id === id);
+  }
   if (!t) throw new Error(`没有任务 ${id}`);
   return t;
 }

@@ -95,7 +95,8 @@ function colOf(t: Task): Col {
 
 
 export default function BoardPage() {
-  const { tasks, error, act } = useTasks();
+  const { tasks, archived, error, act } = useTasks();
+  const [archive, setArchive] = useState(false);
   const [creating, setCreating] = useState(false);
   const [settings, setSettings] = useState<SettingsTab | null>(null);
   // On a phone Gerdr's ☰ drawer holds what the header has no room for: the settings sheet's pages, one row each
@@ -229,6 +230,11 @@ export default function BoardPage() {
               再显示 {Math.min(50, all.length - shown.length)} 个
             </button>
           )}
+          {c.id === "done" && archived > 0 && all.length <= shown.length && (
+            <button className="w-full py-2 text-[12px] text-muted-foreground hover:text-foreground" title="完成很久的任务移出了任务面板的数据，打开一个就放回来" onClick={() => setArchive(true)}>
+              已归档 {archived} 个
+            </button>
+          )}
         </div>
       </section>
     );
@@ -320,6 +326,7 @@ export default function BoardPage() {
         />
       )}</Linger>
       <Linger>{creating && <NewTask onClose={() => setCreating(false)} act={act} />}</Linger>
+      {archive && <ArchiveDialog onClose={() => setArchive(false)} onOpen={(id) => void act("unarchive", { id }).then(() => (setArchive(false), setOpen(id)))} />}
       <Linger>{settings && <SettingsSheet tab={settings} onTab={setSettings} onClose={() => setSettings(null)} onTask={(id) => (setSettings(null), setOpen(id))} />}</Linger>
     </div>
   );
@@ -2116,3 +2123,54 @@ export type FeedItem = { at: number; key: string } & ({ type: "act"; a: NonNulla
 
 const PixelLoader = (core as unknown as { PixelLoader?: (p: { className?: string }) => React.ReactNode }).PixelLoader;
 
+type Archived = { root: string; doneAt: number; tasks: { id: string; title: string; owner: string; status: string; doneAt?: number; summary?: string }[] };
+
+/**
+ * Requirements finished long ago (local/_archive.ts, 设置 → 归档): searchable; opening one puts it back under 已完成
+ * (it's archived again an hour or so later if nothing happens to it).
+ */
+function ArchiveDialog({ onClose, onOpen }: { onClose: () => void; onOpen: (id: string) => void }) {
+  const [q, setQ] = useState("");
+  const [r, setR] = useState<{ groups: Archived[]; total: number } | null>(null);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => void run<{ groups: Archived[]; total: number }>("tasks.archived", { q }).then(setR, (e) => setErr(String(e?.message ?? e))), q ? 250 : 0);
+    return () => clearTimeout(t);
+  }, [q]);
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent showCloseButton={false} aria-describedby={undefined} className="flex max-h-[80dvh] w-full flex-col gap-3 p-4 sm:max-w-xl">
+        <div className="flex items-center justify-between">
+          <DialogTitle className="text-[15px] font-medium">已归档{r ? ` · ${r.total}` : ""}</DialogTitle>
+          <Button variant="ghost" size="icon" aria-label="关闭" onClick={onClose}>
+            <X className="size-4" />
+          </Button>
+        </div>
+        <input className="h-8 rounded-md border bg-background px-2.5 text-[13px] outline-none focus:ring-1 focus:ring-ring" placeholder="搜编号、标题、结果、仓库" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
+        <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
+          {err && <p className="py-4 text-center text-[12px] text-bad">{err}</p>}
+          {r && !r.groups.length && <p className="py-6 text-center text-[12px] text-muted-foreground">没有</p>}
+          {r?.groups.map((g) => {
+            const root = g.tasks.find((t) => t.id === g.root) ?? g.tasks[0];
+            const more = g.tasks.length - 1;
+            return (
+              <button key={g.root} className="block w-full rounded-lg px-2.5 py-2 text-left hover:bg-accent" onClick={() => onOpen(g.root)}>
+                <div className="flex items-baseline gap-2 text-[13px]">
+                  <span className="shrink-0 tabular-nums text-muted-foreground">{root.id}</span>
+                  <span className={clsx("min-w-0 flex-1 truncate", root.status === "dropped" && "text-muted-foreground line-through")}>{root.title}</span>
+                  <span className="shrink-0 text-[11px] text-muted-foreground">{day(g.doneAt)}</span>
+                </div>
+                {(root.summary || more > 0) && (
+                  <p className="mt-0.5 line-clamp-2 text-[12px] text-muted-foreground">
+                    {more > 0 ? `${more + 1} 个成员 · ` : ""}
+                    {root.summary}
+                  </p>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}

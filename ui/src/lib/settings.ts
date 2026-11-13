@@ -49,6 +49,11 @@ export type Settings = {
    * since the last compaction: by time (set the schedule to, say, 04:00). DESIGN.md「秘书」「一个会话，靠压缩」.
    */
   compactTokens: number;
+  /**
+   * A requirement whose tasks all ended (done / dropped) more than this many days ago is archived: moved out of
+   * user/data/reqs/, so the board stops reading it every run. Comes back when asked for (local/_archive.ts). 0 = never.
+   */
+  archiveDays: number;
 };
 
 export const ACK_TEXT = "收到，建了任务 {id}「{title}」，有结果会在这里说。";
@@ -63,10 +68,12 @@ export const DEFAULTS: Settings = {
   ack: "dispatch",
   ackText: ACK_TEXT,
   compactTokens: 80_000,
+  archiveDays: 14,
 };
 
 const str = (v: unknown, d: string) => (typeof v === "string" ? v.trim() : d);
 const oneOf = <T extends string>(v: unknown, ok: readonly T[], d: T): T => (ok.includes(v as T) ? (v as T) : d);
+const count = (v: unknown, d: number) => (v !== "" && v != null && Number.isFinite(Number(v)) && Number(v) >= 0 ? Math.round(Number(v)) : d);
 const who = (v: any, d: Who): Who => ({ agent: str(v?.agent, d.agent), model: str(v?.model, d.model), effort: str(v?.effort, d.effort), mode: str(v?.mode, d.mode) });
 
 /** Whatever is stored (partial, old, hand-edited) → complete settings: a missing or unfitting value is the default. */
@@ -90,5 +97,6 @@ export function normalize(raw: any): Settings {
     ack: oneOf(r.ack, ["accept", "dispatch", "never"] as const, d.ack),
     ackText: str(r.ackText, "") || d.ackText,
     compactTokens: Number.isFinite(Number(r.compactTokens)) && Number(r.compactTokens) >= 0 && r.compactTokens !== "" && r.compactTokens != null ? Math.round(Number(r.compactTokens)) : d.compactTokens,
+    archiveDays: count(r.archiveDays, d.archiveDays),
   };
 }

@@ -2,7 +2,7 @@
 // (status, briefing, checkStuck, compact), and say for the panel's assistant. The page is the secretary's own chat;
 // the session behind it is _main.ts.
 
-import { list } from "./tasks";
+import { archived, list } from "./tasks";
 import { askText, compactMain, ensureMain, state, toMain, updateState } from "./_main";
 
 const cut = (s: string, n: number) => {
@@ -85,6 +85,10 @@ export async function status(input: { since?: number }, ctx: Ctx) {
     else if (t.session || t.status === "running" || t.status === "delivering") active.push(`- ${head} ${when(t.updatedAt)}更新${t.summary ? `：${cut(t.summary, 160)}` : ""}`);
     else todo.push(`- ${head}${t.blockedBy?.length ? `（等 ${t.blockedBy.join("、")}）` : t.routing ? "（正在派）" : ""}`);
   }
+  // Asked about further back than the archive's cutoff: what was archived counts too (_archive.ts)
+  for (const g of archived({}, ctx).groups)
+    for (const t of g.tasks)
+      if (t.status === "done" && (t.doneAt ?? 0) >= since) done.push(`- ${t.id}「${t.title}」${when(t.doneAt!)}（已归档）${t.summary ? `：${cut(t.summary, 200)}` : ""}`);
   const sec = (title: string, l: string[]) => `## ${title}（${l.length}）\n${l.join("\n") || "无"}`;
   return [
     sec("等用户的", you),

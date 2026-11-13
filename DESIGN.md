@@ -657,6 +657,24 @@ worker 在看板上怎么做（每次停下要汇报、自己开的会话来问�
 **被否掉的做法：规则写在 `WORKER_PROTOCOL`、工具说明、`brief()` 的字符串里。** 用户看不到 agent 被告诉了什么，
 想调也只能改代码；而且工具说明里还留着和新规则矛盾的旧话（「要用户决定就用你自带的提问工具」）。
 
+## 归档：完成很久的需求移出数据（2026-11-13）
+
+每次运行（`tasks.list` 每分钟一次、每个工具调用）都把 `user/data/reqs/` 全读一遍，还要为每个有 worker 的任务问一次 Gerdr
+它的会话。完成的任务从来不删，数据只增不减。用户问过要不要换 SQLite：没换，量远没到（当时 72 个任务、272K），
+代码又是「整块读进内存、改、写回」，换了也还是整块读；文件还能让人和 agent 直接看、直接改。先做归档，数据真的多到要按条查、
+要统计历史，再在 Gerdr 里加 `ctx.db`。
+
+- **单位是一张卡片（需求）**：根任务和成员的部分文件、它们要用户做的步骤，一起移到 `user/data/archive/`，
+  `index.json` 记每组的任务摘要（编号、标题、状态、完成时间、最后的结果、会话），`sessions.json` 记会话 → 组。
+  条件：组里每个任务都结束了（完成 / 放弃），最晚那个超过 设置 → 归档的天数（默认 14，0 = 不归档），
+  而且还在进行的任务里没有提到它们的编号（`blockedBy`、`from`、等待的 item…，按带引号的 id 在 JSON 里找，宁可不归）。
+  `tasks.list` 里做，最多一小时一次（`index.json` 的 `checkedAt`）。只搬文件，什么都不删。
+- **用到就回来**：按 id 找（`_store.ts` 的 `find`；在 `update` 里时，写的时候发现多了没读过的部分，整个改动重来一遍）、
+  `tasks.list {id}`、worker 自己调面板工具（`load` 看 `ctx.caller.session`）、它的会话又跑起来（`tasks.list` 的 `revive`：
+  用户在它的对话里写了话，接着照旧的规则把任务重新打开）。回来以后没事的话，下一次检查又会归档。
+- **看得到**：「已完成」列底下「已归档 N 个」，能搜，点一个就放回「已完成」并打开；秘书用 `tasks.archived {q}` 查以前的事，
+  `secretary.status` 的「完成的」把时间范围内已归档的也算上。
+
 ## 个人的东西都在 `user/`
 
 面板是用 git 分享的，一个人用它产生和决定的东西不是：任务、去向记录、打开了哪些触发器（里面有 Slack ID）、
@@ -674,6 +692,7 @@ worker 在看板上怎么做（每次停下要汇报、自己开的会话来问�
 | 文件 | 内容 |
 |---|---|
 | `local/_store.ts` | 任务数据和读写（带 etag 重试） |
+| `local/_archive.ts` | 归档：完成很久的需求移到 `user/data/archive/`，用到时搬回来（`tasks.archived` / `tasks.unarchive`） |
 | `local/_user.ts` | `user/`：个人副本优先的读法、旧 `data/` 的一次性迁移 |
 | `local/_apply.ts` | worker 汇报怎么落到任务上（工具和旧文字块共用） |
 | `local/tasks.ts` | 看板和秘书调用的函数：list / add / start / accept / complete / deliver / redo / drop… |

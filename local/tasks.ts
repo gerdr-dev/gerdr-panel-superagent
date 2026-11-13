@@ -8,6 +8,7 @@ import { applyBlock } from "./_apply";
 import { endQuestions, endWaits, isOutside, open, question, syncAgents, syncSessions, wakeText, type Wait } from "./_waits";
 import { cutLine, wake } from "./_wake";
 import { allAgents, mentionsIn } from "./_agents";
+import { archived as archivedGroups, archivedCount, archiveOld, latest, revive, unarchive as bringBack } from "./_archive";
 import { isMain, rerouteTask, routeTask, sweep, toMain } from "./_main";
 
 export type { Task };
@@ -72,6 +73,11 @@ function lastBlock(reply: string): any {
  * asking about one task: the whole board is tens of thousands of characters. Syncing still covers every task.
  */
 export async function list(input: unknown, ctx: Ctx) {
+  // Archived ones asked for by id, or whose worker is running again (the user wrote to it): back on the board first
+  const want = (input as { id?: string } | null)?.id;
+  if (want) bringBack(ctx, want);
+  const all = ctx.sessions.list() as (Session & { parent?: string; reportTo?: string })[];
+  revive(ctx, all);
   await startUnblocked(ctx);
   const live: Record<string, any> = {};
   const { store } = load(ctx);
@@ -85,7 +91,6 @@ export async function list(input: unknown, ctx: Ctx) {
   }
   // Sessions the workers handed work to (reportTo / parent / a task tag), here or on another computer: waits of their
   // task (_waits.ts syncSessions)
-  const all = ctx.sessions.list() as (Session & { parent?: string; reportTo?: string })[];
   const kidsOf = (t: Task) =>
     helpers(t, all).map((k: any) => ({
       id: k.id,
@@ -207,6 +212,12 @@ export async function list(input: unknown, ctx: Ctx) {
   for (const n of nudge) live[n.session] = ctx.sessions.get(n.session) ?? live[n.session];
   await closeRouters(ctx, live);
   sweep(ctx);
+  // Requirements finished long ago leave the board's files (_archive.ts, at most hourly): out of s too, so they leave
+  // the page with this very answer
+  if (archiveOld(ctx, () => load(ctx), workflow(ctx).archiveDays, reqOf)) {
+    const kept = new Set(load(ctx).store.tasks.map((t) => t.id));
+    s.tasks = s.tasks.filter((t) => kept.has(t.id));
+  }
   const tasks = s.tasks.map((t) => {
       const sess = t.session ? live[t.session] : null;
       const halted = stopped(t, sess);
@@ -245,8 +256,8 @@ export async function list(input: unknown, ctx: Ctx) {
       ctx.log(`${a.id} 的回答没转给秘书：${err?.message ?? err}`),
     );
   const board = teams(s, tasks);
-  const id = (input as { id?: string } | null)?.id;
-  if (!id) return { tasks: board, at: Date.now() };
+  const id = want;
+  if (!id) return { tasks: board, at: Date.now(), archived: archivedCount(ctx) };
   if (!board.some((t) => t.id === id)) throw new Error(`没有 ${id}`);
   // The task, the requirement it is in, and everything in that requirement
   const root = (board.find((t) => t.id === id) as any)?.in ?? id;
@@ -949,6 +960,24 @@ function handover(t: Task, said: string) {
  * Undoes 放弃: { id } — back to where it was (its worker's conversation was only closed: the next message opens it
  * again, and a session it handed work to still reports back to it).
  */
+/**
+ * The archive (_archive.ts): requirements finished more than 设置 → archiveDays ago, newest first, each with its
+ * tasks (id, title, status, when done, last summary). q: only those whose id / title / summary / repository has it.
+ * Asking for one by id anywhere (tasks.list {id}, any action) brings it back; so does tasks.unarchive.
+ */
+export function archived(input: { q?: string; limit?: number } | null, ctx: Ctx) {
+  const q = input?.q?.trim().toLowerCase();
+  const hit = (t: { id: string; title: string; summary?: string; repo?: string }) => [t.id, t.title, t.summary, t.repo].some((x) => x?.toLowerCase().includes(q!));
+  const groups = archivedGroups(ctx).filter((g) => !q || g.tasks.some(hit));
+  return { groups: groups.slice(0, input?.limit ?? 200).map((g) => ({ ...g, doneAt: latest(g) })), total: groups.length };
+}
+
+/** Puts an archived requirement (the one holding task `id`) back on the board, under 已完成. */
+export function unarchive(input: { id: string }, ctx: Ctx) {
+  if (!bringBack(ctx, input.id)) throw new Error(`${input.id} 不在归档里`);
+  return { ok: true };
+}
+
 export function restore(input: { id: string }, ctx: Ctx) {
   return update(ctx, (s) => {
     const t = find(s, input.id);

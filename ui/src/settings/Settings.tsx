@@ -116,6 +116,12 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
             <Repos repos={s.repos} onChange={(v) => put("repos", v)} />
           </Section>
 
+          <Section title="归档" note="完成（或放弃）很久的任务移出任务面板的数据，任务面板和秘书每次就不用再读它们；什么都不删。「已完成」列底下能搜到、打开一个就放回来，它的 worker 又干起活来也会自己回来。">
+            <Field label="完成多少天后归档" hint={s.archiveDays > 0 ? `一个需求里所有任务都结束超过 ${s.archiveDays} 天，而且没有还在进行的任务提到它` : "不归档"}>
+              <input className={input} type="number" min={0} step={1} value={s.archiveDays} onChange={(e) => put("archiveDays", Math.max(0, Math.round(Number(e.target.value) || 0)))} />
+            </Field>
+          </Section>
+
           <Section
             title="外面来的消息"
             note="触发器收进来、找你的消息（私信、@ 你）。闲聊、道谢这类秘书不接，只记在「去向」里。"
