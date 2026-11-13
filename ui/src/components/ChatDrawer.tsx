@@ -1,4 +1,4 @@
-import { ArrowDownRight, ArrowLeft, FolderOpen, MessageSquare, MoreHorizontal, X } from "lucide-react";
+import { ArrowDownRight, ArrowLeft, FolderOpen, GitBranch, MessageSquare, MoreHorizontal, X } from "lucide-react";
 import { EditableTitle } from "./EditableTitle";
 import clsx from "clsx";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -95,6 +95,20 @@ export function ChatDrawer({
         ))}
       </div>
     ) : null;
+  // Where the agent works and on which branch, as Code's pane header shows it (it can move itself: workdir)
+  const dirNow = (s as any)?.workdir || s?.cwd;
+  const where = dirNow ? (
+    <span className="flex max-w-[55%] min-w-0 shrink items-center gap-2 font-mono text-[11px] text-muted-foreground" title={(s as any)?.workdir ? `${dirNow}（从 ${s?.cwd} 开始）` : dirNow}>
+      <span className="min-w-0 truncate">{String(dirNow).replace(/^\/(Users|home)\/[^/]+/, "~")}</span>
+      {(s as any)?.branch && (
+        <span className="flex shrink-0 items-center gap-1" title={`分支 ${(s as any).branch}`}>
+          <GitBranch className="size-3" />
+          <span className="max-w-[14em] truncate">{(s as any).branch}</span>
+        </span>
+      )}
+      {label && <span className="shrink-0">·</span>}
+    </span>
+  ) : null;
   const go = (ref: string) => setJump((j) => ({ ref, seq: (j?.seq ?? 0) + 1 }));
   const act = (a: ChatAction) => {
     if (a.confirm && armed !== a.id) return setArmed(a.id);
@@ -156,10 +170,11 @@ export function ChatDrawer({
         <SheetTitle className="sr-only">{s?.title || session}</SheetTitle>
         {trail ? <Trail {...trail} header={header} /> : header(null)}
         {extra}
-        {(label || shown.length > 0 || items?.length) && (
+        {(label || shown.length > 0 || items?.length || where) && (
           <div className="shrink-0 space-y-1 border-b bg-muted/40 px-3 py-1.5">
-            {(label || shown.length > 0) && (
+            {(label || shown.length > 0 || where) && (
               <div className="flex items-center gap-2">
+                {where}
                 {label && (
                   // Clamped; a tap shows all of it
                   <button
