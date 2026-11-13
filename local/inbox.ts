@@ -9,7 +9,7 @@
 import { load } from "./_store";
 import { migrate } from "./_user";
 import { workflow } from "./_config";
-import { compact, evaluate, followUp, record, state, subscribers } from "./_main";
+import { compact, evaluate, followUp, record, sharers, state, subscribers } from "./_main";
 import { onAssignEvent } from "./assign";
 
 // Which events this person takes in is theirs: their trigger files live in user/triggers/ (Gerdr reads them beside the
@@ -175,8 +175,9 @@ export async function onEvent(input: { event: GerdrEvent; trigger?: string; allo
   const ev = compact(e);
   const owners = subscribers(store.tasks, ev);
   // 设置 → 任务对话里的后续: straight to the task's worker, or judged by the secretary first (it sees the tasks of this
-  // conversation, and can attach it to one, leave it, or make it something new)
-  if (owners.length && workflow(ctx).followUps === "secretary") {
+  // conversation, done ones too, and can attach it to one, pick an ended one up again, leave it, or make it new). A
+  // conversation that held more than one task is always judged: which one it is about is in the words, not the key
+  if (owners.length && (workflow(ctx).followUps === "secretary" || sharers(store.tasks, ev).length > 1)) {
     const it = record(ctx, ev, { state: "pending", sentAt: Date.now() });
     await evaluate(ctx, [it.id], store.tasks);
     return { item: it.id, pending: true, followUpOf: owners.map((t) => t.id) };

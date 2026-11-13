@@ -208,6 +208,17 @@ export function subscribers(tasks: Task[], e: { source: string; key?: string; ac
   return last ? [last] : [];
 }
 
+/**
+ * Every task this conversation ever went to (done ones too; not dropped). Only a conversation that is one task's alone
+ * (a thread made for it, an MR) can send its messages straight to that worker: in one that holds several (a DM where
+ * two things were asked, one of them already accepted and still talked about) a message may be about any of them, and
+ * only reading it tells which — the secretary's job (2026-11-13, the user: "还是靠不住…直接发给需求2 也不正确").
+ */
+export function sharers(tasks: Task[], e: { source: string; key?: string }): Task[] {
+  if (!e.key) return [];
+  return tasks.filter((t) => t.status !== "dropped" && follows(t).some((x) => x.source === e.source && x.key === e.key));
+}
+
 function who(e: Ev) {
   return e.who || e.actor || "";
 }
