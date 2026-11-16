@@ -163,8 +163,12 @@ export default function BoardPage() {
   // with its task's 链路 when it has one
   const [peek, setPeek] = useState<{ session: string; task?: string; sub?: string; from?: string } | null>(null);
   // ⌘K over the board finds any task on it (finished ones too, not only the 20 shown), and opens it like a click
+  // In the board's order of what matters (等你, 进行中, 待验收, 待办, then 已完成 newest first), each column sorted as
+  // on the board; tasks inside a requirement's card after them. Typing re-ranks by how well each row matches.
+  const searchOrder = PHONE_ORDER.flatMap(list);
+  const searchSeen = new Set(searchOrder.map((t) => t.id));
   useSearchItems(
-    (tasks ?? []).map((t) => ({
+    [...searchOrder, ...(tasks ?? []).filter((t) => !searchSeen.has(t.id)).sort((a, b) => b.updatedAt - a.updatedAt)].map((t) => ({
       id: t.id,
       label: t.title,
       // Only the status at the row's end: a repo path made every row's end land somewhere else
