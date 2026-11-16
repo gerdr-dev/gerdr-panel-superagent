@@ -167,8 +167,9 @@ export default function BoardPage() {
     (tasks ?? []).map((t) => ({
       id: t.id,
       label: t.title,
-      detail: [waitsOnUser(t) ? "等你" : COLS.find((c) => c.id === boardCol(t))?.title, t.repo].filter(Boolean).join(" · "),
-      keywords: [t.origin?.title, t.prompt?.slice(0, 300)].filter(Boolean).join(" "),
+      // Only the status at the row's end: a repo path made every row's end land somewhere else
+      detail: waitsOnUser(t) ? "等你" : COLS.find((c) => c.id === boardCol(t))?.title,
+      keywords: [t.repo, t.origin?.title, t.prompt?.slice(0, 300)].filter(Boolean).join(" "),
       onSelect: () => (setPeek(null), setOpen(t.id)),
     })),
     { heading: "任务" },
