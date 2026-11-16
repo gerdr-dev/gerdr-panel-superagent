@@ -870,6 +870,19 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
   const quoted = !!t.origin && !t.assigned;
   const [remark, setRemark] = useState(t.remark ?? "");
   const [open, setOpen] = useState(false);
+  // Whether the quote is cut: measured, not guessed from its lines (a phone wraps 6 lines into 12, and 展开全部 never
+  // showed, user report 2026-11-16)
+  const quote = useRef<HTMLParagraphElement>(null);
+  const [cut, setCut] = useState(false);
+  useLayoutEffect(() => {
+    const el = quote.current;
+    if (!el) return;
+    const check = () => setCut(el.scrollHeight > el.clientHeight + 1);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [t.prompt, open]);
   const dirty = editable && !quoted && draft.trim() !== (t.prompt ?? t.title).trim();
   const remarkDirty = editable && quoted && remark.trim() !== (t.remark ?? "").trim();
   const save = async () => {
@@ -904,8 +917,10 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
       {editable && quoted ? (
         <>
           <div className="rounded-md border-l-2 border-muted-foreground/30 bg-muted/40 px-3 py-2">
-            <p className={clsx(txt, "leading-relaxed whitespace-pre-wrap text-muted-foreground", !open && "line-clamp-[8]")}>{t.prompt ?? t.title}</p>
-            {((t.prompt ?? "").split("\n").length > 8 || (t.prompt ?? "").length > 400) && (
+            <p ref={quote} className={clsx(txt, "leading-relaxed whitespace-pre-wrap text-muted-foreground", !open && "line-clamp-[8]")}>
+              {t.prompt ?? t.title}
+            </p>
+            {(cut || open) && (
               <button className="mt-1 text-[12px] text-brand hover:underline" onClick={() => setOpen(!open)}>
                 {open ? "收起" : "展开全部"}
               </button>
