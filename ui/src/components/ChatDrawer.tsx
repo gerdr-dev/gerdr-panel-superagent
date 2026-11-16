@@ -241,7 +241,7 @@ export function ChatDrawer({
  * The ⋯ menu. Drawn in place, not portaled: a portaled menu lands in the panel's mount outside the sheet, and a click
  * there counts as one on the board, closing the drawer. A confirm item asks in place (its label becomes the question).
  */
-function Menu({ actions, armed, onPick, onClose }: { actions: ChatAction[]; armed: string; onPick: (a: ChatAction) => void; onClose: () => void }) {
+export function Menu({ actions, armed, onPick, onClose }: { actions: ChatAction[]; armed: string; onPick: (a: ChatAction) => void; onClose: () => void }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {

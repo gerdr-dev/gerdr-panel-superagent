@@ -8,7 +8,7 @@ import { Sheet, SheetContent, SheetTitle } from "../components/ui/sheet";
 import { type Attachment } from "../components/Attachments";
 import { TaskBox, TaskDialog, mentionsOf, uploading, type AgentInfo } from "../components/TaskBox";
 import { askSecret, secretNames } from "../lib/bridge";
-import { ChatDrawer, type ChatAction, type ChatItem } from "../components/ChatDrawer";
+import { ChatDrawer, Menu, type ChatAction, type ChatItem } from "../components/ChatDrawer";
 import { TaskStep } from "../cards";
 import { Trail } from "../components/Trail";
 import { Linger } from "../lib/linger";
@@ -650,6 +650,7 @@ function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, T
 /** Everything about one task and what you can do with it, in a panel on the right (full screen on a phone). */
 function Drawer({ t, byId, act, onClose, onGo }: { t: Task; byId: Record<string, Task>; act: Act; onClose: () => void; onGo: (id: string) => void }) {
   const done = t.status === "done" || t.status === "dropped";
+  const [armed, setArmed] = useState("");
   return (
     // Not modal, like the chat drawer: another task's card stays clickable and switches the drawer to it; a click on
     // the board elsewhere closes it
@@ -672,6 +673,18 @@ function Drawer({ t, byId, act, onClose, onGo }: { t: Task; byId: Record<string,
               <span className="shrink-0">· {(waitsOnUser(t) ? "等你" : COLS.find((c) => c.id === boardCol(t))?.title)}</span>
               <EditableTitle value={t.title} onSave={(title) => renameTask(act, t, title)} className="text-[13px] font-medium text-foreground" />
               {toggle}
+              {t.owner === "agent" && !done && (
+                <Menu
+                  actions={[{ id: "accept", label: "标为完成", confirm: "确定完成？" }, { id: "drop", label: "放弃", kind: "danger", confirm: "确定放弃？" }]}
+                  armed={armed}
+                  onPick={(a) => {
+                    if (a.confirm && armed !== a.id) return setArmed(a.id);
+                    setArmed("");
+                    void act(a.id, { id: t.id });
+                  }}
+                  onClose={() => setArmed("")}
+                />
+              )}
               <Button variant="ghost" size="icon" aria-label="关闭" onClick={onClose}>
                 <X className="size-4" />
               </Button>
@@ -679,7 +692,14 @@ function Drawer({ t, byId, act, onClose, onGo }: { t: Task; byId: Record<string,
           );
           return t.owner === "agent" ? <Trail header={header} task={t.id} version={t.updatedAt} onSession={(id) => openChat(id, t.id)} onTask={onGo} /> : header(null);
         })()}
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">{done && !(t.questions && t.status === "done") ? <DoneDetail t={t} act={act} /> : t.owner === "human" ? <HumanCard key={t.id} t={t} byId={byId} act={act} onGo={onGo} /> : <AgentCard key={t.id} t={t} byId={byId} act={act} />}</div>
+        {done && !(t.questions && t.status === "done") ? (
+          <div className="min-h-0 flex-1 overflow-y-auto p-4"><DoneDetail t={t} act={act} /></div>
+        ) : t.owner === "human" ? (
+          <div className="min-h-0 flex-1 overflow-y-auto p-4"><HumanCard key={t.id} t={t} byId={byId} act={act} onGo={onGo} /></div>
+        ) : (
+          // Scrolls itself, its steps pinned below
+          <div className="flex min-h-0 flex-1 flex-col"><AgentCard key={t.id} t={t} byId={byId} act={act} /></div>
+        )}
       </SheetContent>
     </Sheet>
   );
@@ -837,14 +857,10 @@ function firstLine(text: string) {
 function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act: Act }) {
   const { busy, err, go } = useAction(act);
   const [text, setText] = useState("");
-  const [rejecting, setRejecting] = useState(false);
   // A task not sent out yet is still the user's words: its text is an input box right away (no 编辑 to press), the way
   // it was written (新任务 asks only what to do; the title is its first line, here too). Saved when the box is left,
   // and before 派出去
   const editable = t.status === "todo" && !t.routing && !t.session && !t.reroute;
-  // 让秘书重排: what's wrong with a card in 待办, in the user's words; the secretary rewrites it and leaves it in 待办
-  // (tasks.reroute → redraft). For a card it drafted from a long message, saying what's wrong beats editing it by hand
-  const [redoing, setRedoing] = useState(false);
   const [draft, setDraft] = useState(t.prompt ?? t.title);
   // What its message's sender hears when it's sent out (设置 → 回复对方: 派出去时): the 回复对方 words, to change or empty
   const [reply, setReply] = useState(t.replyDraft ?? "");
@@ -857,7 +873,12 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
   const l = t.live;
   const stale = l?.status === "running" && l.turnStartedAt && Date.now() - l.turnStartedAt > 40 * 60000;
   const tone = l?.status === "waiting" || l?.status === "error" || stale ? "text-warn" : l?.status === "running" ? "text-ok" : "text-muted-foreground";
+  // The steps (派出去 / 让秘书重排 / 通过 / 打回) pinned under the scrolling card, like a chat's composer; 放弃 and 标为完成
+  // are in the title row's ⋯ (Drawer)
+  const foot = (t.status === "todo" && !t.routing && t.assigned?.state !== "ask") || t.status === "review";
   return (
+    <>
+    <div className="min-h-0 flex-1 overflow-y-auto p-4">
     <Card t={t} icon={<Bot className="size-4" />}>
       <div className="flex items-start justify-between gap-2">
         <h3 className="text-[16px] font-medium">{t.title}</h3>
@@ -874,12 +895,12 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
       <Links t={t} />
       {editable ? (
         <textarea
-          rows={6}
+          rows={10}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={() => void save()}
           placeholder="要 agent 做什么"
-          className="w-full resize-y rounded-md border bg-background px-2 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]"
+          className={box}
         />
       ) : (
         t.prompt && (
@@ -906,103 +927,111 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
           )}
         </div>
       )}
-      {rejecting && (
-        <div className="flex gap-2">
-          <input autoFocus value={text} onChange={(e) => setText(e.target.value)} placeholder="哪里不对，要怎么改" className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]" />
-          <Button disabled={!text.trim() || !!busy} onClick={async () => (await go("reject", "reject", { id: t.id, feedback: text })) && (setText(""), setRejecting(false))}>
-            {busy === "reject" ? <Loader2 className="size-3.5 animate-spin" /> : <Undo2 className="size-3.5" />}打回
-          </Button>
-          <Button variant="ghost" size="icon" aria-label="取消" onClick={() => setRejecting(false)}>
-            <X className="size-4" />
-          </Button>
-        </div>
-      )}
-      {rejecting && t.session && (
-        <button className="inline-flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground" onClick={() => openChat(t.session!, t.id)}>
-          <Paperclip className="size-3" />
-          要附截图：在对话里说哪里不对
-        </button>
-      )}
-      {t.reroute && t.status === "todo" && (
-        <p className="inline-flex items-center gap-1.5 text-[12px] text-brand">
-          <Loader2 className="size-3.5 animate-spin" />
-          秘书在按你的意见重排：{t.reroute.feedback}
-          {t.reroute.router && (
-            <button className="hover:underline" onClick={() => openChat(t.reroute!.router!)}>
-              看它的对话
-            </button>
-          )}
-        </p>
-      )}
-      {redoing && (
-        <div className="space-y-2">
-          <textarea
-            autoFocus
-            rows={3}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="哪里不对、要怎么排（比如：拆成前后端两张；仓库应该是 whale-service）"
-            className="w-full resize-y rounded-md border bg-background px-2 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]"
-          />
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => (setRedoing(false), setText(""))}>
-              取消
-            </Button>
-            <Button disabled={!text.trim() || !!busy} onClick={async () => (await go("reroute", "reroute", { id: t.id, feedback: text })) && (setText(""), setRedoing(false))}>
-              {busy === "reroute" ? <Loader2 className="size-3.5 animate-spin" /> : <Undo2 className="size-3.5" />}交给秘书重排
-            </Button>
-          </div>
-        </div>
-      )}
       {t.assigned?.state === "ask" && <AssignBox t={t} act={act} save={save} />}
       {t.assigned && t.assigned.state !== "ask" && !t.session && <ReplyBox t={t} act={act} />}
       {t.canReply && !t.routing && (
-        <label className="block space-y-1">
-          <span className="text-[12px] text-muted-foreground">派出去时回复对方{t.origin?.title ? `（${t.origin.title}）` : ""}：留空就不回</span>
+        <label className="block space-y-1.5 pt-1">
+          <span className="block text-[12px] text-muted-foreground">
+            派出去时回复{t.origin?.title ? <span title={t.origin.title}> {t.origin.title.split(/[:：]/)[0].slice(0, 40)} </span> : "对方"}<span className="opacity-70"> · 留空就不回</span>
+          </span>
           <textarea
             rows={2}
             value={reply}
             onChange={(e) => setReply(e.target.value)}
             placeholder="派出去时发给发消息的人"
-            className="w-full resize-y rounded-md border bg-background px-2 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]"
+            className={box}
           />
         </label>
       )}
       {err && <p role="alert" className="text-[12px] text-bad">{err}</p>}
-      <div className="flex flex-wrap justify-end gap-2">
-        {editable && !t.assigned && !redoing && (
-          <Button variant="outline" disabled={!!busy} onClick={async () => (await save()) && setRedoing(true)}>
-            <Undo2 className="size-3.5" />
-            让秘书重排
-          </Button>
-        )}
-        {t.status === "todo" && !t.routing && !t.reroute && t.assigned?.state !== "ask" && (
-          <Button disabled={!!busy || (editable && !draft.trim())} onClick={async () => (await save()) && go("start", "start", { id: t.id, ...(t.canReply ? { reply } : {}) })}>
-            {busy === "start" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}派出去
-          </Button>
-        )}
-        {t.status === "review" && !rejecting && (
-          <>
-            <Button variant="outline" disabled={!!busy} onClick={() => setRejecting(true)}>
-              <Undo2 className="size-3.5" />
-              打回
+    </Card>
+    </div>
+    {foot && (
+      <div className="shrink-0 space-y-2 border-t bg-muted/30 px-4 py-3">
+        {t.reroute && t.status === "todo" ? (
+          <p className="flex items-center gap-1.5 text-[12px] text-brand">
+            <Loader2 className="size-3.5 shrink-0 animate-spin" />
+            <span className="min-w-0 flex-1 truncate" title={t.reroute.feedback}>秘书在按你的意见重排：{t.reroute.feedback}</span>
+            {t.reroute.router && (
+              <button className="shrink-0 hover:underline" onClick={() => openChat(t.reroute!.router!)}>
+                看它的对话
+              </button>
+            )}
+          </p>
+        ) : editable && !t.assigned ? (
+          // 让秘书重排 is the drawer's composer: where you'd talk to the worker once it's out, you talk to the
+          // secretary about the card before it is (2026-11-16: a button opening a box mid-drawer felt odd)
+          <div className="flex items-end gap-2">
+            <Composer busy={busy === "reroute"} placeholder="哪里不对？跟秘书说，它来重排" onSend={(feedback) => go("reroute", "reroute", { id: t.id, feedback })} before={save} />
+            <Button className="h-9 shrink-0" disabled={!!busy || !draft.trim()} onClick={async () => (await save()) && go("start", "start", { id: t.id, ...(t.canReply ? { reply } : {}) })}>
+              {busy === "start" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}派出去
             </Button>
-            <Button disabled={!!busy} onClick={() => go("accept", "accept", { id: t.id })}>
+          </div>
+        ) : t.status === "review" ? (
+          <div className="flex items-end gap-2">
+            <Composer busy={busy === "reject"} placeholder="哪里不对？写了打回给它改" onSend={(feedback) => go("reject", "reject", { id: t.id, feedback })} />
+            <Button className="h-9 shrink-0" disabled={!!busy} onClick={() => go("accept", "accept", { id: t.id })}>
               {busy === "accept" ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}通过
             </Button>
-          </>
-        )}
-        {t.status !== "review" && (
-          <>
-            <DropButton busy={!!busy} onDrop={() => go("drop", "drop", { id: t.id })} />
-            <Button variant="outline" disabled={!!busy} onClick={() => go("accept", "accept", { id: t.id })}>
-              <Check className="size-3.5" />
-              标为完成
+          </div>
+        ) : (
+          <div className="flex justify-end">
+            <Button className="h-9" disabled={!!busy} onClick={async () => (await save()) && go("start", "start", { id: t.id, ...(t.canReply ? { reply } : {}) })}>
+              {busy === "start" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}派出去
             </Button>
-          </>
+          </div>
         )}
       </div>
-    </Card>
+    )}
+    </>
+  );
+}
+
+const box = "w-full resize-y rounded-md border bg-background px-3 py-2 text-[13px] leading-relaxed outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]";
+
+/**
+ * A one-line box that grows as you write, with its send button inside (the chat's composer, small): Enter sends,
+ * Shift+Enter a new line. Cleared once sent.
+ */
+function Composer({ placeholder, busy, onSend, before }: { placeholder: string; busy: boolean; onSend: (text: string) => Promise<boolean>; before?: () => Promise<boolean> }) {
+  const [text, setText] = useState("");
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [text]);
+  const send = async () => {
+    const v = text.trim();
+    if (!v || busy) return;
+    if (before && !(await before())) return;
+    if (await onSend(v)) setText("");
+  };
+  return (
+    <div className="relative min-w-0 flex-1">
+      <textarea
+        ref={ref}
+        rows={1}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (!isSubmitEnter(e)) return;
+          e.preventDefault();
+          void send();
+        }}
+        placeholder={placeholder}
+        className="block max-h-40 min-h-9 w-full resize-none rounded-md border bg-background py-2 pr-10 pl-3 text-[13px] leading-5 outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]"
+      />
+      <button
+        aria-label="发出"
+        disabled={!text.trim() || busy}
+        onClick={() => void send()}
+        className="absolute right-1.5 bottom-1.5 flex size-6 items-center justify-center rounded-md bg-foreground text-background transition-opacity disabled:opacity-25"
+      >
+        {busy ? <Loader2 className="size-3.5 animate-spin" /> : <ArrowUp className="size-3.5" />}
+      </button>
+    </div>
   );
 }
 
