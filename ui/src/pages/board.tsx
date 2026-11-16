@@ -14,6 +14,7 @@ import { Trail } from "../components/Trail";
 import { Linger } from "../lib/linger";
 import { SettingsSheet, TABS, type SettingsTab } from "../components/SettingsSheet";
 import { phoneMenu, usePhoneMenu } from "../lib/phoneMenu";
+import { useSearchItems } from "../lib/search";
 import { ago, day, since, type Task, useTasks, waitedSince } from "../lib/tasks";
 import { project, run } from "../lib/gerdr";
 import * as core from "@gerdr/core";
@@ -161,6 +162,17 @@ export default function BoardPage() {
   // A conversation opened from a panel ("回到 tN 的对话", a finished task's chat): the chat alone, over the panel,
   // with its task's 链路 when it has one
   const [peek, setPeek] = useState<{ session: string; task?: string; sub?: string; from?: string } | null>(null);
+  // ⌘K over the board finds any task on it (finished ones too, not only the 20 shown), and opens it like a click
+  useSearchItems(
+    (tasks ?? []).map((t) => ({
+      id: t.id,
+      label: t.title,
+      detail: [waitsOnUser(t) ? "等你" : COLS.find((c) => c.id === boardCol(t))?.title, t.repo].filter(Boolean).join(" · "),
+      keywords: [t.origin?.title, t.prompt?.slice(0, 300)].filter(Boolean).join(" "),
+      onSelect: () => (setPeek(null), setOpen(t.id)),
+    })),
+    { heading: "任务" },
+  );
   // A conversation opened from a task's drawer (a member's avatar in a requirement) is a second layer over that drawer,
   // which stays open underneath: the user goes back and forth between the two often, and closing the chat (its way
   // back, Esc) just slides it off the drawer again instead of swapping one drawer for another
