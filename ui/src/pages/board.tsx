@@ -244,7 +244,9 @@ export default function BoardPage() {
     <div ref={pageRoot} className="flex h-full min-h-0 flex-col [overflow-wrap:anywhere] max-md:h-auto max-md:min-h-full max-md:overflow-x-clip md:relative">
       {/* On a phone the buttons are icons only (their words would push the header wider than the screen and squeeze
           the title into a column of letters); the counts stay */}
-      <header className="flex min-w-0 items-center justify-between gap-3 border-b px-4 py-2.5 max-md:gap-1 max-md:px-3">
+      {/* As tall as Gerdr's own tab bar over a Code pane (h-10, ui/src/components/TabBar.tsx), so switching between
+          the two doesn't make the top edge jump; hence the small buttons */}
+      <header className="flex h-10 min-w-0 shrink-0 items-center justify-between gap-3 border-b px-2 max-md:gap-1">
         {/* Left: the secretary's conversation (a drawer) and where outside messages went; right: settings, a new task.
             Until 2026-11-16 a 秘书 / 任务面板 switch sat here too, a second way into the same conversation */}
         <div className="flex shrink-0 items-center gap-1 max-md:gap-0">
@@ -255,10 +257,10 @@ export default function BoardPage() {
           </Button>
         </div>
         <div className="flex min-w-0 items-center gap-1 max-md:gap-0">
-          <Button variant="ghost" size="icon" className={clsx(phoneMenu && "max-md:hidden")} aria-label="设置" title="设置、流程、触发器、定时任务" onClick={() => setSettings("settings")}>
+          <Button variant="ghost" size="icon" className={clsx("size-8", phoneMenu && "max-md:hidden")} aria-label="设置" title="设置、流程、触发器、定时任务" onClick={() => setSettings("settings")}>
             <Settings className="size-4" />
           </Button>
-          <Button onClick={() => setCreating(true)} aria-label="新任务">
+          <Button size="sm" onClick={() => setCreating(true)} aria-label="新任务">
             <Plus className="size-3.5" />
             <span className="max-md:hidden">新任务</span>
           </Button>
