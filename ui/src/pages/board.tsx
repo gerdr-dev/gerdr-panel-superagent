@@ -173,6 +173,8 @@ export default function BoardPage() {
       label: t.title,
       // Only the status at the row's end: a repo path made every row's end land somewhere else
       detail: waitsOnUser(t) ? "等你" : COLS.find((c) => c.id === boardCol(t))?.title,
+      // The board's colours for the same status: 等你 its amber badge, 进行中 / 待验收 their column icons' colours
+      ...(waitsOnUser(t) ? { tone: "warn" as const, pill: true } : boardCol(t) === "active" ? { tone: "brand" as const } : boardCol(t) === "review" ? { tone: "ok" as const } : {}),
       keywords: [t.repo, t.origin?.title, t.prompt?.slice(0, 300)].filter(Boolean).join(" "),
       onSelect: () => (setPeek(null), setOpen(t.id)),
     })),
