@@ -426,8 +426,24 @@ function userSteps(t: Task, byId: Record<string, Task>): ChatItem[] {
   });
 }
 
-/** The line and buttons on a worker's conversation, by where its task stands. */
+/**
+ * What its worker wrote to a chat, waiting for the user to send or not (local/outbox.ts): a row each, jumping to the
+ * card in the chat. Nothing waits on them, so they don't make the task yellow; they're only listed.
+ */
+function outgoing(t: Task): ChatItem[] {
+  if (t.status === "done" || t.status === "dropped") return [];
+  return (t.outbox ?? []).filter((o) => o.state === "pending").map((o) => ({ text: `待发送 · 回给 ${o.where}：${firstLine(o.text)}`, jump: `${t.id}~${o.id}` }));
+}
+
+/** The line and buttons on a worker's conversation, with the messages it holds for the user listed under it. */
 function chatPanel(t: Task, byId: Record<string, Task>): { label: string; actions: ChatAction[]; items?: ChatItem[] } {
+  const p = chatPanelFor(t, byId);
+  const outs = outgoing(t);
+  return outs.length ? { ...p, items: [...(p.items ?? []), ...outs] } : p;
+}
+
+/** The line and buttons on a worker's conversation, by where its task stands. */
+function chatPanelFor(t: Task, byId: Record<string, Task>): { label: string; actions: ChatAction[]; items?: ChatItem[] } {
   const drop: ChatAction = { id: "drop", label: "放弃", confirm: "确定放弃？" };
   // The user finished it themselves, or it's good enough as it is: done, whatever the worker last reported
   const done: ChatAction = { id: "accept", label: "标为完成", confirm: "确定完成？" };
@@ -521,6 +537,11 @@ function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, T
       {t.question && waitsOnUser(t) && <p className="line-clamp-2 text-[12px] text-warn">{t.question}</p>}
       {steps.map((x) => (
         <p key={x.jump} className="line-clamp-2 border-l-2 border-warn pl-2 text-[12px] text-warn">
+          {x.text}
+        </p>
+      ))}
+      {outgoing(t).map((x) => (
+        <p key={x.jump} className="line-clamp-2 border-l-2 border-warn/50 pl-2 text-[12px] text-muted-foreground">
           {x.text}
         </p>
       ))}

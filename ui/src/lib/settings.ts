@@ -44,6 +44,11 @@ export type Settings = {
   /** What they hear: {id} and {title} are the task's. */
   ackText: string;
   /**
+   * What a worker writes to the people in a chat its task follows (board.ts reply_message): "review" = a card the user
+   * sends or lets go (local/outbox.ts), the worker carrying on without hearing which; "auto" = sent right away.
+   */
+  replies: "review" | "auto";
+  /**
    * The secretary's conversation is compacted (schedules/compact.json, hourly by default, once it has sat idle an
    * hour) when its context holds at least this many tokens. 0 = whenever the schedule runs and something was said
    * since the last compaction: by time (set the schedule to, say, 04:00). DESIGN.md「秘书」「一个会话，靠压缩」.
@@ -67,6 +72,7 @@ export const DEFAULTS: Settings = {
   followUps: "worker",
   ack: "dispatch",
   ackText: ACK_TEXT,
+  replies: "review",
   compactTokens: 80_000,
   archiveDays: 14,
 };
@@ -96,6 +102,7 @@ export function normalize(raw: any): Settings {
     followUps: oneOf(r.followUps, ["worker", "secretary"] as const, d.followUps),
     ack: oneOf(r.ack, ["accept", "dispatch", "never"] as const, d.ack),
     ackText: str(r.ackText, "") || d.ackText,
+    replies: oneOf(r.replies, ["review", "auto"] as const, d.replies),
     compactTokens: Number.isFinite(Number(r.compactTokens)) && Number(r.compactTokens) >= 0 && r.compactTokens !== "" && r.compactTokens != null ? Math.round(Number(r.compactTokens)) : d.compactTokens,
     archiveDays: count(r.archiveDays, d.archiveDays),
   };

@@ -99,6 +99,7 @@ registerCard("task-taken-back", TaskTakenBack);
 type Event = { kind?: string; level?: "card" | "line"; kicker?: string; title?: string; body?: string; links?: { label?: string; url: string }[] };
 
 const EVENT_ICON: Record<string, typeof Activity> = {
+  reply: Send,
   progress: Activity,
   working: FileText,
   review: Eye,
@@ -259,3 +260,87 @@ function TaskWait({ card }: CardProps) {
 }
 
 registerCard("task-wait", TaskWait);
+
+type Out = { state: "pending" | "sent" | "skipped" | "missing"; text?: string; where?: string; doneAt?: number; edited?: boolean };
+
+/**
+ * Words a worker wrote to the people in a chat its task follows, held for the user (local/outbox.ts, 设置 → 回话
+ * "review"): 发送 / 不发, the words editable first. Nothing waits on it and the worker isn't told which; once chosen,
+ * one line says how it ended. Asked again every 30s while on screen, since the board's card can answer it too.
+ */
+function TaskOutgoing({ card }: CardProps) {
+  const c = card as { ref?: string; project?: string; task?: string; where?: string; text?: string };
+  const [st, setSt] = useState<Out>();
+  const [draft, setDraft] = useState<string | null>(null);
+  const [busy, setBusy] = useState("");
+  const [err, setErr] = useState("");
+  const get = () => (c.ref && c.project ? run<Out>("outbox.status", { ref: c.ref }, { project: c.project }).then(setSt, () => {}) : Promise.resolve());
+  useEffect(() => {
+    void get();
+    const timer = setInterval(get, 30000);
+    return () => clearInterval(timer);
+  }, [c.ref, c.project]);
+  const text = st?.text ?? c.text ?? "";
+  const where = st?.where ?? c.where ?? "";
+  const act = async (fn: "send" | "skip") => {
+    setBusy(fn);
+    setErr("");
+    try {
+      await run(`outbox.${fn}`, fn === "send" && draft != null ? { ref: c.ref, text: draft } : { ref: c.ref }, { project: c.project });
+      setDraft(null);
+      await get();
+    } catch (e) {
+      setErr(String((e as Error)?.message ?? e));
+    } finally {
+      setBusy("");
+    }
+  };
+  if (st && st.state !== "pending") {
+    const sent = st.state === "sent";
+    return (
+      <div className={`my-1.5 rounded-lg border border-l-2 bg-card px-3 py-2 text-[12px] text-muted-foreground ${sent ? "border-l-ok" : "border-l-muted-foreground/40"}`}>
+        <div className="flex items-center gap-2">
+          {sent ? <Send className="size-3.5 shrink-0 text-ok" /> : <Undo2 className="size-3.5 shrink-0" />}
+          <span className="min-w-0 flex-1 truncate">{st.state === "missing" ? "这条待发送的消息不在了" : `${sent ? (st.edited ? "改过后发给了" : "发给了") : "没发给"} ${where}`}</span>
+          {st.doneAt && <span className="shrink-0">{new Date(st.doneAt).toTimeString().slice(0, 5)}</span>}
+        </div>
+        {st.state !== "missing" && <p className={`mt-1 line-clamp-3 whitespace-pre-wrap ${sent ? "" : "line-through"}`}>{text}</p>}
+      </div>
+    );
+  }
+  return (
+    <div className="my-1.5 space-y-1.5 rounded-lg border border-l-2 border-l-warn bg-card px-3 py-2">
+      <div className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+        <MessageSquare className="size-3.5 shrink-0 text-warn" />
+        <span className="min-w-0 truncate">待发送 · 回给 {where}{c.task ? ` · ${c.task}` : ""} · 不急，worker 不等它</span>
+      </div>
+      {draft == null ? (
+        <p className="whitespace-pre-wrap text-[13px]">{text}</p>
+      ) : (
+        <textarea className="min-h-24 w-full resize-y rounded-md border bg-background px-2 py-1.5 text-[13px] outline-none focus:ring-1 focus:ring-brand" value={draft} onChange={(e) => setDraft(e.target.value)} autoFocus />
+      )}
+      <div className="flex flex-wrap items-center gap-2 text-[12px]">
+        <button className="inline-flex items-center gap-1 rounded-md bg-brand px-2.5 py-1 font-medium text-background disabled:opacity-50" disabled={!!busy || (draft != null && !draft.trim())} onClick={() => act("send")}>
+          <Send className="size-3" />
+          {busy === "send" ? "发送中…" : draft != null ? "发送改好的" : "发送"}
+        </button>
+        <button className="rounded-md border px-2.5 py-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50" disabled={!!busy} onClick={() => act("skip")}>
+          不发
+        </button>
+        {draft == null ? (
+          <button className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-muted-foreground hover:bg-accent hover:text-foreground" disabled={!!busy} onClick={() => setDraft(text)}>
+            <Pencil className="size-3" />
+            改一下
+          </button>
+        ) : (
+          <button className="rounded-md px-1.5 py-1 text-muted-foreground hover:bg-accent hover:text-foreground" disabled={!!busy} onClick={() => setDraft(null)}>
+            不改了
+          </button>
+        )}
+        {err && <span className="text-bad">{err}</span>}
+      </div>
+    </div>
+  );
+}
+
+registerCard("task-outgoing", TaskOutgoing);

@@ -9,7 +9,7 @@
  *   back, a memory kept).
  * Things waiting on the user or on something outside have their own cards (task-step, task-wait).
  */
-export type EventKind = "progress" | "working" | "review" | "done" | "join" | "tell" | "handBack" | "remember" | "message";
+export type EventKind = "progress" | "working" | "review" | "done" | "join" | "tell" | "handBack" | "remember" | "message" | "reply";
 
 const KICKER: Record<EventKind, string> = {
   progress: "更新进度",
@@ -21,6 +21,7 @@ const KICKER: Record<EventKind, string> = {
   handBack: "交回 Superagent",
   remember: "记住了",
   message: "发给你",
+  reply: "发出去了",
 };
 
 const LOUD: Record<EventKind, "card" | "line"> = {
@@ -33,6 +34,7 @@ const LOUD: Record<EventKind, "card" | "line"> = {
   handBack: "line",
   remember: "line",
   message: "card",
+  reply: "line",
 };
 
 export function eventCard(ctx: Ctx, task: string | undefined, kind: EventKind, title: string, more?: { body?: string; links?: { label?: string; url: string }[] }) {

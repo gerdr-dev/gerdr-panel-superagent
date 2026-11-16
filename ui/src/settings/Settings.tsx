@@ -149,6 +149,12 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
                 <input className={input} value={s.ackText} placeholder={ACK_TEXT} onChange={(e) => put("ackText", e.target.value)} />
               </Field>
             )}
+            <Field
+              label="worker 回话"
+              hint={{ review: "worker 要回那段对话里的人时，先变成一张「待发送」卡片：你点发送才发出去，点不发就算了。worker 不等你、也不会知道你选了哪个", auto: "worker 写好就直接发出去" }[s.replies]}
+            >
+              <Choice value={s.replies} options={[["review", "先给我过目"], ["auto", "直接发"]]} onChange={(v) => put("replies", v)} />
+            </Field>
           </Section>
 
           <Section

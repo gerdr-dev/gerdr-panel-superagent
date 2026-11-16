@@ -17,6 +17,8 @@ export type Task = {
   owner: "agent" | "human";
   /** Work someone asked of the user (local/assign.ts): agree to it, reply to them, deliver. */
   assigned?: { state: "ask" | "agreed" | "delivered" | "done"; by?: string; how?: "agent" | "self"; agent?: string; repos?: string[]; share?: "" | "view" | "talk"; draft?: string; shareDir?: string; unattended?: boolean };
+  /** What its worker wrote to a chat, held for the user to send or not (local/outbox.ts). */
+  outbox?: { id: string; text: string; where: string; at: number; state: "pending" | "sent" | "skipped"; doneAt?: number; edited?: boolean }[];
   origin?: { source: string; key?: string; title?: string; url?: string };
   status: "todo" | "running" | "review" | "done" | "dropped";
   /** Images and files the user gave with it (local paths on Gerdr's machine). */

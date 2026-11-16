@@ -5,7 +5,9 @@
 
 import { applyBlock } from "./_apply";
 import { activity, find, load, note, reqOf, splitRef, update, type Store, type Task } from "./_store";
-import { handBack, isMain } from "./_main";
+import { handBack, isMain, state as mainState, threadsOf } from "./_main";
+import { workflow } from "./_config";
+import { hold } from "./_outbox";
 import { waitCard } from "./waits";
 import { eventCard } from "./_cards";
 import { endWaits, isOutside, open, question } from "./_waits";
@@ -67,6 +69,18 @@ export const tools = {
       "Give back a message that reached your task from its conversation (a Slack thread, a DM) but isn't for it: it asks for something beyond your task, or is about another one. The Superagent then decides what it is (a new task, another task's, nothing). Your task also stops following that conversation: what is said there next goes to the Superagent first, and comes back to you only if it gives you something again. Don't answer it yourself. event: the message id given with it.",
     input: { type: "object", properties: { event: { type: "string" }, reason: { type: "string", description: "Why it isn't this task's, in a sentence" } }, required: ["event", "reason"] },
   },
+  reply_message: {
+    description:
+      "Say something to the people in a chat your task follows (a Slack DM or thread it came from): an answer to them, a question, the result. This is the only way to write to them: never send it with slackctl, an API or any other tool. event: the message id you answer (given with each message passed to you); left out, the message the task came from. The user's settings decide whether it goes at once or waits as a card for them to send or not; either way you get no word back on it: don't wait for it, don't ask about it, carry on. Not for a task someone asked of the user through another panel (my_task shows requestedBy): that's reply_requester.",
+    input: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: "What they read, as you'd write it in that chat (they don't see your conversation)" },
+        event: { type: "string", description: "The message you answer; default: the one the task came from" },
+      },
+      required: ["text"],
+    },
+  },
   reply_requester: {
     description:
       "Only for a task someone asked of the user (my_task shows requestedBy): answer whoever asked, through where the task came from (the team panel). deliver false: said to them now (a question for them, how it's going). deliver true: your delivery note — what was done, the result, how to check it — which is NOT sent: it fills the user's 回复并交付 box on their task panel, and they send it after looking at your work (only a person delivers). Write it once your work is done, then end your turn as usual. What you made that they should see (a screenshot, the HTML, a report) goes in the shared folder my_task names (shareDir): only what is there reaches them, at the same path on their computer, so write that path in your note. Never ask the user which channel to report on: this is it.",
@@ -122,6 +136,10 @@ export function instructions(input: unknown, ctx: Ctx) {
     `What the user's memory says about this repository and all of them came in your first message; the files are ` +
     `${ctx.fs.root}/${MEMORY}/${t.repo ? nameOf(t.repo) : "…"}.md and ${GENERAL}.md there — add to them with remember ` +
     `(when: ${skillFile(ctx, "my-workflow/references/memory.md")}).` +
+    (t.origin?.reply && !t.assigned
+      ? ` It came from a chat (${t.origin.source}): to write to the people there, use reply_message, never slackctl or another ` +
+        `tool. ${workflow(ctx).replies === "review" ? "The user looks at each one and sends it or not; you are not told which, so carry on without waiting." : ""}`
+      : "") +
     (t.assigned
       ? ` ${t.assigned.by ?? "Someone"} asked the user for this task (through ${t.origin?.source ?? "another panel"}): they ` +
         `don't see this chat. Once the work is done, write the delivery note for them with reply_requester (deliver ` +
@@ -465,4 +483,50 @@ export async function reply_requester(input: { text: string; deliver?: boolean }
   }
   await replyOrigin({ id: t.id, text, byAgent: t.agent || "agent" }, ctx);
   return `已发给 ${t.assigned.by ?? "对方"}。`;
+}
+
+/**
+ * The worker writes to the people in a chat its task follows (outbox.ts): sent now (设置 → 回话 "auto"), or held as a
+ * card for the user to send or not ("review"). The worker isn't told what became of it either way.
+ */
+export async function reply_message(input: { text: string; event?: string }, ctx: Ctx) {
+  const t = mine(load(ctx).store, ctx);
+  if (t.assigned) throw new Error(`${t.id} 是别人通过另一个面板请用户做的任务：回发起人用 reply_requester`);
+  const text = input?.text?.trim();
+  if (!text) throw new Error("text 不能为空");
+  const to = replyTarget(ctx, t, input.event?.trim());
+  const where = [to.source, to.who || to.title].filter(Boolean).join(" · ");
+  const ev = (ctx as any).events;
+  if (!ev?.reply) throw new Error("这个 Gerdr 还没有事件功能：升级 Gerdr 后再用");
+  const msg = { id: to.id, source: to.source, kind: to.kind, key: to.key, actor: to.actor, title: to.title, url: to.url, reply: to.reply };
+  if (workflow(ctx).replies === "auto") {
+    ev.reply(msg, text);
+    update(ctx, (s) => {
+      const x = find(s, t.id);
+      note(x, `发给了 ${where}：${text}`);
+      x.updatedAt = Date.now();
+    });
+    return { note: `已发给 ${where}。`, gerdrCard: eventCard(ctx, t.id, "reply", `${where}：${text}`) };
+  }
+  const o = hold(ctx, t.id, text, msg, where);
+  return {
+    note: "交给用户过目了：他决定发不发，你不会收到结果。不用等、不用问，接着做你的事；这段话也不用在回复里再写一遍。",
+    gerdrCard: { type: "task-outgoing", ref: `${t.id}~${o.id}`, project: ctx.workspace.project, task: t.id, where, text },
+  };
+}
+
+/** The message a reply answers: the one named (from a conversation the task follows), else the one it came from. */
+function replyTarget(ctx: Ctx, t: Task, id?: string) {
+  const items = mainState(ctx).items;
+  const known = (eid: string) => items.filter((x) => x.event.id === eid).pop()?.event;
+  if (id) {
+    const e = known(id);
+    if (!e) throw new Error(`没有消息 ${id}（看给你的消息里写的消息 id）`);
+    if (!e.reply) throw new Error(`消息 ${id} 没有可以回的地方`);
+    if (e.key && !threadsOf(t).some((x) => x.source === e.source && x.key === e.key) && e.id !== t.origin?.id)
+      throw new Error(`消息 ${id} 不在你这个任务跟着的对话里`);
+    return e;
+  }
+  if (!t.origin?.reply) throw new Error(`${t.id} 不是从一段对话来的，没有可以回的人：结论写在回复里就行`);
+  return known(t.origin.id) ?? { ...t.origin, who: undefined as string | undefined, actor: undefined as string | undefined };
 }

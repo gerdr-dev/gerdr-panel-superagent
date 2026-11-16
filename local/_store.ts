@@ -29,6 +29,23 @@ export type Question = { id: string; title: string; kind: "choice" | "value"; op
  */
 export type Activity = { at: number; by?: string; kind: "progress" | "tell" | "join" | "done" | "review" | "user" | "stuck" | "wait" | "got" | "message"; text: string; to?: string; files?: { path: string; name?: string }[]; /** The step / question item (human task) whose answer this line records: drawn by that item's record instead (DESIGN.md「一个架构」) */ of?: string };
 
+/** One message a worker wrote for a chat, waiting for the user (local/outbox.ts). */
+export type Outgoing = {
+  /** "o1", "o2"…: unique within the task; the chat card's ref is "<task>~<id>". */
+  id: string;
+  text: string;
+  /** The message it answers (its reply address goes to that conversation / thread), as the event had it. */
+  to: { id: string; source: string; kind: string; key?: string; actor?: string; title?: string; url?: string; reply?: { kind: string; data?: unknown } };
+  /** Where it goes, in a few words, for the card: "slack-me · 千一". */
+  where: string;
+  at: number;
+  state: "pending" | "sent" | "skipped";
+  /** When the user sent it or let it go. */
+  doneAt?: number;
+  /** The user changed the words before sending. */
+  edited?: boolean;
+};
+
 export type Task = {
   id: string;
   title: string;
@@ -105,6 +122,11 @@ export type Task = {
    * Only these are agreed to, replied to and delivered from the task panel.
    */
   assigned?: { state: "ask" | "agreed" | "delivered" | "done"; by?: string; how?: "agent" | "self"; agent?: string; repos?: string[]; share?: "" | "view" | "talk"; draft?: string; shareDir?: string; unattended?: boolean };
+  /**
+   * What its worker wrote to the people in a conversation it follows (board.ts reply_message) while 设置 → 回话 is
+   * "review": each waits as a card for the user to send or not (local/outbox.ts). The worker never hears which.
+   */
+  outbox?: Outgoing[];
   /**
    * A member of requirement `team` (the task whose card the user sees; its own worker is the lead, 负责人): it works
    * in its own repository next to the others and talks to them straight (board.ts tell), not through the router.
