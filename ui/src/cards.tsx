@@ -323,7 +323,7 @@ function TaskOutgoing({ card }: CardProps) {
     <div className="my-1.5 space-y-1.5 rounded-lg border border-l-2 border-l-warn bg-card px-3 py-2">
       <div className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
         <MessageSquare className="size-3.5 shrink-0 text-warn" />
-        <span className="min-w-0 truncate">待发送 · 回给 {where}{c.task ? ` · ${c.task}` : ""} · 可以直接改，worker 不等它</span>
+        <span className="min-w-0 truncate">待发送 · 回给 {where}{c.task ? ` · ${c.task}` : ""}</span>
       </div>
       <textarea
         ref={box}
