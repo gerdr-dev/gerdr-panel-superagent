@@ -3,6 +3,7 @@
 // the session behind it is _main.ts.
 
 import { archived, list } from "./tasks";
+import { midLines } from "./memory";
 import { askText, compactMain, ensureMain, state, toMain, updateState } from "./_main";
 
 const cut = (s: string, n: number) => {
@@ -100,40 +101,21 @@ export async function status(input: { since?: number }, ctx: Ctx) {
 }
 
 /**
- * What open tasks wait on outside the board (a colleague's reply, an approval, a publish, a pipeline), in the worker's
- * own words, with what wakes it. For the secretary to look up when a message reaches it that might be one of these
- * (the user asked a colleague in their own DM when a fix goes to prod for a task; the answer came to the secretary,
- * which saw no task in that conversation and let it go, 2026-11-16). No matching in code: the secretary reads and judges.
+ * The mid-term memory tidy-up (schedules/tidy.json): lines whose task ended or whose date passed go to the secretary
+ * to delete, update or turn into long-term memory (references/mid-memory.md says how). Nothing stale: the secretary
+ * isn't woken (no cost). { dry?: true — only list them }
  */
-export async function waiting(_input: unknown, ctx: Ctx) {
-  const { tasks } = await list({}, ctx);
-  const outside = (w: any) => !w.end && !w.user && ["reply", "check", "time", "teammate"].includes(w.kind);
-  const lines: string[] = [];
-  for (const t of tasks as any[]) {
-    if (t.status === "done" || t.status === "dropped") continue;
-    const ws = (t.waits ?? []).filter(outside);
-    if (!ws.length) continue;
-    // One wait_for gives several waits sharing `what` (one per thing that wakes it): said once
-    const whats = [...new Set(ws.map((w: any) => w.what))];
-    const wake = ws
-      .map((w: any) =>
-        w.kind === "reply"
-          ? `${w.where || `${w.on?.source} ${w.on?.key}`} 上有新消息`
-          : w.kind === "check"
-            ? `检查命令${w.check?.last ? `（上次：${cut(w.check.last.out || `exit ${w.check.last.code}`, 60)}）` : ""}`
-            : w.kind === "teammate"
-              ? `${w.where ?? w.item} 回话`
-              : null,
-      )
-      .filter(Boolean);
-    const since = Math.min(...ws.map((w: any) => w.since));
-    lines.push(
-      `- ${t.id}「${t.title}」${when(since)}起在等：${whats.join("；")}` +
-        (wake.length ? `\n    叫醒它的：${wake.join("、")}` : "") +
-        (t.summary ? `\n    它最后说：${cut(t.summary, 160)}` : ""),
-    );
-  }
-  return lines.length ? `在等外面的任务（${lines.length}）：\n${lines.join("\n")}` : "没有在等外面的任务";
+export async function tidy(input: { dry?: boolean } | null, ctx: Ctx) {
+  const stale = midLines(ctx, true);
+  if (input?.dry || !stale.length) return stale.length ? stale : "中期记忆里没有该整理的，没叫秘书";
+  await toMain(
+    ctx,
+    [`[整理] 中期记忆里这些条看起来了结了或过期了，照 mid-memory.md 整理：删掉、改成最新的，或者它其实是长期的规矩，就照 memory.md 先问用户再记进长期记忆。只回一句做了什么。\n${stale.join("\n")}`],
+    "notice",
+    undefined,
+    `[整理] 中期记忆有 ${stale.length} 条要看`,
+  );
+  return `${stale.length} 条交给秘书整理`;
 }
 
 /**

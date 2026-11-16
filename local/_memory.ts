@@ -12,6 +12,13 @@ import { USER } from "./_user";
 export const MEMORY = `${USER}/memory`;
 /** The file for what holds for every repository. Starts with _ so no repository folder can take its name. */
 export const GENERAL = "_general";
+/**
+ * Mid-term memory: what is going on right now and who it involves (someone the user asked on a task's behalf, who a
+ * task waits on, what a colleague is working on with the user), written by any agent on its own judgement, tied to a
+ * task when there is one, deleted once it's settled. Not pushed into any message: agents look it up (memory.mid) when
+ * they need to connect a message or a person to work. DESIGN.md「中期记忆」.
+ */
+export const MID = "_mid";
 
 /** A memory file's name for a repository: its folder's name ("~/src/billing-service/" → "billing-service"). */
 export function nameOf(repo: string) {

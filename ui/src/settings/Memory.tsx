@@ -1,4 +1,4 @@
-import { Brain, FolderGit2 } from "lucide-react";
+import { Brain, FolderGit2, Radar } from "lucide-react";
 import clsx from "clsx";
 import { useEffect, useState } from "react";
 import { run } from "../lib/gerdr";
@@ -7,7 +7,8 @@ import { SaveBar } from "../components/SaveBar";
 // 记忆: what the agents learned from the user about each repository (MR or straight push, who merges, who approves a
 // release), one file per repository plus one for all of them (local/memory.ts, user/memory/). The agents add lines
 // with their remember tool; here the user reads them, fixes a wrong one, or writes their own. Plain text, as the
-// agents get it: one line per fact.
+// agents get it: one line per fact. 中期 (_mid) is the mid-term memory: what is going on now and who it involves, written
+// by agents on their own (note tool), looked up rather than handed out, deleted once settled.
 
 type Entry = { name: string; label: string; repo?: string; note?: string; text: string; etag?: string };
 
@@ -90,7 +91,8 @@ export default function MemoryPage() {
         <h1 className="text-[22px] font-semibold tracking-tight">记忆</h1>
         <p className="mt-1 text-[13px] text-muted-foreground">
           每个仓库的具体情况：走不走 MR、谁来合、发布找谁批。worker 做事时从你的话里学到、你确认过的，会一条条记在这里，以后派到这个仓库的 worker 一开始就带着。
-          「通用」是对所有仓库都成立的，秘书派活时也看。错了直接改，一行一条；只存在你这里，不随面板分享。
+          「通用」是对所有仓库都成立的，秘书派活时也看。「中期」是眼下的事和人（谁在等什么、谁在跟你对接什么），agent 自己记、了结了就删，秘书靠它把消息对上任务。
+          错了直接改，一行一条；只存在你这里，不随面板分享。
         </p>
       </header>
       {err && (
@@ -105,10 +107,10 @@ export default function MemoryPage() {
             <button
               key={f.name}
               onClick={() => open(f.name)}
-              title={f.repo ?? "对所有仓库都成立的"}
+              title={f.repo ?? (f.name === "_mid" ? "眼下的事和人" : "对所有仓库都成立的")}
               className={clsx("flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] hover:bg-accent", f.name === name && "bg-accent font-medium")}
             >
-              {f.repo || f.name !== "_general" ? <FolderGit2 className="size-3.5 shrink-0 text-muted-foreground" /> : <Brain className="size-3.5 shrink-0 text-muted-foreground" />}
+              {f.name === "_mid" ? <Radar className="size-3.5 shrink-0 text-muted-foreground" /> : f.repo || f.name !== "_general" ? <FolderGit2 className="size-3.5 shrink-0 text-muted-foreground" /> : <Brain className="size-3.5 shrink-0 text-muted-foreground" />}
               <span className={clsx("min-w-0 flex-1 truncate", !count(f.text) && "text-muted-foreground")}>{f.label}</span>
               {count(f.text) > 0 && <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{count(f.text)}</span>}
             </button>
@@ -123,6 +125,8 @@ export default function MemoryPage() {
                   <span className="break-all font-mono">{cur.repo}</span>
                   {cur.note && <> · {cur.note}</>}
                 </>
+              ) : cur.name === "_mid" ? (
+                "眼下的事和人：agent 自己记、自己改，事情了结就删；括号里是哪天、哪个任务、到哪天、谁记的。每天早上会把任务已结束、已过期的交给秘书整理。"
               ) : cur.name === "_general" ? (
                 "对所有仓库都成立的；没单独写的仓库照这里做。"
               ) : (

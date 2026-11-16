@@ -1000,6 +1000,35 @@ export function archived(input: { q?: string; limit?: number } | null, ctx: Ctx)
   return { groups: groups.slice(0, input?.limit ?? 200).map((g) => ({ ...g, doneAt: latest(g) })), total: groups.length };
 }
 
+/**
+ * Finds tasks by words, on the board and in the archive: { q: words separated by spaces — a task matches when any is in
+ * its title, request, latest summary, origin (who sent it, where) or notes; limit?: 20 }. One line each, newest first,
+ * for an agent connecting a message or a person to work (the secretary before letting a message go). Then tasks.list
+ * {id} for the one it wants.
+ */
+export function search(input: { q: string; limit?: number }, ctx: Ctx) {
+  const words = (input?.q ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) throw new Error('q 写要找的词，空格分开：{"q":"模型 客服"}');
+  const hit = (...xs: (string | undefined)[]) => {
+    const all = xs.filter(Boolean).join("\n").toLowerCase();
+    return words.filter((w) => all.includes(w)).length;
+  };
+  const cut = (x: string, n: number) => cutLine(x.replace(/\s+/g, " "), n);
+  const rows: { at: number; n: number; line: string }[] = [];
+  for (const t of load(ctx).store.tasks) {
+    const n = hit(t.id, t.title, t.prompt, t.summary, t.repo, t.origin?.title, ...(t.notes ?? []).map((x) => x.text));
+    if (n) rows.push({ at: t.updatedAt ?? t.createdAt, n, line: `- ${t.id}「${t.title}」(${t.status})${t.origin?.title ? ` 来自 ${cut(t.origin.title, 40)}` : ""}${t.summary ? `：${cut(t.summary, 120)}` : ""}` });
+  }
+  for (const g of archived({ limit: 1000 }, ctx).groups)
+    for (const t of g.tasks as any[]) {
+      const n = hit(t.id, t.title, t.summary, t.repo);
+      if (n) rows.push({ at: t.doneAt ?? 0, n, line: `- ${t.id}「${t.title}」(已归档)${t.summary ? `：${cut(t.summary, 120)}` : ""}` });
+    }
+  rows.sort((a, b) => b.n - a.n || b.at - a.at);
+  const lim = input?.limit ?? 20;
+  return rows.length ? rows.slice(0, lim).map((r) => r.line).join("\n") + (rows.length > lim ? `\n（还有 ${rows.length - lim} 个，换更具体的词）` : "") : `没有任务带「${words.join("」「")}」`;
+}
+
 /** Puts an archived requirement (the one holding task `id`) back on the board, under 已完成. */
 export function unarchive(input: { id: string }, ctx: Ctx) {
   if (!bringBack(ctx, input.id)) throw new Error(`${input.id} 不在归档里`);
