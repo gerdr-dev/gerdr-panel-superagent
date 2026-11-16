@@ -29,7 +29,11 @@ export function waitingLines(tasks: Listed[]): Line[] {
       const blocked = tasks.find((x) => x.blockedBy?.includes(t.id) && x.session && x.status !== "done" && x.status !== "dropped");
       const left = (t.questions ?? []).filter((q) => !q.dropped && !q.answer);
       const what = t.questions ? `待你答 ${left.length} 个问题` : t.handBack?.kind === "choice" ? "待你决定" : "要你做";
-      items.push({ id: t.id, title: `${t.id} ${what}：${cut(t.title, 80)}`, body: left.length ? left.map((q) => `· ${q.title}`).join("\n") : t.steps, session: blocked?.session });
+      // Named by the task it holds up (t113), the card the user knows: the step's own id (t149) is shown nowhere on the
+      // board (2026-11-16). One question: the body is that task's title, not the question a second time
+      const head = blocked ? `${blocked.id} ` : "";
+      const body = left.length > 1 ? left.map((q) => `· ${q.title}`).join("\n") : blocked ? blocked.title : left.length ? undefined : t.steps;
+      items.push({ id: t.id, title: `${head}${what}：${cut(t.title, 80)}`, body, session: blocked?.session });
       continue;
     }
     if (t.live?.status === "waiting" || t.live?.status === "error") continue;
