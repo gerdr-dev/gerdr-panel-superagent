@@ -133,6 +133,8 @@ export function instructions(input: unknown, ctx: Ctx) {
     `nothing to report: when your turn ends and you wait on nothing, the task goes before the user with what you said. ` +
     `Waiting on someone or something: wait_for; something only the user can decide or do: ask_human. How to work on it ` +
     `is their my-workflow skill, ${skillFile(ctx, "my-workflow/references/task.md")}: read it before you stop. my_task shows the task as the panel sees it. ` +
+    `Your questions and steps for the user have ids (t5, t5#1) for your tools only: the panel doesn't show them, so to ` +
+    `the user name the question itself ("套餐商品配置那个问题"), never "卡片 t5" or "t5#1". ` +
     `What the user's memory says about this repository and all of them came in your first message; the files are ` +
     `${ctx.fs.root}/${MEMORY}/${t.repo ? nameOf(t.repo) : "…"}.md and ${GENERAL}.md there — add to them with remember ` +
     `(when: ${skillFile(ctx, "my-workflow/references/memory.md")}).` +
@@ -365,6 +367,9 @@ export function staleAsks(s: Store, t: Task) {
   );
 }
 
+/** Told with each question: its id is for the tools, the board doesn't show it. */
+const noIds = "编号只给工具用，任务面板上不显示：跟用户提起时说问题本身，别写 tN / tN#1。";
+
 export function my_task(input: unknown, ctx: Ctx) {
   const { store } = load(ctx);
   const t = mine(store, ctx);
@@ -378,6 +383,9 @@ export function my_task(input: unknown, ctx: Ctx) {
     question: question(t),
     waits: open(t).map((w) => ({ kind: w.kind, what: w.what, since: w.since })),
     artifacts: t.links ?? [],
+    // The ids are for the tools: the board shows questions without them (2026-11-16), and a worker that wrote
+    // "都在卡片 t124 上，t124#1" made the user decode them
+    ...(humans.length ? { note: "humanSteps 的 id 只给工具用，任务面板上不显示：跟用户说时用问题本身，别写 t5 / t5#1。" } : {}),
     humanSteps: humans.map((h) => ({ id: h.id, title: h.title, status: h.status, handedBack: h.handBack?.kind === "secret" ? (h.status === "done" ? `secret ${h.handBack.name} saved` : undefined) : h.handedBack })),
   };
 }
@@ -442,7 +450,7 @@ function questionCard(h: Task, ctx: Ctx) {
   const choice = q.kind === "choice";
   return {
     id: ref,
-    note: qs.length > 1 ? `和你前面问的 ${qs.length - 1} 个放在同一个任务面板事项 ${h.id} 里；用户都答完，你会一次收到全部答案` : `已放到用户任务面板的「等你」里（${h.id}）；再问的会并进同一项，都答完你一次收到全部答案`,
+    note: qs.length > 1 ? `和你前面问的 ${qs.length - 1} 个放在同一个任务面板事项 ${h.id} 里；用户都答完，你会一次收到全部答案。${noIds}` : `已放到用户任务面板的「等你」里（${h.id}）；再问的会并进同一项，都答完你一次收到全部答案。${noIds}`,
     gerdrCard: {
       type: "task-step",
       ref,
