@@ -595,6 +595,7 @@ function taskBlock(t: Task, agents: { id: string; name: string }[]) {
   return [
     `[任务 ${t.id}] ${t.title}`,
     t.prompt,
+    t.remark?.trim() ? `用户的备注（派出时自动附给 worker）：${t.remark.trim()}` : "",
     t.attachments?.length ? `附件（派出时自动带给 worker）：\n${t.attachments.map((a) => `- ${a.name}：${a.path}`).join("\n")}` : "",
     pin,
   ]

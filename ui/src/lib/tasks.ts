@@ -20,6 +20,8 @@ export type Task = {
   /** 设置 → 回复对方 is 派出去时 and it's still in 待办: the card's 回复对方 box, and what it starts with (local/tasks.ts list). */
   canReply?: boolean;
   replyDraft?: string;
+  /** The user's 备注 on a card from outside, sent to the worker after the message (local/_store.ts). */
+  remark?: string;
   /** What its worker wrote to a chat, held for the user to send or not (local/outbox.ts). */
   outbox?: { id: string; text: string; where: string; at: number; state: "pending" | "sent" | "skipped"; doneAt?: number; edited?: boolean }[];
   origin?: { source: string; key?: string; title?: string; url?: string };

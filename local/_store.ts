@@ -169,6 +169,11 @@ export type Task = {
    * is sent, not even the 回复对方 words). Kept on the task because 派出去 may first go to the secretary for a repository.
    */
   replyOnStart?: string;
+  /**
+   * The user's own words on a card that came from outside (备注): its prompt is someone else's message, theirs to keep
+   * as it was, so what the user adds goes here and rides with it to the worker (and the secretary when it routes).
+   */
+  remark?: string;
   /** @deprecated a question for the user: now a user wait (_waits.ts askUser). */
   question?: string;
   /** The latest result in a line or a paragraph, and where to look (MR, doc). */

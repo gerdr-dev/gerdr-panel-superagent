@@ -865,8 +865,15 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
   const [draft, setDraft] = useState(t.prompt ?? t.title);
   // What its message's sender hears when it's sent out (设置 → 回复对方: 派出去时): the 回复对方 words, to change or empty
   const [reply, setReply] = useState(t.replyDraft ?? "");
-  const dirty = editable && draft.trim() !== (t.prompt ?? t.title).trim();
+  // A card from outside (a message someone sent): its text is their words, kept as they came; the user's own go in
+  // 我的备注 (remark), sent to the worker after them (2026-11-16, the user: "这不是我写的，这是作为来源方")
+  const quoted = !!t.origin && !t.assigned;
+  const [remark, setRemark] = useState(t.remark ?? "");
+  const [open, setOpen] = useState(false);
+  const dirty = editable && !quoted && draft.trim() !== (t.prompt ?? t.title).trim();
+  const remarkDirty = editable && quoted && remark.trim() !== (t.remark ?? "").trim();
   const save = async () => {
+    if (remarkDirty) return !!(await go("edit", "edit", { id: t.id, remark: remark.trim() }));
     const prompt = draft.trim();
     if (!dirty || !prompt) return true;
     return !!(await go("edit", "edit", { id: t.id, title: firstLine(prompt) || t.title, prompt }));
@@ -894,7 +901,31 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
       {l?.status === "waiting" && l.waiting && <p className="rounded-md bg-warn/10 px-3 py-2 text-[12px] text-warn">在等：{l.waiting}（去会话里处理）</p>}
       {t.summary && <Md>{t.summary}</Md>}
       <Links t={t} />
-      {editable ? (
+      {editable && quoted ? (
+        <>
+          <div className="rounded-md border-l-2 border-muted-foreground/30 bg-muted/40 px-3 py-2">
+            <p className={clsx("text-[13px] leading-relaxed whitespace-pre-wrap text-muted-foreground", !open && "line-clamp-[8]")}>{t.prompt ?? t.title}</p>
+            {((t.prompt ?? "").split("\n").length > 8 || (t.prompt ?? "").length > 400) && (
+              <button className="mt-1 text-[12px] text-brand hover:underline" onClick={() => setOpen(!open)}>
+                {open ? "收起" : "展开全部"}
+              </button>
+            )}
+          </div>
+          <label className="block space-y-1.5">
+            <span className="block text-[12px] text-muted-foreground">
+              我的备注<span className="opacity-70"> · 派出去时附在上面这段后面交给 worker</span>
+            </span>
+            <textarea
+              rows={3}
+              value={remark}
+              onChange={(e) => setRemark(e.target.value)}
+              onBlur={() => void save()}
+              placeholder="你的判断、重点、约束（比如：先只出方案，别改代码）"
+              className={box}
+            />
+          </label>
+        </>
+      ) : editable ? (
         <textarea
           rows={10}
           value={draft}
@@ -908,6 +939,7 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
           <details className="text-[12px] text-muted-foreground" open={!t.summary}>
             <summary className="cursor-pointer">派活时的说明</summary>
             <p className="mt-1 whitespace-pre-wrap">{t.prompt}</p>
+            {t.remark && <p className="mt-2 whitespace-pre-wrap">我的备注：{t.remark}</p>}
           </details>
         )
       )}
@@ -964,7 +996,7 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
           // secretary about the card before it is (2026-11-16: a button opening a box mid-drawer felt odd)
           <div className="flex items-end gap-2">
             <Composer busy={busy === "reroute"} placeholder="哪里不对？跟秘书说，它来重排" onSend={(feedback) => go("reroute", "reroute", { id: t.id, feedback })} before={save} />
-            <Button className="h-9 shrink-0" disabled={!!busy || !draft.trim()} onClick={async () => (await save()) && go("start", "start", { id: t.id, ...(t.canReply ? { reply } : {}) })}>
+            <Button className="h-9 shrink-0" disabled={!!busy || (!quoted && !draft.trim())} onClick={async () => (await save()) && go("start", "start", { id: t.id, ...(t.canReply ? { reply } : {}) })}>
               {busy === "start" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}派出去
             </Button>
           </div>

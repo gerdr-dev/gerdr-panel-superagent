@@ -538,6 +538,11 @@ export function edit(input: Partial<Task> & { id: string }, ctx: Ctx) {
  * reply protocol, reporting to the panel's agent. { id, prompt?, repo?, agent?, model?, effort?, worktree?, mode? }
  * Agent / model / effort not given: the task's, else the user's worker defaults (设置), else Gerdr's.
  */
+/** The user's 备注 on a card from outside, after its prompt (the message as it came) in what a worker is sent. */
+export function remarkOf(t: Task) {
+  return t.remark?.trim() ? `\n\n## 我的备注\n${t.remark.trim()}` : "";
+}
+
 export async function start(
   input: { id: string; prompt?: string; repo?: string; agent?: string; model?: string; effort?: string; worktree?: boolean; mode?: string; reply?: string },
   ctx: Ctx,
@@ -595,7 +600,7 @@ export async function start(
   } as any);
   // A Gerdr that took the system file says it back; an older one ignored it, so the rules ride on the message as before
   const took = (sess as any).systemFile === `${ctx.workspace.dir}/${sys}`;
-  await ctx.sessions.send(sess.id, (prompt || "看附件，照里面的做。") + (took ? "" : workerProtocol(ctx, t.id) + forWorker(ctx, repo)), {
+  await ctx.sessions.send(sess.id, (prompt || "看附件，照里面的做。") + remarkOf(t) + (took ? "" : workerProtocol(ctx, t.id) + forWorker(ctx, repo)), {
     attachments: (t.attachments ?? []).map((a) => a.path),
     show: true,
   } as any);
@@ -899,6 +904,7 @@ async function redraft(t: Task, feedback: string, ctx: Ctx) {
     `现在的卡：仓库 ${t.repo ?? "（没选）"}${t.agent ? `，agent ${t.agent}` : ""}${t.model ? `，模型 ${t.model}` : ""}`,
     t.origin ? `来源：${t.origin.title ?? t.origin.source}${t.origin.url ? ` ${t.origin.url}` : ""}` : "",
     `现在的说明：\n${t.prompt ?? t.title}`,
+    t.remark?.trim() ? `用户的备注（他自己写的，派出去时附在说明后面）：${t.remark.trim()}` : "",
     `用户的意见：${feedback}`,
     `照意见改这张卡：tasks.edit '{"id":"${t.id}","title":"…","prompt":"…","repo":"/绝对路径","agent":"…"}'（只写要改的）；` +
       `要拆成几件，这张改成第一件，其余用 tasks.add 建成新卡（不加 start，留在待办）；整件事不用做了，tasks.drop 写 reason。` +
