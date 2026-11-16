@@ -817,6 +817,8 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
   // and before 派出去
   const editable = t.status === "todo" && !t.routing && !t.session;
   const [draft, setDraft] = useState(t.prompt ?? t.title);
+  // What its message's sender hears when it's sent out (设置 → 回复对方: 派出去时): the 回复对方 words, to change or empty
+  const [reply, setReply] = useState(t.replyDraft ?? "");
   const dirty = editable && draft.trim() !== (t.prompt ?? t.title).trim();
   const save = async () => {
     const prompt = draft.trim();
@@ -894,10 +896,22 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
       )}
       {t.assigned?.state === "ask" && <AssignBox t={t} act={act} save={save} />}
       {t.assigned && t.assigned.state !== "ask" && !t.session && <ReplyBox t={t} act={act} />}
+      {t.canReply && !t.routing && (
+        <label className="block space-y-1">
+          <span className="text-[12px] text-muted-foreground">派出去时回复对方{t.origin?.title ? `（${t.origin.title}）` : ""}：留空就不回</span>
+          <textarea
+            rows={2}
+            value={reply}
+            onChange={(e) => setReply(e.target.value)}
+            placeholder="派出去时发给发消息的人"
+            className="w-full resize-y rounded-md border bg-background px-2 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]"
+          />
+        </label>
+      )}
       {err && <p role="alert" className="text-[12px] text-bad">{err}</p>}
       <div className="flex flex-wrap justify-end gap-2">
         {t.status === "todo" && !t.routing && t.assigned?.state !== "ask" && (
-          <Button disabled={!!busy || (editable && !draft.trim())} onClick={async () => (await save()) && go("start", "start", { id: t.id })}>
+          <Button disabled={!!busy || (editable && !draft.trim())} onClick={async () => (await save()) && go("start", "start", { id: t.id, ...(t.canReply ? { reply } : {}) })}>
             {busy === "start" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}派出去
           </Button>
         )}

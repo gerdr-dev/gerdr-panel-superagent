@@ -218,6 +218,7 @@ export async function list(input: unknown, ctx: Ctx) {
     const kept = new Set(load(ctx).store.tasks.map((t) => t.id));
     s.tasks = s.tasks.filter((t) => kept.has(t.id));
   }
+  let ack: ReturnType<typeof workflow> | undefined;
   const tasks = s.tasks.map((t) => {
       const sess = t.session ? live[t.session] : null;
       const halted = stopped(t, sess);
@@ -241,6 +242,11 @@ export async function list(input: unknown, ctx: Ctx) {
         stopped: halted || undefined,
         stopWhy: halted ? stopWhy(t, sess, s) : undefined,
         said: said || undefined,
+        // 设置 → 回复对方 is 派出去时, and it's not out yet and came from a chat: the card's 回复对方 box by 派出去, filled
+        // with the 回复对方 words for the user to change
+        ...(t.status === "todo" && t.owner === "agent" && t.origin?.reply && !t.assigned && (ack ??= workflow(ctx)).ack === "dispatch"
+          ? { canReply: true, replyDraft: t.replyOnStart ?? ack.ackText.split("{id}").join(t.id).split("{title}").join(t.title) }
+          : {}),
       };
     });
   // What waits on the user, in Gerdr's inbox too (_inbox.ts): each member and step on its own, as before
@@ -533,9 +539,16 @@ export function edit(input: Partial<Task> & { id: string }, ctx: Ctx) {
  * Agent / model / effort not given: the task's, else the user's worker defaults (设置), else Gerdr's.
  */
 export async function start(
-  input: { id: string; prompt?: string; repo?: string; agent?: string; model?: string; effort?: string; worktree?: boolean; mode?: string },
+  input: { id: string; prompt?: string; repo?: string; agent?: string; model?: string; effort?: string; worktree?: boolean; mode?: string; reply?: string },
   ctx: Ctx,
 ) {
+  // reply: the card's 回复对方 box, kept on the task until it's out (it may go to the secretary for a repository first);
+  // it takes the place of the 回复对方 words
+  if (typeof input.reply === "string")
+    update(ctx, (s) => {
+      const x = find(s, input.id);
+      Object.assign(x, { replyOnStart: input.reply!.trim(), ackOnStart: undefined });
+    });
   const { store } = load(ctx);
   const t = find(store, input.id);
   if (t.owner !== "agent") throw new Error(`${t.id} 是人工任务，不能派给 agent`);
@@ -603,6 +616,21 @@ export async function start(
     } catch (err: any) {
       ctx.log(`告诉 ${out.origin.source} 对话 id 失败：${err?.message ?? err}`);
     }
+  }
+  // What the user wrote in the card's 回复对方 box goes now that it's out (empty: nothing)
+  if (typeof out.replyOnStart === "string") {
+    if (out.replyOnStart && out.origin?.reply)
+      try {
+        (ctx as any).events.reply({ ...out.origin, at: 0 }, out.replyOnStart);
+      } catch (err: any) {
+        ctx.log(`回复 ${out.origin.source}/${out.origin.kind} 失败：${err?.message ?? err}`);
+      }
+    return update(ctx, (s) => {
+      const x = find(s, out.id);
+      if (x.replyOnStart) note(x, `派出去时回了对方：${x.replyOnStart}`);
+      x.replyOnStart = undefined;
+      return x;
+    });
   }
   // Its message's sender hears back now that it's out (设置: 回复对方 → 派出去时)
   if (out.ackOnStart) {

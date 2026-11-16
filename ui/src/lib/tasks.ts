@@ -17,6 +17,9 @@ export type Task = {
   owner: "agent" | "human";
   /** Work someone asked of the user (local/assign.ts): agree to it, reply to them, deliver. */
   assigned?: { state: "ask" | "agreed" | "delivered" | "done"; by?: string; how?: "agent" | "self"; agent?: string; repos?: string[]; share?: "" | "view" | "talk"; draft?: string; shareDir?: string; unattended?: boolean };
+  /** 设置 → 回复对方 is 派出去时 and it's still in 待办: the card's 回复对方 box, and what it starts with (local/tasks.ts list). */
+  canReply?: boolean;
+  replyDraft?: string;
   /** What its worker wrote to a chat, held for the user to send or not (local/outbox.ts). */
   outbox?: { id: string; text: string; where: string; at: number; state: "pending" | "sent" | "skipped"; doneAt?: number; edited?: boolean }[];
   origin?: { source: string; key?: string; title?: string; url?: string };

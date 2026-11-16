@@ -140,7 +140,7 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
             </Field>
             <Field
               label="回复对方"
-              hint={{ accept: "秘书一接下就回", dispatch: "任务派出去时才回：没过目之前不替你说话", never: "不替你回" }[s.ack]}
+              hint={{ accept: "秘书一接下就回", dispatch: "任务派出去时才回：没过目之前不替你说话。待办卡片的「派出去」上面有个框，预先填好下面的回复内容，可以改，留空就不回", never: "不替你回" }[s.ack]}
             >
               <Choice value={s.ack} options={[["accept", "接下时"], ["dispatch", "派出去时"], ["never", "不回"]]} onChange={(v) => put("ack", v)} />
             </Field>
