@@ -904,7 +904,7 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
       {editable && quoted ? (
         <>
           <div className="rounded-md border-l-2 border-muted-foreground/30 bg-muted/40 px-3 py-2">
-            <p className={clsx("text-[13px] leading-relaxed whitespace-pre-wrap text-muted-foreground", !open && "line-clamp-[8]")}>{t.prompt ?? t.title}</p>
+            <p className={clsx(txt, "leading-relaxed whitespace-pre-wrap text-muted-foreground", !open && "line-clamp-[8]")}>{t.prompt ?? t.title}</p>
             {((t.prompt ?? "").split("\n").length > 8 || (t.prompt ?? "").length > 400) && (
               <button className="mt-1 text-[12px] text-brand hover:underline" onClick={() => setOpen(!open)}>
                 {open ? "收起" : "展开全部"}
@@ -1020,7 +1020,11 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
   );
 }
 
-const box = "w-full resize-y rounded-md border bg-background px-3 py-2 text-[13px] leading-relaxed outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]";
+// One size for what's read and typed in the drawer (the quote, the boxes, the composer), as Gerdr's own composer: 13px,
+// 15px on a phone, 16px on an iPhone only (below 16 WebKit zooms into a focused box). A flat 16px on every phone next
+// to 13px text read as mismatched (user report, 2026-11-16).
+const txt = "text-[13px] max-md:text-[15px] max-md:supports-[-webkit-touch-callout:none]:text-[16px]";
+const box = `w-full resize-y rounded-md border bg-background px-3 py-2 ${txt} leading-relaxed outline-none focus:ring-2 focus:ring-ring`;
 
 /**
  * A one-line box that grows as you write, with its send button inside (the chat's composer, small): Enter sends,
@@ -1057,7 +1061,7 @@ function Composer({ placeholder, busy, onSend, before }: { placeholder: string; 
           void send();
         }}
         placeholder={placeholder}
-        className="block max-h-40 min-h-9 w-full resize-none rounded-md border bg-background py-2 pr-10 pl-3 text-[13px] leading-5 outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]"
+        className={`block max-h-40 min-h-9 w-full resize-none rounded-md border bg-background py-2 pr-10 pl-3 ${txt} leading-5 outline-none focus:ring-2 focus:ring-ring`}
       />
       <button
         aria-label="发出"
