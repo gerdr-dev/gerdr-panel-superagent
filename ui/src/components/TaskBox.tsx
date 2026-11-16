@@ -6,9 +6,9 @@ import { Dialog, DialogContent, DialogTitle } from "./ui/dialog";
 import { AttachmentBar, useAttach, type Attachment } from "./Attachments";
 import { isSubmitEnter } from "../lib/utils";
 
-// The 新任务 box, shared by every task panel that copies it (the team panel syncs this file as it is): the dialog's
-// frame, and the text with its images and files (paste, drop, pick) and @ agents. What a panel asks besides (who it
-// is for, which repository) and its buttons are its own, passed as children.
+// The 新任务 box on its own, so a panel built on this one copies this file as it is instead of rewriting the box:
+// the dialog's frame, and the text with its images and files (paste, drop, pick) and @ agents. What a panel asks
+// besides (who it is for, which repository) and its buttons are its own, passed as children.
 
 /** Still uploading: the task can't go yet (each file's path is only known once it's up). */
 export const uploading = (files: Attachment[]) => files.some((x) => !x.path && !x.error);
