@@ -999,8 +999,11 @@ function Composer({ placeholder, busy, onSend, before }: { placeholder: string; 
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    // scrollHeight leaves out the border (box-sizing: border-box): without it the box is 2px short and shows a scrollbar
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+    const full = el.scrollHeight + el.offsetHeight - el.clientHeight;
+    el.style.height = `${Math.min(full, 160)}px`;
+    el.style.overflowY = full > 160 ? "auto" : "hidden";
   }, [text]);
   const send = async () => {
     const v = text.trim();
