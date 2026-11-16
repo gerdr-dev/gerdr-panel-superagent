@@ -439,16 +439,17 @@ function useLiveMain<T extends { id: string; status: string; waiting?: string }>
 let openChat: (session: string, task?: string) => void = () => {};
 
 /**
- * Steps only the user can do that hold this task up, one line each ("t124 待你答：…"): under the drawer's title and on
+ * Steps only the user can do that hold this task up, one line each ("待你答：…"; no ids: the user found "t124" on a
+ * question of t123 one more thing to decode, 2026-11-16): under the drawer's title and on
  * the card, so the board says what it waits for without opening it.
  */
 function userSteps(t: Task, byId: Record<string, Task>): ChatItem[] {
   const mine = (t.blockedBy ?? []).map((id) => byId[id]).filter((h) => h && h.owner === "human" && h.status !== "done" && h.status !== "dropped");
   return mine.flatMap((h) => {
     // Several questions in one item: a row each (each has its card in the chat), still one thing on the board
-    if (h.questions) return unanswered(h).map((q) => ({ text: `${h.id} 待你答：${q.title}`, jump: `${h.id}#${q.id}` }));
+    if (h.questions) return unanswered(h).map((q) => ({ text: `待你答：${q.title}`, jump: `${h.id}#${q.id}` }));
     const left = h.expiresAt ? (h.expiresAt > Date.now() ? `（还剩 ${Math.round((h.expiresAt - Date.now()) / 60000)} 分钟）` : "（已过期）") : "";
-    return [{ text: `${h.id} ${h.handBack?.kind === "choice" ? "待决定" : "要你做"}：${h.title}${left}`, jump: h.id }];
+    return [{ text: `${h.handBack?.kind === "choice" ? "待决定" : "要你做"}：${h.title}${left}`, jump: h.id }];
   });
 }
 
@@ -483,7 +484,7 @@ function chatPanelFor(t: Task, byId: Record<string, Task>): { label: string; act
     return {
       // A short line, then one row per thing (Gerdr draws them with a yellow edge and a jump icon): the run-on text and
       // a row of buttons left nothing readable on a phone. Each row jumps to its card in this chat.
-      label: `${t.id} 在等你处理 ${steps.length} 件`,
+      label: `在等你处理 ${steps.length} 件`,
       actions: [drop, done],
       items: steps,
     };
@@ -1686,7 +1687,7 @@ function askCards(h: Task): Record<string, unknown>[] | null {
       out.push({
         ref: `${h.id}#${q.id}`,
         // Answered ones wait for the rest (sent together) unless the user sends them first: say which
-        kicker: `${choice ? "等你决定" : "要你给"} · ${h.id}${qs.length > 1 ? ` · 第 ${i + 1} / ${qs.length} 个` : ""}${q.answer ? ` · 已答${q.sent || qs.length === 1 ? "" : "，等其它的答完一起发"}：${q.answer}` : ""}`,
+        kicker: `${choice ? "等你决定" : "要你给"}${q.answer ? ` · 已答${q.sent || qs.length === 1 ? "" : "，等其它的答完一起发"}：${q.answer}` : ""}`,
         title: q.title,
         body: [q.steps, !choice && q.label ? `要交回：${q.label}` : ""].filter(Boolean).join("\n\n") || undefined,
         tone: "info",
@@ -1705,7 +1706,7 @@ function askCards(h: Task): Record<string, unknown>[] | null {
   return [
     {
       ref: h.id,
-      kicker: `${kind === "choice" ? "等你决定" : "要你做"} · ${h.id}${left}`,
+      kicker: `${kind === "choice" ? "等你决定" : "要你做"}${left}`,
       title: h.title,
       body: [h.steps, kind === "value" ? `做完要交回：${h.handBack?.label || "一个值"}` : "", h.verify ? `做完后 agent 会核验：${h.verify}` : ""].filter(Boolean).join("\n\n") || undefined,
       tone: kind === "choice" ? "info" : "warn",

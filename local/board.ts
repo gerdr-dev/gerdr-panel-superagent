@@ -254,7 +254,7 @@ export function ask_human(input: any, ctx: Ctx) {
             type: "task-step",
             ref: h.id,
             project: ctx.workspace.project,
-            kicker: `等你决定 · ${h.id} · 不急，在这里选或之后在任务面板上选`,
+            kicker: `等你决定 · 不急，之后在任务面板上选也行`,
             title: h.title,
             body: h.steps || undefined,
             tone: "info",
@@ -439,7 +439,6 @@ function questionCard(h: Task, ctx: Ctx) {
   const qs = (h.questions ?? []).filter((x) => !x.dropped);
   const q = qs[qs.length - 1];
   const ref = `${h.id}#${q.id}`;
-  const of = qs.length > 1 ? ` · 第 ${qs.length} 个问题` : "";
   const choice = q.kind === "choice";
   return {
     id: ref,
@@ -448,7 +447,7 @@ function questionCard(h: Task, ctx: Ctx) {
       type: "task-step",
       ref,
       project: ctx.workspace.project,
-      kicker: `${choice ? "等你决定" : "要你给"} · ${h.id}${of} · 不急，在这里答或之后在任务面板上答`,
+      kicker: `${choice ? "等你决定" : "要你给"} · 不急，之后在任务面板上答也行`,
       title: q.title,
       body: [q.steps, !choice && q.label ? `要交回：${q.label}` : ""].filter(Boolean).join("\n\n") || undefined,
       tone: "info",
