@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Activity, AlarmClock, BookmarkPlus, Check, CircleCheck, CornerUpLeft, Eye, FileText, Hourglass, Link2, MessageSquare, Pencil, Send, SquareTerminal, Undo2, UserPlus, Users } from "lucide-react";
 import { DefaultCard, registerCard, type CardProps } from "@gerdr/core";
 import { run } from "./lib/gerdr";
@@ -271,9 +271,11 @@ type Out = { state: "pending" | "sent" | "skipped" | "missing"; text?: string; w
 function TaskOutgoing({ card }: CardProps) {
   const c = card as { ref?: string; project?: string; task?: string; where?: string; text?: string };
   const [st, setSt] = useState<Out>();
+  // The words are an input from the start, filled with what the worker wrote: edit them in place, then send
   const [draft, setDraft] = useState<string | null>(null);
   const [busy, setBusy] = useState("");
   const [err, setErr] = useState("");
+  const box = useRef<HTMLTextAreaElement>(null);
   const get = () => (c.ref && c.project ? run<Out>("outbox.status", { ref: c.ref }, { project: c.project }).then(setSt, () => {}) : Promise.resolve());
   useEffect(() => {
     void get();
@@ -282,11 +284,20 @@ function TaskOutgoing({ card }: CardProps) {
   }, [c.ref, c.project]);
   const text = st?.text ?? c.text ?? "";
   const where = st?.where ?? c.where ?? "";
+  const value = draft ?? text;
+  const edited = draft != null && draft !== text;
+  // Grows with the text, so a long reply is read whole without scrolling inside the box
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight + 2}px`;
+  }, [value, st?.state]);
   const act = async (fn: "send" | "skip") => {
     setBusy(fn);
     setErr("");
     try {
-      await run(`outbox.${fn}`, fn === "send" && draft != null ? { ref: c.ref, text: draft } : { ref: c.ref }, { project: c.project });
+      await run(`outbox.${fn}`, fn === "send" ? { ref: c.ref, text: value } : { ref: c.ref }, { project: c.project });
       setDraft(null);
       await get();
     } catch (e) {
@@ -312,32 +323,39 @@ function TaskOutgoing({ card }: CardProps) {
     <div className="my-1.5 space-y-1.5 rounded-lg border border-l-2 border-l-warn bg-card px-3 py-2">
       <div className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
         <MessageSquare className="size-3.5 shrink-0 text-warn" />
-        <span className="min-w-0 truncate">待发送 · 回给 {where}{c.task ? ` · ${c.task}` : ""} · 不急，worker 不等它</span>
+        <span className="min-w-0 truncate">待发送 · 回给 {where}{c.task ? ` · ${c.task}` : ""} · 可以直接改，worker 不等它</span>
       </div>
-      {draft == null ? (
-        <p className="whitespace-pre-wrap text-[13px]">{text}</p>
-      ) : (
-        <textarea className="min-h-24 w-full resize-y rounded-md border bg-background px-2 py-1.5 text-[13px] outline-none focus:ring-1 focus:ring-brand" value={draft} onChange={(e) => setDraft(e.target.value)} autoFocus />
-      )}
+      <textarea
+        ref={box}
+        rows={2}
+        className="w-full resize-none overflow-hidden rounded-md border bg-background px-2 py-1.5 text-[13px] leading-relaxed outline-none focus:ring-1 focus:ring-brand"
+        value={value}
+        disabled={!!busy}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          // ⌘/Ctrl+Enter sends, like the chat's own box with a modifier; a plain Enter is a new line
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && value.trim() && !busy) {
+            e.preventDefault();
+            void act("send");
+          }
+        }}
+      />
       <div className="flex flex-wrap items-center gap-2 text-[12px]">
-        <button className="inline-flex items-center gap-1 rounded-md bg-brand px-2.5 py-1 font-medium text-background disabled:opacity-50" disabled={!!busy || (draft != null && !draft.trim())} onClick={() => act("send")}>
+        <button className="inline-flex items-center gap-1 rounded-md bg-brand px-2.5 py-1 font-medium text-background disabled:opacity-50" disabled={!!busy || !value.trim()} onClick={() => act("send")}>
           <Send className="size-3" />
-          {busy === "send" ? "发送中…" : draft != null ? "发送改好的" : "发送"}
+          {busy === "send" ? "发送中…" : edited ? "发送改好的" : "发送"}
         </button>
         <button className="rounded-md border px-2.5 py-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50" disabled={!!busy} onClick={() => act("skip")}>
           不发
         </button>
-        {draft == null ? (
-          <button className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-muted-foreground hover:bg-accent hover:text-foreground" disabled={!!busy} onClick={() => setDraft(text)}>
-            <Pencil className="size-3" />
-            改一下
-          </button>
-        ) : (
-          <button className="rounded-md px-1.5 py-1 text-muted-foreground hover:bg-accent hover:text-foreground" disabled={!!busy} onClick={() => setDraft(null)}>
-            不改了
+        {edited && (
+          <button className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-muted-foreground hover:bg-accent hover:text-foreground" disabled={!!busy} onClick={() => setDraft(null)}>
+            <Undo2 className="size-3" />
+            恢复原文
           </button>
         )}
-        {err && <span className="text-bad">{err}</span>}
+        <span className="ml-auto text-muted-foreground/70">⌘↵ 发送</span>
+        {err && <span className="w-full text-bad">{err}</span>}
       </div>
     </div>
   );

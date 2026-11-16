@@ -337,7 +337,7 @@ worker 回那段对话里的人（任务从 Slack 私信、thread 来的），�
 说明里写死「只能用它，别用 slackctl 之类自己发」。发不发看「设置 → worker 回话」（`replies`）：
 
 - `review`（默认）：话先放进任务的 `outbox`（`local/_outbox.ts`），worker 的对话里出一张「待发送」卡片
-  （`ui/src/cards.tsx` 的 `task-outgoing`），看板的任务卡和对话顶栏各有一行。用户点「发送」（可以先改一下）
+  （`ui/src/cards.tsx` 的 `task-outgoing`），看板的任务卡和对话顶栏各有一行。卡片里的话就是一个输入框（预先填好 worker 写的），用户直接改，点「发送」或 ⌘↵
   才走事件自己的回复地址发出去（`outbox.send` → `ctx.events.reply`），点「不发」就算了（`outbox.skip`）。
 - `auto`：直接发，对话里留一行记录。
 
