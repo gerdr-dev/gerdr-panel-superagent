@@ -22,7 +22,6 @@ import { Md } from "../lib/markdown";
 import { usePhone, useSwipePages } from "../lib/swipe";
 import { convo, parseConvo } from "../lib/convo";
 import { usePanelChange, useRefresh, useSessions } from "../lib/visible";
-import { Views } from "../components/Views";
 import { useLocation } from "react-router";
 
 // The task board: columns left to right (to do, running, needs you, to review, done), small cards, details in a side
@@ -246,15 +245,16 @@ export default function BoardPage() {
       {/* On a phone the buttons are icons only (their words would push the header wider than the screen and squeeze
           the title into a column of letters); the counts stay */}
       <header className="flex min-w-0 items-center justify-between gap-3 border-b px-4 py-2.5 max-md:gap-1 max-md:px-3">
-        <div className="flex shrink-0 items-center gap-3">
-          <Views />
-        </div>
-        <div className="flex min-w-0 items-center gap-1 max-md:gap-0">
+        {/* Left: the secretary's conversation (a drawer) and where outside messages went; right: settings, a new task.
+            Until 2026-11-16 a 秘书 / 任务面板 switch sat here too, a second way into the same conversation */}
+        <div className="flex shrink-0 items-center gap-1 max-md:gap-0">
           <MainButton onOpen={(id) => (setOpen(""), setPeek({ session: id }))} />
           <Button variant="ghost" size="sm" className={clsx(phoneMenu && "max-md:hidden")} title="外面来的每条消息去了哪：交给了哪个任务、为什么没接" onClick={() => setSettings("log")}>
             <Inbox className="size-4" />
             <span className="max-md:hidden">去向</span>
           </Button>
+        </div>
+        <div className="flex min-w-0 items-center gap-1 max-md:gap-0">
           <Button variant="ghost" size="icon" className={clsx(phoneMenu && "max-md:hidden")} aria-label="设置" title="设置、流程、触发器、定时任务" onClick={() => setSettings("settings")}>
             <Settings className="size-4" />
           </Button>
@@ -392,13 +392,17 @@ function MainButton({ onOpen }: { onOpen: (id: string) => void }) {
     { poll: 10_000 },
   );
   const m = useLiveMain(main);
-  if (!m || m.status === "gone") return null;
-  const label = m.status === "running" ? "在判断" : m.status === "waiting" ? "等你回答" : m.status === "error" ? "出错了" : "空闲";
+  const status = m && m.status !== "gone" ? m.status : "";
+  const label = status === "running" ? "在判断" : status === "waiting" ? "等你回答" : status === "error" ? "出错了" : "";
+  // Always there: the board is the only page now, so this is the way to the secretary. None yet (or it was let go):
+  // opening it starts one (secretary.open), as the 秘书 page used to on load
+  const open = () => (m && status ? onOpen(m.id) : run<{ main: string }>("secretary.open", {}).then((r) => onOpen(r.main), () => {}));
   return (
-    <Button variant="ghost" size="sm" title={`秘书的会话（${label}）：它怎么判断、派给谁、在想什么，都在这里`} onClick={() => onOpen(m.id)}>
-      <span className={clsx("size-1.5 rounded-full", m.status === "running" ? "bg-ok" : m.status === "waiting" || m.status === "error" ? "bg-warn" : "bg-muted-foreground/40")} />
-      <span className="max-md:hidden">秘书在想</span>
-      {m.status !== "idle" && <span className="text-[11px] text-muted-foreground max-md:hidden">{label}</span>}
+    <Button variant="ghost" size="sm" title={`和秘书说话${label ? `（${label}）` : ""}：交给它的事、它怎么判断外面来的消息、派给了谁，都在这段对话里`} onClick={open}>
+      <MessageSquare className="size-4" />
+      <span className="max-md:hidden">秘书</span>
+      {label && <span className={clsx("size-1.5 rounded-full", status === "running" ? "bg-ok" : "bg-warn")} />}
+      {label && <span className="text-[11px] text-muted-foreground max-md:hidden">{label}</span>}
     </Button>
   );
 }

@@ -362,7 +362,7 @@ function talkText(ctx: Ctx) {
   const ex = (o: unknown) => JSON.stringify(o);
   return [
     `## 和用户说话\n` +
-      `- **秘书页就是你这段对话**：用户在这里对你打字，你回复里写的就是他看到的。直接在回复里说，不用任何工具发消息；` +
+      `- **你这段对话就是秘书**（任务面板左上角「秘书」打开它）：用户在这里对你打字，你回复里写的就是他看到的。直接在回复里说，不用任何工具发消息；` +
       `调了哪些命令他也看得见（折起来的一行），所以结论写在回复的正文里。\n` +
       `- 别的消息也会出现在这段对话里，开头标着是什么：[任务 tN] / [消息 cN] / [重新安排 tN] 是要派的活（见下面）；` +
       `[检查] 是定时检查发现了卡住的任务；[简报] 是到了写简报的时间；[tN 的回答] 是你转给 worker 的问题它答了；[任务面板] 是任务面板的提醒；` +
@@ -390,7 +390,7 @@ function talkText(ctx: Ctx) {
       `- 不要用你自带的提问工具（AskUserQuestion）：有要问用户的，直接在回复里问，他会在这里答你。` +
       `问了就先不派，这一轮到此为止，他的回答会是他的下一条消息。\n` +
       `- **仓库拿不准就先问，不要先派了再说明**（包括这件事不属于仓库列表里的任何一个）：带上你的建议问他，怎么挑、怎么建议见「怎么派」。\n` +
-      `- **worker 要用户回答的问题**（secretary.status 里带着问题、选项和交答案的命令）：页面顶上「等你」那一栏列着，他能点开去答，也可以对你说。` +
+      `- **worker 要用户回答的问题**（secretary.status 里带着问题、选项和交答案的命令）：任务面板上「等你」列着，他能点开去答，也可以对你说。` +
       `你问他的时候说清要他决定什么、为什么要紧、有哪几个选项，他答了，你用给出的命令替他交（一个问题一条命令），再告诉他交了。密钥不经过对话：让他在任务面板上那张卡里填。\n` +
       `- 改这个面板本身（设置、流程、触发器、定时任务、页面）不归你：告诉用户去面板右边的面板助手那里说。\n` +
       `- 这段对话一直用下去，长了会被压缩：早先的聊天变成一段摘要，细节会丢。要长期记住的事当场记下 —— 用户交代的活进任务面板（任务），` +
@@ -488,7 +488,11 @@ export async function ensureMain(ctx: Ctx, first?: string, attachments?: string[
   // carry `context` from the same Gerdr version on, and an older one would start the new session without its rules
   const old = !!cur && !s.system && (cur as any).context !== undefined;
   const replace = !!cur && (old || (idle && (cur.status === "error" || (!!s.who && s.who !== who))));
-  if (cur && !replace) return { id: { id: cur.id, fresh: false }, changed, hash: h };
+  if (cur && !replace) {
+    // One started before do not disturb (or a Gerdr without it: no ctx.sessions.mute, left as it is)
+    if (!(cur as any).muted && typeof (ctx.sessions as any).mute === "function") await Promise.resolve((ctx.sessions as any).mute(cur.id, true)).catch(() => {});
+    return { id: { id: cur.id, fresh: false }, changed, hash: h };
+  }
   const sess = await ctx.sessions.start({
     cwd: ctx.workspace.dir,
     agent: r.agent || undefined,
@@ -501,6 +505,8 @@ export async function ensureMain(ctx: Ctx, first?: string, attachments?: string[
     continueFrom: cur && !old && cur.status !== "running" ? cur.id : undefined,
     tags: { superagent: "main" },
     workspace: "none",
+    // The user reads it when they choose to (the 秘书 button): its turns ending don't notify them (2026-11-16)
+    muted: true,
   } as any);
   // A Gerdr that took the system file says so; an older one ignored it, so the rules go in front of the first message
   const system = (sess as any).systemFile === abs(ctx, SYSTEM);
