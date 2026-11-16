@@ -5,7 +5,8 @@ import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef,
 import { Button } from "../components/Button";
 import { Dialog, DialogContent, DialogTitle } from "../components/ui/dialog";
 import { Sheet, SheetContent, SheetTitle } from "../components/ui/sheet";
-import { AttachmentBar, useAttach, type Attachment } from "../components/Attachments";
+import { type Attachment } from "../components/Attachments";
+import { TaskBox, TaskDialog, mentionsOf, uploading, type AgentInfo } from "../components/TaskBox";
 import { askSecret, secretNames } from "../lib/bridge";
 import { ChatDrawer, type ChatAction, type ChatItem } from "../components/ChatDrawer";
 import { TaskStep } from "../cards";
@@ -1422,7 +1423,6 @@ function NewTask({ onClose, act }: { onClose: () => void; act: Act }) {
   const [repos, setRepos] = useState<{ path: string; name: string }[]>([]);
   const [more, setMore] = useState(false);
   const [files, setFiles] = useState<Attachment[]>([]);
-  const attach = useAttach(files, setFiles);
   const { busy, err, go } = useAction(act);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   useEffect(() => {
@@ -1439,22 +1439,9 @@ function NewTask({ onClose, act }: { onClose: () => void; act: Act }) {
         : { title: f.title, owner, steps: f.steps, minutes: Number(f.minutes) || undefined, handBack: { kind: f.kind, label: f.label || undefined, name: f.kind === "secret" ? f.name : undefined } };
     if (await go(start ? "start" : "add", "add", body)) onClose();
   };
-  const ok = !attach.uploading && (owner === "human" ? f.title.trim() : f.prompt.trim() || files.length) && (f.kind !== "secret" || /^[\w.-]+$/.test(f.name));
+  const ok = !uploading(files) && (owner === "human" ? f.title.trim() : f.prompt.trim() || files.length) && (f.kind !== "secret" || /^[\w.-]+$/.test(f.name));
   return (
-    <Dialog open onOpenChange={(o) => !o && !busy && onClose()}>
-      <DialogContent
-        showCloseButton={false}
-        aria-describedby={undefined}
-        // Esc with the @ list open closes the list (MentionArea), not the dialog
-        onEscapeKeyDown={(e) => document.querySelector("[data-mention-list]") && e.preventDefault()}
-        className="flex max-h-[90dvh] w-full flex-col gap-3 overflow-y-auto p-4 sm:max-w-xl"
-      >
-        <div className="flex items-center justify-between">
-          <DialogTitle className="text-[15px] font-medium">新任务</DialogTitle>
-          <Button variant="ghost" size="icon" aria-label="关闭" onClick={onClose}>
-            <X className="size-4" />
-          </Button>
-        </div>
+    <TaskDialog title="新任务" onClose={onClose} busy={!!busy} err={err}>
         <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted p-1 text-[13px]">
           {(["agent", "human"] as const).map((o) => (
             <button key={o} className={clsx("flex items-center justify-center gap-1.5 rounded-md py-1.5", owner === o ? "bg-background font-medium shadow-sm" : "text-muted-foreground")} onClick={() => setOwner(o)}>
@@ -1466,24 +1453,24 @@ function NewTask({ onClose, act }: { onClose: () => void; act: Act }) {
         {owner === "human" && <input autoFocus className={input} placeholder="标题" value={f.title} onChange={set("title")} onKeyDown={(e) => isSubmitEnter(e) && ok && !busy && void submit(false)} />}
         {owner === "agent" ? (
           <>
-            <div className="space-y-2" onDrop={attach.onDrop} onDragOver={attach.onDragOver}>
-              <MentionArea
-                agents={agents}
-                value={f.prompt}
-                onChange={(prompt) => setF({ ...f, prompt })}
-                onPaste={attach.onPaste}
-                onSubmit={() => ok && !busy && void submit(true)}
-                className={clsx(input, "h-40 resize-y py-2 leading-relaxed")}
-                placeholder="要它做什么：目标、范围、做完的标准（截图可以直接粘贴；输入 @ 点名 agent；回车派出，Shift+回车换行）"
-              />
-              {mentions.length > 0 && (
-                <p className="text-[12px] text-muted-foreground">
-                  交给 {mentions.map((a) => a.name).join("、")}
-                  {mentions.length > 1 ? "：由派活的对话安排怎么分、谁用什么模型" : ""}
-                </p>
-              )}
-              <AttachmentBar items={files} onChange={setFiles} onPick={attach.add} />
-            </div>
+            <TaskBox
+              agents={agents}
+              value={f.prompt}
+              onChange={(prompt) => setF({ ...f, prompt })}
+              files={files}
+              onFiles={setFiles}
+              onSubmit={() => ok && !busy && void submit(true)}
+              className={clsx(input, "h-40 resize-y py-2 leading-relaxed")}
+              placeholder="要它做什么：目标、范围、做完的标准（截图可以直接粘贴；输入 @ 点名 agent；回车派出，Shift+回车换行）"
+              below={
+                mentions.length > 0 && (
+                  <p className="text-[12px] text-muted-foreground">
+                    交给 {mentions.map((a) => a.name).join("、")}
+                    {mentions.length > 1 ? "：由派活的对话安排怎么分、谁用什么模型" : ""}
+                  </p>
+                )
+              }
+            />
             {more ? (
               <>
                 <input className={input} list="board-repos" placeholder="仓库目录" value={f.repo} onChange={set("repo")} />
@@ -1536,7 +1523,6 @@ function NewTask({ onClose, act }: { onClose: () => void; act: Act }) {
             </div>
           </>
         )}
-        {err && <p role="alert" className="text-[12px] text-bad">{err}</p>}
         <div className="flex justify-end gap-2">
           {owner === "agent" && (
             <Button variant="outline" disabled={!ok || !!busy} onClick={() => submit(false)}>
@@ -1548,127 +1534,7 @@ function NewTask({ onClose, act }: { onClose: () => void; act: Act }) {
             {owner === "agent" ? "创建并派出" : "创建"}
           </Button>
         </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-type AgentInfo = { id: string; name: string; base?: string; prompt?: string };
-
-/** The agents @-mentioned in the text (by id or name), each once. Same reading as local/_agents.ts. */
-function mentionsOf(text: string, agents: AgentInfo[]): AgentInfo[] {
-  const out: AgentInfo[] = [];
-  for (const m of text.matchAll(/@([^\s@，。,.;；:：!?！？)）]+)/g)) {
-    const w = m[1].toLowerCase();
-    const a = agents.find((x) => x.id.toLowerCase() === w || x.name.toLowerCase() === w);
-    if (a && !out.includes(a)) out.push(a);
-  }
-  return out;
-}
-
-/** A textarea where typing @ offers the agents: ↑ ↓ to move, Enter / Tab to pick, Esc to dismiss. */
-function MentionArea({
-  agents,
-  value,
-  onChange,
-  onPaste,
-  onSubmit,
-  className,
-  placeholder,
-  up = false,
-  autoFocus = true,
-  byName = false,
-}: {
-  /** Picking inserts @name (a member's repository: what people call it), not @id. */
-  byName?: boolean;
-  agents: AgentInfo[];
-  /** The @ list opens above the box (a box at the bottom of the screen). */
-  up?: boolean;
-  autoFocus?: boolean;
-  value: string;
-  onChange: (v: string) => void;
-  /** Enter (not Shift+Enter, not an input method's): send. With the @ list open, Enter picks from it instead. */
-  onSubmit?: () => void;
-  onPaste?: React.ClipboardEventHandler<HTMLTextAreaElement>;
-  className?: string;
-  placeholder?: string;
-}) {
-  const ref = useRef<HTMLTextAreaElement>(null);
-  const [q, setQ] = useState<{ word: string; at: number } | null>(null);
-  const [hi, setHi] = useState(0);
-  const found = q ? agents.filter((a) => (a.id + " " + a.name).toLowerCase().includes(q.word.toLowerCase())).slice(0, 6) : [];
-  const look = (el: HTMLTextAreaElement) => {
-    const before = el.value.slice(0, el.selectionStart);
-    const m = /(^|\s)@([^\s@]*)$/.exec(before);
-    setQ(m ? { word: m[2], at: before.length - m[2].length - 1 } : null);
-    setHi(0);
-  };
-  const pick = (a: AgentInfo) => {
-    if (!q) return;
-    const end = q.at + 1 + q.word.length;
-    const word = byName ? a.name : a.id;
-    onChange(value.slice(0, q.at) + "@" + word + " " + value.slice(end));
-    setQ(null);
-    const caret = q.at + word.length + 2;
-    requestAnimationFrame(() => ref.current?.setSelectionRange(caret, caret));
-  };
-  return (
-    <div className="relative">
-      <textarea
-        ref={ref}
-        autoFocus={autoFocus}
-        className={className}
-        placeholder={placeholder}
-        value={value}
-        onPaste={onPaste}
-        onChange={(e) => {
-          onChange(e.target.value);
-          look(e.target);
-        }}
-        onClick={(e) => look(e.currentTarget)}
-        onBlur={() => setTimeout(() => setQ(null), 150)}
-        onKeyDown={(e) => {
-          if (!found.length) {
-            if (onSubmit && isSubmitEnter(e)) {
-              e.preventDefault();
-              onSubmit();
-            }
-            return;
-          }
-          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-            e.preventDefault();
-            setHi((h) => (h + (e.key === "ArrowDown" ? 1 : found.length - 1)) % found.length);
-          } else if ((e.key === "Enter" && !e.nativeEvent.isComposing && e.keyCode !== 229) || e.key === "Tab") {
-            e.preventDefault();
-            pick(found[hi]);
-          } else if (e.key === "Escape") {
-            // only the list closes, not the dialog
-            e.stopPropagation();
-            setQ(null);
-          }
-        }}
-      />
-      {found.length > 0 && (
-        <div data-mention-list className={clsx("absolute inset-x-2 z-50 overflow-hidden", up ? "bottom-full mb-1" : "top-full mt-1", "rounded-md border bg-popover text-[13px] text-popover-foreground shadow-md")}>
-          {found.map((a, i) => (
-            <button
-              key={a.id}
-              type="button"
-              className={clsx("flex w-full items-baseline gap-2 px-3 py-1.5 text-left", i === hi && "bg-accent")}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                pick(a);
-              }}
-              onMouseEnter={() => setHi(i)}
-            >
-              <span className="shrink-0 font-medium">{a.name}</span>
-              <span className="shrink-0 text-[11px] text-muted-foreground">@{a.id}</span>
-              {a.prompt && <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{a.prompt}</span>}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+    </TaskDialog>
   );
 }
 
