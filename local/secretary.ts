@@ -100,6 +100,43 @@ export async function status(input: { since?: number }, ctx: Ctx) {
 }
 
 /**
+ * What open tasks wait on outside the board (a colleague's reply, an approval, a publish, a pipeline), in the worker's
+ * own words, with what wakes it. For the secretary to look up when a message reaches it that might be one of these
+ * (the user asked a colleague in their own DM when a fix goes to prod for a task; the answer came to the secretary,
+ * which saw no task in that conversation and let it go, 2026-11-16). No matching in code: the secretary reads and judges.
+ */
+export async function waiting(_input: unknown, ctx: Ctx) {
+  const { tasks } = await list({}, ctx);
+  const outside = (w: any) => !w.end && !w.user && ["reply", "check", "time", "teammate"].includes(w.kind);
+  const lines: string[] = [];
+  for (const t of tasks as any[]) {
+    if (t.status === "done" || t.status === "dropped") continue;
+    const ws = (t.waits ?? []).filter(outside);
+    if (!ws.length) continue;
+    // One wait_for gives several waits sharing `what` (one per thing that wakes it): said once
+    const whats = [...new Set(ws.map((w: any) => w.what))];
+    const wake = ws
+      .map((w: any) =>
+        w.kind === "reply"
+          ? `${w.where || `${w.on?.source} ${w.on?.key}`} 上有新消息`
+          : w.kind === "check"
+            ? `检查命令${w.check?.last ? `（上次：${cut(w.check.last.out || `exit ${w.check.last.code}`, 60)}）` : ""}`
+            : w.kind === "teammate"
+              ? `${w.where ?? w.item} 回话`
+              : null,
+      )
+      .filter(Boolean);
+    const since = Math.min(...ws.map((w: any) => w.since));
+    lines.push(
+      `- ${t.id}「${t.title}」${when(since)}起在等：${whats.join("；")}` +
+        (wake.length ? `\n    叫醒它的：${wake.join("、")}` : "") +
+        (t.summary ? `\n    它最后说：${cut(t.summary, 160)}` : ""),
+    );
+  }
+  return lines.length ? `在等外面的任务（${lines.length}）：\n${lines.join("\n")}` : "没有在等外面的任务";
+}
+
+/**
  * The briefing (schedules/briefing.json, at the times the user set): the facts since the last one, to the secretary
  * to write up as the user's secretary.md says. Its reply lands in the conversation as a briefing.
  */
