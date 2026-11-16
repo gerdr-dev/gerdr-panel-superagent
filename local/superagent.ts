@@ -96,6 +96,8 @@ async function one(d: Decision, ctx: Ctx) {
  */
 async function boardTask(d: Decision, ctx: Ctx) {
   const self = find(load(ctx).store, d.item);
+  if (self.reroute?.was !== undefined)
+    throw new Error(`${self.id} 还没派出去，是让你改卡，不用 decide：tasks.edit {"id":"${self.id}",…} 改好留在待办（拆就 tasks.add，不做就 tasks.drop）`);
   if (self.reroute) return rearrange(d, self, ctx);
   throw new Error(
     `任务面板上的任务不用 decide，用任务面板的命令：派出去 tasks.dispatch {"id":"${self.id}","parts":[…]}；停掉别的任务 tasks.drop {"id":"tN","reason":"…"}；` +

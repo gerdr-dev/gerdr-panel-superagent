@@ -71,7 +71,8 @@ export type Task = {
    * decides how (another repository, several, keep or stop the old workers). Set on the card (the requirement root)
    * until the router decides or leaves it (sweep).
    */
-  reroute?: { feedback: string; at: number; router?: string };
+  /** was: a card not sent out yet (tasks.redraft), what it looked like before, to tell whether the secretary changed it. */
+  reroute?: { feedback: string; at: number; router?: string; was?: string };
   /** When the user last typed in its worker's chat that the feed has (Gerdr's personSaid): each one is logged once. */
   heard?: number;
   /**
@@ -385,3 +386,7 @@ export function newTask(s: Store, p: Partial<Task> & { title: string }): Task {
   return t;
 }
 
+/** What redraft changes on a card, to tell afterwards whether the secretary changed anything. */
+export function draftOf(t: Task) {
+  return JSON.stringify([t.title, t.prompt, t.repo, t.agent, t.model, t.status]);
+}

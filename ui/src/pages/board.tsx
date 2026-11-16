@@ -841,7 +841,10 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
   // A task not sent out yet is still the user's words: its text is an input box right away (no 编辑 to press), the way
   // it was written (新任务 asks only what to do; the title is its first line, here too). Saved when the box is left,
   // and before 派出去
-  const editable = t.status === "todo" && !t.routing && !t.session;
+  const editable = t.status === "todo" && !t.routing && !t.session && !t.reroute;
+  // 让秘书重排: what's wrong with a card in 待办, in the user's words; the secretary rewrites it and leaves it in 待办
+  // (tasks.reroute → redraft). For a card it drafted from a long message, saying what's wrong beats editing it by hand
+  const [redoing, setRedoing] = useState(false);
   const [draft, setDraft] = useState(t.prompt ?? t.title);
   // What its message's sender hears when it's sent out (设置 → 回复对方: 派出去时): the 回复对方 words, to change or empty
   const [reply, setReply] = useState(t.replyDraft ?? "");
@@ -920,6 +923,37 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
           要附截图：在对话里说哪里不对
         </button>
       )}
+      {t.reroute && t.status === "todo" && (
+        <p className="inline-flex items-center gap-1.5 text-[12px] text-brand">
+          <Loader2 className="size-3.5 animate-spin" />
+          秘书在按你的意见重排：{t.reroute.feedback}
+          {t.reroute.router && (
+            <button className="hover:underline" onClick={() => openChat(t.reroute!.router!)}>
+              看它的对话
+            </button>
+          )}
+        </p>
+      )}
+      {redoing && (
+        <div className="space-y-2">
+          <textarea
+            autoFocus
+            rows={3}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="哪里不对、要怎么排（比如：拆成前后端两张；仓库应该是 whale-service）"
+            className="w-full resize-y rounded-md border bg-background px-2 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]"
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => (setRedoing(false), setText(""))}>
+              取消
+            </Button>
+            <Button disabled={!text.trim() || !!busy} onClick={async () => (await go("reroute", "reroute", { id: t.id, feedback: text })) && (setText(""), setRedoing(false))}>
+              {busy === "reroute" ? <Loader2 className="size-3.5 animate-spin" /> : <Undo2 className="size-3.5" />}交给秘书重排
+            </Button>
+          </div>
+        </div>
+      )}
       {t.assigned?.state === "ask" && <AssignBox t={t} act={act} save={save} />}
       {t.assigned && t.assigned.state !== "ask" && !t.session && <ReplyBox t={t} act={act} />}
       {t.canReply && !t.routing && (
@@ -936,7 +970,13 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
       )}
       {err && <p role="alert" className="text-[12px] text-bad">{err}</p>}
       <div className="flex flex-wrap justify-end gap-2">
-        {t.status === "todo" && !t.routing && t.assigned?.state !== "ask" && (
+        {editable && !t.assigned && !redoing && (
+          <Button variant="outline" disabled={!!busy} onClick={async () => (await save()) && setRedoing(true)}>
+            <Undo2 className="size-3.5" />
+            让秘书重排
+          </Button>
+        )}
+        {t.status === "todo" && !t.routing && !t.reroute && t.assigned?.state !== "ask" && (
           <Button disabled={!!busy || (editable && !draft.trim())} onClick={async () => (await save()) && go("start", "start", { id: t.id, ...(t.canReply ? { reply } : {}) })}>
             {busy === "start" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}派出去
           </Button>

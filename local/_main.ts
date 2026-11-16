@@ -19,7 +19,7 @@ import { forRouter } from "./memory";
 import { allAgents } from "./_agents";
 import { textOf } from "./playbooks";
 import { DATA, migrate } from "./_user";
-import { activity, find, load as loadTasks, note, update as updateTasks, type Task } from "./_store";
+import { activity, draftOf, find, load as loadTasks, note, update as updateTasks, type Task } from "./_store";
 import { cutLine, wake } from "./_wake";
 import { windowText } from "./_log";
 import { isOutside, waitingOn } from "./_waits";
@@ -322,6 +322,7 @@ async function brief(ctx: Ctx): Promise<string> {
       `- 派出去：gerdr panel run tasks.dispatch '${ex({ id: "t12", parts: [{ repo: "/绝对路径" }] })}'（可加 title）\n` +
       `- 它是在管别的任务：停掉 tasks.drop '${ex({ id: "t9", reason: "…" })}'；转告 tasks.say '${ex({ id: "t9", text: "…" })}'；` +
       `接手一个停掉的任务，派的时候加 "from": "t9"，会带上它的进展和对话；tN 只是条指令、照做完了：tasks.edit '${ex({ id: "t12", status: "done", summary: "停了 t9" })}'\n` +
+      `- 用户对待办里还没派出去的卡不满意（[重排 tN]）：用 tasks.edit 照他的意见改这张卡（要拆就 tasks.add 新卡、不用做就 tasks.drop），改完留在待办，不派出去。\n` +
       `- 用户对某张卡的安排有意见（[重新安排 tN]，比如仓库错了）：用 superagent.decide 照反馈重新安排这张卡，item 就是 tN（它要记下这次安排完了没有）。重新派给 parts（新的完整安排：要留下的已有 worker 那份写 "task": "它的 id"，会收到反馈和这份的 prompt；没留下的停掉；没写 task 的开新 worker，第一份接这张卡，其余各是一张新卡）；只是让现在的 worker 自己改，写 "decision": "attach"；整件事不做了，写 "decision": "stop" 和 reason。\n` +
       `\n## parts（decide 的 accept 和 tasks.dispatch 一样）\n` +
       `- parts 每项一份活：repo 必填；agent、model、effort 不写就用下面的默认，简单的活可以给便宜的模型；worktree 默认 false。\n` +
@@ -364,7 +365,7 @@ function talkText(ctx: Ctx) {
     `## 和用户说话\n` +
       `- **你这段对话就是秘书**（任务面板左上角「秘书」打开它）：用户在这里对你打字，你回复里写的就是他看到的。直接在回复里说，不用任何工具发消息；` +
       `调了哪些命令他也看得见（折起来的一行），所以结论写在回复的正文里。\n` +
-      `- 别的消息也会出现在这段对话里，开头标着是什么：[任务 tN] / [消息 cN] / [重新安排 tN] 是要派的活（见下面）；` +
+      `- 别的消息也会出现在这段对话里，开头标着是什么：[任务 tN] / [消息 cN] / [重新安排 tN] / [重排 tN] 是要派的活（见下面）；` +
       `[检查] 是定时检查发现了卡住的任务；[简报] 是到了写简报的时间；[tN 的回答] 是你转给 worker 的问题它答了；[任务面板] 是任务面板的提醒；` +
       `[用户] 是用户在面板助手那里说、转给你的。` +
       `用户能看到它们，所以派活、分拣这种不用说话的，回复只写一句结论（「派给了 t12」「没接：道谢」），别把过程再讲一遍。\n` +
@@ -719,7 +720,12 @@ export function sweep(ctx: Ctx) {
   if (!loadTasks(ctx).store.tasks.some((t) => stuck(t) || unanswered(t))) return;
   updateTasks(ctx, (st) => {
     for (const t of st.tasks) {
-      if (unanswered(t)) {
+      if (unanswered(t) && t.reroute!.was !== undefined) {
+        // A 待办 card redone in place (tasks.ts redraft): its turn ending is the end of it
+        const changed = draftOf(t) !== t.reroute!.was;
+        activity(st, t, { kind: changed ? "join" : "stuck", text: changed ? "秘书照你的意见重排好了" : "秘书这一轮结束了，卡片没改：再说一次，或去它的对话里问问" });
+        t.reroute = undefined;
+      } else if (unanswered(t)) {
         // Its workers were left as they were: the card goes on, the user can send the feedback again
         activity(st, t, { kind: "stuck", text: "调度这一轮结束了，没重新安排：再说一次，或去它的对话里问问" });
         t.reroute = undefined;

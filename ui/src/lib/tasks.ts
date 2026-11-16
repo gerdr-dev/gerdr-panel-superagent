@@ -28,7 +28,7 @@ export type Task = {
   attachments?: { path: string; name: string; mime?: string }[];
   routing?: number;
   /** The user asked the router to rearrange this card; set until it decides. */
-  reroute?: { feedback: string; at: number; router?: string };
+  reroute?: { feedback: string; at: number; router?: string; was?: string };
   router?: string;
   routerClosed?: boolean;
   prompt?: string;

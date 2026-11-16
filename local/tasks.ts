@@ -3,7 +3,7 @@ import { tellBadge } from "./_badge";
 import { DATA, skillFile } from "./_user";
 import { workflow } from "./_config";
 import { forWorker } from "./memory";
-import { activity, blockersDone, find, load, members, newTask, note, reqOf, splitRef, update, type Question, type Store, type Task } from "./_store";
+import { activity, blockersDone, draftOf, find, load, members, newTask, note, reqOf, splitRef, update, type Question, type Store, type Task } from "./_store";
 import { applyBlock } from "./_apply";
 import { endQuestions, endWaits, isOutside, open, question, syncAgents, syncSessions, wakeText, type Wait } from "./_waits";
 import { cutLine, wake } from "./_wake";
@@ -885,6 +885,41 @@ export async function drop(input: { id: string; reason?: string }, ctx: Ctx) {
 }
 
 /**
+ * A card not sent out yet (the secretary drafted it into 待办 for the user to look over) that the user wants redone in
+ * their own words rather than by editing it: the secretary rewrites it in place (title, prompt, repository, agent),
+ * splits it into more 待办 cards or drops it, and leaves it in 待办 for another look. Before 2026-11-16 this threw
+ * "直接改任务内容再派": fine for a card the user wrote, but a card the secretary drafted from a long message is the
+ * secretary's to redo; the user only says what's wrong. Settled when its turn ends (_main.ts sweep).
+ */
+async function redraft(t: Task, feedback: string, ctx: Ctx) {
+  if (t.routing) throw new Error(`${t.id} 秘书正在派，等它派完再说`);
+  const block = [
+    `[重排 ${t.id}] ${t.title}`,
+    `这张卡还在待办、没派出去，用户看了不满意，要你按他的意见重排。`,
+    `现在的卡：仓库 ${t.repo ?? "（没选）"}${t.agent ? `，agent ${t.agent}` : ""}${t.model ? `，模型 ${t.model}` : ""}`,
+    t.origin ? `来源：${t.origin.title ?? t.origin.source}${t.origin.url ? ` ${t.origin.url}` : ""}` : "",
+    `现在的说明：\n${t.prompt ?? t.title}`,
+    `用户的意见：${feedback}`,
+    `照意见改这张卡：tasks.edit '{"id":"${t.id}","title":"…","prompt":"…","repo":"/绝对路径","agent":"…"}'（只写要改的）；` +
+      `要拆成几件，这张改成第一件，其余用 tasks.add 建成新卡（不加 start，留在待办）；整件事不用做了，tasks.drop 写 reason。` +
+      `**改完留在待办，不要派出去**，用户要再看一遍；除非他的意见里明说了改好就派。`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  update(ctx, (s) => {
+    const x = find(s, t.id);
+    x.reroute = { feedback, at: Date.now(), was: draftOf(x) };
+    activity(s, x, { kind: "user", by: x.id, text: `你让秘书重排：${feedback}` });
+  });
+  try {
+    return await rerouteTask(ctx, t.id, block);
+  } catch (e) {
+    update(ctx, (s) => (find(s, t.id).reroute = undefined));
+    throw e;
+  }
+}
+
+/**
  * The user tells the router what's wrong with how a card was handed out ("仓库错了，应该在 operation"): { id,
  * feedback }. The router decides what to do with it (superagent.ts boardTask, reroute): another repository, several
  * workers, keep or stop the old ones, or only pass it on to the worker. The user doesn't pick repositories here, as
@@ -896,7 +931,7 @@ export async function reroute(input: { id: string; feedback: string }, ctx: Ctx)
   const { store } = load(ctx);
   const root = reqOf(store, find(store, input.id));
   if (!root || root.owner !== "agent") throw new Error(`${input.id} 不是派给 agent 的任务`);
-  if (root.status === "todo" && !root.session) throw new Error(`${root.id} 还没派出去：直接改任务内容再派`);
+  if (root.status === "todo" && !root.session) return redraft(root, feedback, ctx);
   if (root.status === "done" || root.status === "dropped") throw new Error(`${root.id} 已经${root.status === "done" ? "完成" : "放弃"}了`);
   const lines = members(store, root)
     .filter((m) => m.status !== "dropped" && (m === root || m.status !== "done"))
