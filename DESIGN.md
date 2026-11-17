@@ -446,6 +446,10 @@ t123（PortAI 计费税率，portai 仓库）要在新后台 portai-console 加�
 - worker 要帮手，**包括动别的仓库**，一律用 agent 自带的子 agent：结果回到它那里，它检查过再说；要用户看、要用户定的走 `ask_human`。
 - worker 的 skill 里不再有建任务（`tasks.add` 带 `from`、交接）：开任务、拆需求是用户和秘书的事，秘书照旧可以拆几件。
   worker 也不再问「要不要另开任务」。第一版还留着「用户明确让你开时」和建任务的命令，用户看到问「为什么还在说新开 task」。
+- **帮手会话**（同一天）：要自己跑一阵的那种（本地跑给用户看、MR、改几轮），worker 用 `gerdr session new --report-to self` 开，
+  自己管它，像子 agent 一样：回报叫醒 worker，worker 回答它；看板照旧把它算成 worker 在等的（`helpers`），任务完成 / 放弃时
+  一起关掉（`helperSessions`）；不进 Code、不占卡。Gerdr 原来只对 `--host` 放行这种帮手，本机一律拒绝（11-05 的教训是没人跟的会话，
+  回报给 worker 的有人跟），现在本机也放行，同样要求回报给调用者。
 - **被否掉的做法：面板给 worker 一个开帮手会话的工具**（`start_helper`：在别的仓库开会话、`reportTo` 回 worker、不建卡、随任务关掉）。
   做到一半用户叫停：子 agent 本来就有，不需要单独的工具。
 

@@ -446,6 +446,26 @@ function helpers(t: Task, all: (Session & { parent?: string; reportTo?: string }
   );
 }
 
+/**
+ * Every session handed work under a task's workers, down to helpers of helpers (reportTo / parent, here or on another
+ * computer): closed with the task, the way a subagent ends with its agent (gerdr session new --report-to self).
+ */
+function helperSessions(ctx: Ctx, t: Task): string[] {
+  const all = ctx.sessions.list() as (Session & { parent?: string; reportTo?: string })[];
+  const mine = new Set([t.session, ...(t.sessions ?? [])].filter(Boolean) as string[]);
+  const out: string[] = [];
+  for (let depth = 0, grew = true; grew && depth < 4; depth++) {
+    grew = false;
+    for (const x of all)
+      if (!mine.has(x.id) && ((x.reportTo && mine.has(x.reportTo)) || (x.parent && mine.has(x.parent)))) {
+        mine.add(x.id);
+        out.push(x.id);
+        grew = true;
+      }
+  }
+  return out;
+}
+
 function firstLine(text?: string) {
   const line = (text ?? "").trim().split("\n")[0].trim();
   return [...line].length > 40 ? [...line].slice(0, 40).join("") + "…" : line;
@@ -695,7 +715,8 @@ export async function accept(input: { id: string }, ctx: Ctx) {
     activity(s, t, { kind: "user", by: t.id, text: t.team ? "你把这部分标为完成" : "你标为完成了" });
     return t;
   });
-  for (const id of [t.session, ...closing]) if (id && (ctx.sessions as any).close) await (ctx.sessions as any).close(id).catch(() => {});
+  // Helpers its worker started go with it
+  for (const id of [t.session, ...closing, ...helperSessions(ctx, t)]) if (id && (ctx.sessions as any).close) await (ctx.sessions as any).close(id).catch(() => {});
   return t;
 }
 
@@ -881,6 +902,7 @@ export async function drop(input: { id: string; reason?: string }, ctx: Ctx) {
       x.droppedFrom = x.status;
       Object.assign(x, { status: "dropped", doneAt: Date.now(), updatedAt: Date.now() });
       if (x.session) closing.push(x.session);
+      closing.push(...helperSessions(ctx, x));
     }
     activity(s, t, { kind: "user", by: t.id, text: `你放弃了${t.team ? "这部分" : ""}${input.reason ? `：${input.reason}` : ""}` });
     return t;
