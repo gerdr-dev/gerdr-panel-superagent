@@ -389,7 +389,15 @@ export default function BoardPage() {
 
   return (
     // clip, not hidden: nothing may widen the page sideways on a phone, and hidden would break the sticky tabs
-    <div ref={pageRoot} className="flex h-full min-h-0 flex-col [overflow-wrap:anywhere] max-md:h-auto max-md:min-h-full max-md:overflow-x-clip md:relative">
+    // While a card is dragged the cards under it take no pointer: no hover outline on them as it passes (the column's
+    // own outline says where it lands; elementFromPoint then finds the column through them)
+    <div
+      ref={pageRoot}
+      className={clsx(
+        "flex h-full min-h-0 flex-col [overflow-wrap:anywhere] max-md:h-auto max-md:min-h-full max-md:overflow-x-clip md:relative",
+        drag && "[&_[data-task-card]]:pointer-events-none",
+      )}
+    >
       {/* On a phone the buttons are icons only (their words would push the header wider than the screen and squeeze
           the title into a column of letters); the counts stay */}
       {/* As tall as Gerdr's own tab bar over a Code pane (h-10, ui/src/components/TabBar.tsx), so switching between
