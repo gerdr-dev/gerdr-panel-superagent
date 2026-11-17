@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowRight, ArrowUp, Bot, Users, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Route, Send, Settings, Undo2, X } from "lucide-react";
+import { AlertTriangle, ArrowRight, ArrowUp, Bot, Users, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Route, Search, Send, Settings, Undo2, X } from "lucide-react";
 import { EditableTitle } from "../components/EditableTitle";
 import clsx from "clsx";
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -111,6 +111,32 @@ export default function BoardPage() {
   }, [search]);
   const [doneLimit, setDoneLimit] = useState(20);
   const byId = Object.fromEntries((tasks ?? []).map((t) => [t.id, t]));
+  // ⌘F (Ctrl+F off the mac) over the board: a box in the header that narrows every column to the cards matching it.
+  // In a task's drawer ⌘F is the chat's own find (Gerdr's, it reaches the messages the virtual list hasn't drawn);
+  // here, without our own, the browser's find came up, which can't see past the 20 finished cards shown.
+  const [find, setFind] = useState<string | null>(null); // null: the box is closed
+  const findBox = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const mac = /Mac/.test(navigator.platform);
+    const on = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.code !== "KeyF" || e.altKey || e.shiftKey || (mac ? !e.metaKey || e.ctrlKey : !e.ctrlKey || e.metaKey)) return;
+      // A drawer, the settings or a dialog is open: theirs (the chat's find), or the browser's over what they show
+      if (!pageRoot.current?.offsetParent || document.querySelector("[role=dialog]")) return;
+      e.preventDefault();
+      setFind((f) => f ?? "");
+      requestAnimationFrame(() => (findBox.current?.focus(), findBox.current?.select()));
+    };
+    window.addEventListener("keydown", on);
+    return () => window.removeEventListener("keydown", on);
+  }, []);
+  const words = (find ?? "").trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const textOf = (t: Task) => [t.id, t.title, t.repo, t.origin?.title, t.prompt, t.question, t.summary, t.said].filter(Boolean).join("\n").toLowerCase();
+  // Every word somewhere in the card's task or in a task inside its card (a requirement's members, the steps asked)
+  const hit = (t: Task) => {
+    if (!words.length) return true;
+    const text = [t, ...(tasks ?? []).filter((x) => x.in === t.id)].map(textOf).join("\n");
+    return words.every((w) => text.includes(w));
+  };
   const list = (c: Col) => {
     // Members of a requirement and the steps they asked for are in its card, not cards of their own
     const l = (tasks ?? []).filter((t) => !t.in && boardCol(t) === c);
@@ -214,8 +240,9 @@ export default function BoardPage() {
   };
 
   const column = (c: (typeof COLS)[number]) => {
-    const all = list(c.id);
-    const shown = c.id === "done" ? all.slice(0, doneLimit) : all;
+    const all = list(c.id).filter(hit);
+    // Searching: every finished one that matches, not the first 20
+    const shown = c.id === "done" && !words.length ? all.slice(0, doneLimit) : all;
     const you = all.filter(waitsOnUser);
     const minutes = you.filter((t) => t.owner === "human").reduce((n, t) => n + (t.minutes ?? 0), 0);
     return (
@@ -243,7 +270,7 @@ export default function BoardPage() {
             one sideways too) made every touch on the column look like one on something that scrolls sideways, so the
             swipe between columns left it alone (lib/swipe.ts skip) */}
         <div className="min-h-0 flex-1 space-y-2 px-2 pb-2 md:overflow-y-auto">
-          {shown.length ? shown.map((t) => <MiniCard key={t.id} t={t} byId={byId} active={t.id === open} onOpen={() => (setPeek(null), setOpen(t.id))} />) : <p className="py-6 text-center text-[12px] text-muted-foreground">无任务</p>}
+          {shown.length ? shown.map((t) => <MiniCard key={t.id} t={t} byId={byId} active={t.id === open} onOpen={() => (setPeek(null), setOpen(t.id))} />) : <p className="py-6 text-center text-[12px] text-muted-foreground">{words.length ? "没有匹配的" : "无任务"}</p>}
           {all.length > shown.length && (
             <button className="w-full py-2 text-[12px] text-muted-foreground hover:text-foreground" onClick={() => setDoneLimit(doneLimit + 50)}>
               再显示 {Math.min(50, all.length - shown.length)} 个
@@ -277,6 +304,37 @@ export default function BoardPage() {
           </Button>
         </div>
         <div className="flex min-w-0 items-center gap-1 max-md:gap-0">
+          {find !== null ? (
+            <label className="flex h-7 min-w-0 items-center gap-1.5 rounded-md border bg-background px-2 text-[13px] focus-within:border-ring">
+              <Search className="size-3.5 shrink-0 text-muted-foreground" />
+              <input
+                ref={findBox}
+                autoFocus
+                value={find}
+                onChange={(e) => setFind(e.target.value)}
+                placeholder="找任务：标题、编号、仓库、内容"
+                className="w-56 min-w-0 bg-transparent outline-none placeholder:text-muted-foreground max-md:w-32"
+                onKeyDown={(e) => {
+                  if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    setFind(null);
+                  } else if (e.key === "Enter") {
+                    // The first match in the board's order of what matters
+                    const t = PHONE_ORDER.flatMap(list).find(hit);
+                    if (t) (setPeek(null), setOpen(t.id));
+                  }
+                }}
+              />
+              <button aria-label="关闭搜索" className="shrink-0 text-muted-foreground hover:text-foreground" onClick={() => setFind(null)}>
+                <X className="size-3.5" />
+              </button>
+            </label>
+          ) : (
+            <Button variant="ghost" size="icon" className="size-8" aria-label="搜索任务" title={`搜索任务（${/Mac/.test(navigator.platform) ? "⌘F" : "Ctrl+F"}）`} onClick={() => setFind("")}>
+              <Search className="size-4" />
+            </Button>
+          )}
           <Button variant="ghost" size="icon" className={clsx("size-8", phoneMenu && "max-md:hidden")} aria-label="设置" title="设置、流程、触发器、定时任务" onClick={() => setSettings("settings")}>
             <Settings className="size-4" />
           </Button>
@@ -292,7 +350,7 @@ export default function BoardPage() {
       ) : (
         <>
         <Alerts onLog={() => setSettings("log")} />
-        <PhoneTabs cols={phoneCols} count={(c) => list(c).length} waitingCount={waitingCount} current={phoneCol} onPick={setPhoneTab} />
+        <PhoneTabs cols={phoneCols} count={(c) => list(c).filter(hit).length} waitingCount={waitingCount} current={phoneCol} onPick={setPhoneTab} />
         {phone ? (
           // A phone: one column at a time, the tabs above or a swipe to the next (lib/swipe.ts)
           <div ref={pagerView} className="overflow-hidden">
