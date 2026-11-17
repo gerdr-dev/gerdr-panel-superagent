@@ -275,8 +275,12 @@ export default function BoardPage() {
     if (action.startsWith("human:")) return setOpen(action.slice(6));
   };
 
+  // Dragging a card to another column: the user moving it (moveTo), the only way besides its menu and buttons
+  const [dragging, setDragging] = useState<Task | null>(null);
+  const [dropOn, setDropOn] = useState<Col | null>(null);
   const column = (c: (typeof COLS)[number]) => {
     const all = list(c.id).filter(hit);
+    const takes = !!dragging && canMove(dragging, c.id);
     // Searching: every finished one that matches, not the first 20
     const shown = c.id === "done" && !words.length ? all.slice(0, doneLimit) : all;
     const you = all.filter(waitsOnUser);
@@ -284,10 +288,28 @@ export default function BoardPage() {
     return (
       <section
         key={c.id}
+        onDragOver={(e) => {
+          if (!takes) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+          if (dropOn !== c.id) setDropOn(c.id);
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropOn((x) => (x === c.id ? null : x));
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          const t = dragging;
+          setDragging(null);
+          setDropOn(null);
+          if (t && canMove(t, c.id)) void moveTo(act, t.id, c.id);
+        }}
         className={clsx(
           "flex min-w-60 flex-1 basis-0 flex-col rounded-xl max-md:min-w-0",
           // What needs the user stands out in the board itself: 等你 with anything in it, 待验收 a little
           you.length ? "bg-warn/[0.02] ring-1 ring-warn/25" : c.id === "review" && all.length ? "bg-ok/5 ring-1 ring-ok/30" : "bg-muted/50",
+          // While a card is dragged: where it can go is outlined, the one under it filled
+          takes && (dropOn === c.id ? "bg-brand/10 ring-2 ring-brand/60" : "ring-1 ring-brand/30"),
         )}
       >
         <h2 className="flex items-center gap-2 px-3 pt-3 pb-2 text-[13px] font-medium">
@@ -306,7 +328,16 @@ export default function BoardPage() {
             one sideways too) made every touch on the column look like one on something that scrolls sideways, so the
             swipe between columns left it alone (lib/swipe.ts skip) */}
         <div className="min-h-0 flex-1 space-y-2 px-2 pb-2 md:overflow-y-auto">
-          {shown.length ? shown.map((t) => <MiniCard key={t.id} t={t} byId={byId} active={t.id === open} onOpen={() => (setPeek(null), setOpen(t.id))} />) : <p className="py-6 text-center text-[12px] text-muted-foreground">{words.length ? "没有匹配的" : "无任务"}</p>}
+          {shown.length ? shown.map((t) => (
+            <MiniCard
+              key={t.id}
+              t={t}
+              byId={byId}
+              active={t.id === open}
+              onOpen={() => (setPeek(null), setOpen(t.id))}
+              drag={!phone && movable(t) ? { start: () => setDragging(t), end: () => (setDragging(null), setDropOn(null)) } : undefined}
+            />
+          )) : <p className="py-6 text-center text-[12px] text-muted-foreground">{words.length ? "没有匹配的" : "无任务"}</p>}
           {all.length > shown.length && (
             <button className="w-full py-2 text-[12px] text-muted-foreground hover:text-foreground" onClick={() => setDoneLimit(doneLimit + 50)}>
               再显示 {Math.min(50, all.length - shown.length)} 个
@@ -611,7 +642,7 @@ function chatPanelFor(t: Task, byId: Record<string, Task>): { label: string; act
 }
 
 /** A task as a small card in its column: what it is, where, and how it's doing. Click for everything else. */
-function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, Task>; active: boolean; onOpen: () => void }) {
+function MiniCard({ t, byId, active, onOpen, drag }: { t: Task; byId: Record<string, Task>; active: boolean; onOpen: () => void; drag?: { start: () => void; end: () => void } }) {
   const steps = t.status === "done" || t.status === "dropped" ? [] : userSteps(t, byId);
   // The user's own steps are spelled out above (steps); the chips are for the rest (another task it waits for)
   const blockers = (t.blockedBy ?? []).filter((b) => byId[b] && byId[b].status !== "done" && byId[b].status !== "dropped" && !steps.some((x) => x.jump?.split("#")[0] === b));
@@ -623,7 +654,20 @@ function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, T
   const open = t.status !== "done" && t.status !== "dropped";
   const asked = t.owner === "human" && open ? `${ago(t.createdAt)}${t.handBack?.kind === "choice" || t.questions ? "问的" : "交给你"}` : "";
   return (
-    <button data-task-card="" onClick={onOpen} className={clsx(
+    <button
+      data-task-card=""
+      onClick={onOpen}
+      draggable={!!drag}
+      onDragStart={
+        drag &&
+        ((e) => {
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("text/plain", t.id);
+          drag.start();
+        })
+      }
+      onDragEnd={drag?.end}
+      className={clsx(
         "block w-full space-y-1.5 rounded-lg border bg-card p-3 text-left shadow-xs transition-[border-color,box-shadow,transform] duration-150 hover:shadow-sm active:scale-[0.99]",
         // A card waiting on the user stays yellow when hovered or open: only brighter, never blue.
         waitsOnUser(t) ? clsx("bg-warn/[0.04]", active ? "border-warn/80" : "border-warn/25 hover:border-warn/55") : clsx("hover:border-ring/50", active ? "border-ring" : notDispatched(t) && "border-warn/60"),
@@ -668,9 +712,13 @@ function MiniCard({ t, byId, active, onOpen }: { t: Task; byId: Record<string, T
           {x.text}
         </p>
       ))}
-      {!t.question && t.stopped && <p className="line-clamp-2 text-[12px] text-warn">{t.stopWhy ?? "停下了"}{t.said ? `：${t.said}` : ""}</p>}
-      {/* Where it stands in its worker's words (task_update's summary): the one line a card has for it */}
-      {t.owner === "agent" && t.summary && !t.question && !t.stopped && <p className="line-clamp-2 text-[12px] text-muted-foreground">{t.summary}</p>}
+      {/* Where it stands in its worker's words (the first paragraph of its last reply): the one line a card has for it.
+          A worker that stopped with nothing going on is no alarm (only the user moves the card): its live line says
+          停下; an unusual stop (the user's, an error, a turn cut short) is said here, quietly */}
+      {t.owner === "agent" && !t.question && t.stopped && t.stopWhy && t.stopWhy !== "停下了" && t.stopWhy !== "回了你的话，等你接着说" && (
+        <p className="line-clamp-1 text-[12px] text-muted-foreground">{t.stopWhy}</p>
+      )}
+      {t.owner === "agent" && !t.question && (t.summary || (t.stopped && t.said)) && <p className="line-clamp-2 text-[12px] text-muted-foreground">{t.summary || t.said}</p>}
       {!t.question && t.status === "running" && outside(t)[0] && <p className="line-clamp-2 text-[12px] text-muted-foreground">等：{outside(t)[0].what}</p>}
       {!t.question &&
         t.helpers
