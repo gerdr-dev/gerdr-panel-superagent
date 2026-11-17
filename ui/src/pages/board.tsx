@@ -25,6 +25,8 @@ import { usePhone, useSwipePages } from "../lib/swipe";
 import { convo, parseConvo } from "../lib/convo";
 import { usePanelChange, useRefresh, useSessions } from "../lib/visible";
 import { useLocation } from "react-router";
+import { createPortal } from "react-dom";
+import { usePortalContainer } from "../lib/portal";
 
 // The task board: columns left to right (to do, running, to review, done), small cards, details in a side panel. A
 // card's column is its task's status and only the user moves it: dragging it here, 移到… in its menu, or the buttons
@@ -275,9 +277,55 @@ export default function BoardPage() {
     if (action.startsWith("human:")) return setOpen(action.slice(6));
   };
 
-  // Dragging a card to another column: the user moving it (moveTo), the only way besides its menu and buttons
-  const [dragging, setDragging] = useState<Task | null>(null);
+  // Dragging a card to another column: the user moving it (moveTo), the only way besides its menu and buttons.
+  // Pointer events and our own floating copy, not HTML5 drag and drop: the browser's drag image is see-through by a
+  // fixed amount (the board showed through it, text over text) and can't be styled. The copy has an opaque card under
+  // dimmed contents; the card left behind fades.
+  const [drag, setDrag] = useState<{ t: Task; x: number; y: number; dx: number; dy: number; w: number } | null>(null);
   const [dropOn, setDropOn] = useState<Col | null>(null);
+  const dragging = drag?.t ?? null;
+  const portal = usePortalContainer();
+  const beginDrag = (t: Task, e: React.PointerEvent<HTMLElement>) => {
+    if (e.button !== 0 || e.pointerType !== "mouse") return;
+    const r = e.currentTarget.getBoundingClientRect();
+    const x0 = e.clientX, y0 = e.clientY;
+    let on = false;
+    let to: Col | null = null;
+    const move = (ev: PointerEvent) => {
+      // A click stays a click: it becomes a drag only once the pointer has moved a few pixels
+      if (!on && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 5) return;
+      if (!on) {
+        // No text selected along the way, and the hand closed while it holds the card
+        document.body.style.userSelect = "none";
+        document.body.style.cursor = "grabbing";
+      }
+      on = true;
+      ev.preventDefault();
+      const el = document.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>("[data-col]");
+      const c = (el?.dataset.col as Col | undefined) ?? null;
+      to = c && canMove(t, c) ? c : null;
+      setDropOn(to);
+      setDrag({ t, x: ev.clientX, y: ev.clientY, dx: x0 - r.left, dy: y0 - r.top, w: r.width });
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      if (!on) return;
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+      // The click that follows the release would open the card: swallowed, if it comes right away
+      const eat = (ev: MouseEvent) => (ev.stopPropagation(), ev.preventDefault());
+      window.addEventListener("click", eat, { capture: true, once: true });
+      setTimeout(() => window.removeEventListener("click", eat, { capture: true }), 0);
+      setDrag(null);
+      setDropOn(null);
+      if (to) void moveTo(act, t.id, to);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  };
   const column = (c: (typeof COLS)[number]) => {
     const all = list(c.id).filter(hit);
     const takes = !!dragging && canMove(dragging, c.id);
@@ -288,22 +336,7 @@ export default function BoardPage() {
     return (
       <section
         key={c.id}
-        onDragOver={(e) => {
-          if (!takes) return;
-          e.preventDefault();
-          e.dataTransfer.dropEffect = "move";
-          if (dropOn !== c.id) setDropOn(c.id);
-        }}
-        onDragLeave={(e) => {
-          if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropOn((x) => (x === c.id ? null : x));
-        }}
-        onDrop={(e) => {
-          e.preventDefault();
-          const t = dragging;
-          setDragging(null);
-          setDropOn(null);
-          if (t && canMove(t, c.id)) void moveTo(act, t.id, c.id);
-        }}
+        data-col={c.id}
         className={clsx(
           "flex min-w-60 flex-1 basis-0 flex-col rounded-xl max-md:min-w-0",
           // What needs the user stands out in the board itself: 等你 with anything in it, 待验收 a little
@@ -335,7 +368,8 @@ export default function BoardPage() {
               byId={byId}
               active={t.id === open}
               onOpen={() => (setPeek(null), setOpen(t.id))}
-              drag={!phone && movable(t) ? { start: () => setDragging(t), end: () => (setDragging(null), setDropOn(null)) } : undefined}
+              ghost={dragging?.id === t.id}
+              onGrab={!phone && movable(t) ? (e) => beginDrag(t, e) : undefined}
             />
           )) : <p className="py-6 text-center text-[12px] text-muted-foreground">{words.length ? "没有匹配的" : "无任务"}</p>}
           {all.length > shown.length && (
@@ -472,6 +506,19 @@ export default function BoardPage() {
           onClose={() => setPeek(null)}
         />
       )}</Linger>
+      {drag &&
+        // The card being dragged, under the pointer: an opaque card with its contents dimmed, tilted a little. On
+        // the panel's own portal area (as its dialogs): a transformed ancestor would shift a fixed box inside it
+        createPortal(
+          <div className="pointer-events-none fixed z-50" style={{ left: drag.x - drag.dx, top: drag.y - drag.dy, width: drag.w }}>
+            <div className="rotate-[1.5deg] rounded-lg bg-card shadow-2xl ring-1 ring-brand/50">
+              <div className="opacity-60">
+                <MiniCard t={drag.t} byId={byId} active={false} onOpen={() => {}} />
+              </div>
+            </div>
+          </div>,
+          portal ?? document.body,
+        )}
       <Linger>{creating && <NewTask onClose={() => setCreating(false)} act={act} />}</Linger>
       {archive && <ArchiveDialog onClose={() => setArchive(false)} onOpen={(id) => void act("unarchive", { id }).then(() => (setArchive(false), setOpen(id)))} />}
       <Linger>{settings && <SettingsSheet tab={settings} onTab={setSettings} onClose={() => setSettings(null)} onTask={(id) => (setSettings(null), setOpen(id))} />}</Linger>
@@ -642,7 +689,7 @@ function chatPanelFor(t: Task, byId: Record<string, Task>): { label: string; act
 }
 
 /** A task as a small card in its column: what it is, where, and how it's doing. Click for everything else. */
-function MiniCard({ t, byId, active, onOpen, drag }: { t: Task; byId: Record<string, Task>; active: boolean; onOpen: () => void; drag?: { start: () => void; end: () => void } }) {
+function MiniCard({ t, byId, active, onOpen, onGrab, ghost }: { t: Task; byId: Record<string, Task>; active: boolean; onOpen: () => void; onGrab?: (e: React.PointerEvent<HTMLElement>) => void; ghost?: boolean }) {
   const steps = t.status === "done" || t.status === "dropped" ? [] : userSteps(t, byId);
   // The user's own steps are spelled out above (steps); the chips are for the rest (another task it waits for)
   const blockers = (t.blockedBy ?? []).filter((b) => byId[b] && byId[b].status !== "done" && byId[b].status !== "dropped" && !steps.some((x) => x.jump?.split("#")[0] === b));
@@ -657,17 +704,10 @@ function MiniCard({ t, byId, active, onOpen, drag }: { t: Task; byId: Record<str
     <button
       data-task-card=""
       onClick={onOpen}
-      draggable={!!drag}
-      onDragStart={
-        drag &&
-        ((e) => {
-          e.dataTransfer.effectAllowed = "move";
-          e.dataTransfer.setData("text/plain", t.id);
-          drag.start();
-        })
-      }
-      onDragEnd={drag?.end}
+      onPointerDown={onGrab}
       className={clsx(
+        // Its place while it's dragged: faded, the floating copy is the card
+        ghost && "opacity-30",
         "block w-full space-y-1.5 rounded-lg border bg-card p-3 text-left shadow-xs transition-[border-color,box-shadow,transform] duration-150 hover:shadow-sm active:scale-[0.99]",
         // A card waiting on the user stays yellow when hovered or open: only brighter, never blue.
         waitsOnUser(t) ? clsx("bg-warn/[0.04]", active ? "border-warn/80" : "border-warn/25 hover:border-warn/55") : clsx("hover:border-ring/50", active ? "border-ring" : notDispatched(t) && "border-warn/60"),
