@@ -1,4 +1,4 @@
-import { ExternalLink, Loader2, Play, RotateCcw, X } from "lucide-react";
+import { ExternalLink, Loader2, Play, RotateCcw, Send, X } from "lucide-react";
 import clsx from "clsx";
 import { useState } from "react";
 import { Button } from "../components/Button";
@@ -20,6 +20,7 @@ type Item = {
   would?: { title?: string; parts: { repo: string; agent?: string; model?: string; title?: string }[] };
   tasks?: string[];
   handBacks?: { task: string; reason: string }[];
+  hint?: string;
   event: { id: string; source: string; kind: string; key?: string; actor?: string; who?: string; title?: string; text?: string; url?: string };
 };
 
@@ -73,6 +74,9 @@ export default function Log({ onTask }: { onTask: (id: string) => void }) {
 function Row({ x, onTask, onRetried }: { x: Item; onTask: (id: string) => void; onRetried: () => void }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  // 重新判断 opens a box first: the user usually disagrees with the last decision and wants to say how
+  const [asking, setAsking] = useState(false);
+  const [hint, setHint] = useState("");
   const st = STATE[x.state] ?? { label: x.state, tone: "" };
   const e = x.event;
   const again = x.state === "ignored" || x.state === "filtered" || x.state === "unavailable";
@@ -83,6 +87,8 @@ function Row({ x, onTask, onRetried }: { x: Item; onTask: (id: string) => void; 
     setErr("");
     try {
       await run(fn, input);
+      setAsking(false);
+      setHint("");
       onRetried();
     } catch (er: any) {
       setErr(String(er.message || er));
@@ -121,12 +127,39 @@ function Row({ x, onTask, onRetried }: { x: Item; onTask: (id: string) => void; 
         </p>
       )}
       {x.reason && <p className="text-[12px] text-muted-foreground">{x.state === "pending" ? "" : "理由："}{x.reason}</p>}
+      {x.hint && <p className="text-[12px] text-muted-foreground">你的意见：{x.hint}</p>}
       {x.handBacks?.map((h) => (
         <p key={h.task} className="text-[12px] text-muted-foreground">
           {h.task} 交回：{h.reason}
         </p>
       ))}
-      {(again || doIt || close || err) && (
+      {asking && (
+        <div className="space-y-2 pt-1">
+          <textarea
+            autoFocus
+            rows={2}
+            value={hint}
+            onChange={(e) => setHint(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) call("superagent.retry", { ids: [x.id], hint });
+              if (e.key === "Escape") setAsking(false);
+            }}
+            placeholder="给 Superagent 的意见，可不填（比如：这是活，导入到 xx 表，派给 yy 仓库）"
+            className="w-full rounded-md border bg-background px-2 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]"
+          />
+          <div className="flex items-center gap-2">
+            <Button disabled={busy} onClick={() => call("superagent.retry", { ids: [x.id], hint })}>
+              {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
+              重新判断
+            </Button>
+            <Button variant="ghost" disabled={busy} onClick={() => setAsking(false)}>
+              取消
+            </Button>
+            {err && <span className="text-[12px] text-bad">{err}</span>}
+          </div>
+        </div>
+      )}
+      {!asking && (again || doIt || close || err) && (
         <div className="flex items-center gap-2">
           {doIt && (
             <Button disabled={busy} onClick={() => call("superagent.execute", { id: x.id })} title="照它判断的建任务、派出去">
@@ -135,8 +168,8 @@ function Row({ x, onTask, onRetried }: { x: Item; onTask: (id: string) => void; 
             </Button>
           )}
           {again && (
-            <Button variant="outline" disabled={busy} onClick={() => call("superagent.retry", { ids: [x.id] })} title="交给 Superagent 重新判断">
-              {busy ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCcw className="size-3.5" />}
+            <Button variant="outline" disabled={busy} onClick={() => setAsking(true)} title="交给 Superagent 重新判断，可以附一句意见">
+              <RotateCcw className="size-3.5" />
               重新判断
             </Button>
           )}

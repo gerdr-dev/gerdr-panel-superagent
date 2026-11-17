@@ -325,14 +325,17 @@ export function dismiss(input: { ids: string[] }, ctx: Ctx) {
   return { closed: ids };
 }
 
-/** Sends events to the main session again: { ids } — ignored / filtered / unavailable ones, by a person's say-so. */
-export async function retry(input: { ids: string[] }, ctx: Ctx) {
+/**
+ * Sends events to the main session again: { ids, hint? } — ignored / filtered / unavailable ones, by a person's
+ * say-so. hint is what the person wants done differently ("this is work, give it to the X repo"), passed with them.
+ */
+export async function retry(input: { ids: string[]; hint?: string }, ctx: Ctx) {
   const ids = input?.ids ?? [];
   const s = state(ctx);
   for (const id of ids) {
     const it = findItem(s, id);
     if (it.state === "accepted" || it.state === "attached" || it.state === "delivered") throw new Error(`${id} 已经交给任务了（${it.tasks?.join("、")}）`);
   }
-  await evaluate(ctx, ids, load(ctx).store.tasks);
+  await evaluate(ctx, ids, load(ctx).store.tasks, input?.hint);
   return { sent: ids };
 }

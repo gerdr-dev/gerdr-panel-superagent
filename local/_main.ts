@@ -90,6 +90,11 @@ export type Item = {
   decidedAt?: number;
   /** Closed by the user in 去向 (superagent.dismiss) instead of decided: a late decision on it is a no-op. */
   dismissed?: boolean;
+  /**
+   * What the user said when sending it back to be judged again (去向's 重新判断, superagent.retry): the secretary
+   * reads it with the message and the last decision. Kept so 去向 shows what was asked.
+   */
+  hint?: string;
 };
 
 /** Why the secretary is having a turn: the user's words, a briefing (both owe the user a message), its own news, routing. */
@@ -615,7 +620,8 @@ function cut(text: string, n: number) {
   return [...t].length > n ? [...t].slice(0, n).join("") + "…" : t;
 }
 
-function eventBlock(it: Item, tasks: Task[]) {
+/** hint: the user sent it back to be judged again with this to say (superagent.retry); then the last decision goes too. */
+function eventBlock(it: Item, tasks: Task[], hint?: string) {
   const e = it.event;
   const related = tasks.filter((t) => follows(t).some((x) => x.source === e.source && x.key === e.key));
   // Who and where only by name: the ids (user, conversation) are the board's to match, the secretary decides by item.
@@ -628,6 +634,7 @@ function eventBlock(it: Item, tasks: Task[]) {
     e.files?.length ? `附件：\n${e.files.map((f) => `- ${f.name}：${f.path}`).join("\n")}` : "",
     it.handBacks?.length ? `负责它的 worker 交回了：\n${it.handBacks.map((h) => `- ${h.task}：${h.reason}`).join("\n")}` : "",
     related.length ? `这个对话里的任务：${related.map((t) => `${t.id}「${t.title}」(${t.status})`).join("、")}` : "",
+    hint ? `用户让你重新判断这条${it.reason ? `（上次：${it.state}，理由：${it.reason}）` : ""}，用户的意见：${hint}\n照这个意见重新决定。` : "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -655,18 +662,19 @@ export async function rerouteTask(ctx: Ctx, id: string, block: string) {
 }
 
 /** Events to judge (pending items, by id): to the main session in one message. */
-export async function evaluate(ctx: Ctx, ids: string[], tasks: Task[]) {
+export async function evaluate(ctx: Ctx, ids: string[], tasks: Task[], hint?: string) {
   const s = state(ctx);
   const items = ids.map((id) => findItem(s, id));
+  hint = hint?.trim() || undefined;
   await toMain(
     ctx,
-    items.map((it) => eventBlock(it, tasks)),
+    items.map((it) => eventBlock(it, tasks, hint)),
     "route",
     undefined,
     items.length === 1 ? eventLine(items[0]) : `${items.length} 条外面来的消息：${items.map((it) => eventLine(it)).join("；")}`,
   );
   updateState(ctx, (x) => {
-    for (const id of ids) Object.assign(findItem(x, id), { state: "pending", sentAt: Date.now(), reason: undefined, dismissed: undefined });
+    for (const id of ids) Object.assign(findItem(x, id), { state: "pending", sentAt: Date.now(), reason: undefined, dismissed: undefined, hint });
   });
 }
 
