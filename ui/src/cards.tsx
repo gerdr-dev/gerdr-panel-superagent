@@ -199,7 +199,11 @@ function TaskWait({ card }: CardProps) {
       <div className="my-1.5 flex items-center gap-2 rounded-lg border border-l-2 border-l-ok bg-card px-3 py-2 text-[12px] text-muted-foreground">
         <Check className="size-3.5 shrink-0 text-ok" />
         <span className="min-w-0 flex-1 truncate">等：{c.title}</span>
-        <span className="shrink-0">{st?.how ?? "不等了"}{st?.at ? ` · ${new Date(st.at).toTimeString().slice(0, 5)}` : ""}</span>
+        {/* `how` can be a whole MR condition (onState's title): it shrinks too, or it pushes the card past the chat */}
+        <span className="min-w-0 max-w-[60%] truncate" title={st?.how}>
+          {st?.how ?? "不等了"}
+        </span>
+        {st?.at && <span className="shrink-0">· {new Date(st.at).toTimeString().slice(0, 5)}</span>}
       </div>
     );
   return (
