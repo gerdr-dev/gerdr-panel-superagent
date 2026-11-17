@@ -26,9 +26,11 @@ import { convo, parseConvo } from "../lib/convo";
 import { usePanelChange, useRefresh, useSessions } from "../lib/visible";
 import { useLocation } from "react-router";
 
-// The task board: columns left to right (to do, running, needs you, to review, done), small cards, details in a side
-// panel. Columns are worked out from facts (task status, the worker session's state, blockers), never dragged: a
-// dragged card would disagree with what the worker is actually doing.
+// The task board: columns left to right (to do, running, to review, done), small cards, details in a side panel. A
+// card's column is its task's status and only the user moves it: dragging it here, 移到… in its menu, or the buttons
+// (派出去 / 通过 / 打回 / 放弃). Neither the worker nor its session's state moves it (DESIGN.md「状态只由用户改」, 2026-11-17:
+// a /compact sent a card from 待验收 back to 进行中 and back). The session's state is only shown: the card's live line,
+// and yellow (等你) when it waits on the user right now.
 
 type Col = "todo" | "active" | "you" | "review" | "done";
 
@@ -40,6 +42,31 @@ const COLS: { id: Col; title: string; icon: React.ReactNode }[] = [
   { id: "review", title: "待验收", icon: <CircleDot className="size-3.5 text-ok" /> },
   { id: "done", title: "已完成", icon: <CheckCircle2 className="size-3.5 text-muted-foreground" /> },
 ];
+
+/** The status a column stands for (tasks.setStatus). */
+const STATUS: Record<Col, string> = { todo: "todo", active: "running", you: "running", review: "review", done: "done" };
+
+/** Moves a task where the user dropped it or picked in its menu; refused moves (back to 待办 once sent out) say why. */
+const toastError = (core as unknown as { toast?: { error?: (m: string) => unknown } }).toast?.error;
+function moveTo(act: Act, id: string, c: Col) {
+  return act("setStatus", { id, status: STATUS[c] }).catch((e: any) => toastError?.(String(e?.message ?? e)));
+}
+
+/** Where the user can move a task by hand: agent tasks, alone on the board (a requirement's members are in its card). */
+const movable = (t: Task) => t.owner === "agent" && !t.in && t.status !== "dropped";
+
+/** Whether task t can go to column c by hand: 待办 only before it was sent out, 待验收 only after. */
+function canMove(t: Task, c: Col) {
+  if (!movable(t) || c === boardCol(t)) return false;
+  if (c === "todo") return !t.session;
+  if (c === "review") return !!t.session;
+  return true;
+}
+
+/** 移到… rows for a task's menu (已完成 has its own 标为完成). */
+function moveActions(t: Task): ChatAction[] {
+  return COLS.filter((c) => c.id !== "done" && canMove(t, c.id)).map((c) => ({ id: `move:${c.id}`, label: `移到${c.title}` }));
+}
 
 /** Most important first: what waits on the user, then results to judge, then what's going on. */
 const PHONE_ORDER: Col[] = ["active", "review", "todo", "done"];
@@ -120,8 +147,13 @@ export default function BoardPage() {
     const mac = /Mac/.test(navigator.platform);
     const on = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.code !== "KeyF" || e.altKey || e.shiftKey || (mac ? !e.metaKey || e.ctrlKey : !e.ctrlKey || e.metaKey)) return;
-      // A drawer, the settings or a dialog is open: theirs (the chat's find), or the browser's over what they show
-      if (!pageRoot.current?.offsetParent || document.querySelector("[role=dialog]")) return;
+      // The board hidden (another tab), or a drawer, the settings or a dialog over it: theirs (the chat's find), or the
+      // browser's over what they show. Only dialogs on screen: another panel kept mounted out of sight with its drawer
+      // open has one in the page too, and counting it left ⌘F to the browser here.
+      // Gerdr hides the panels not shown with visibility (invisible), so being laid out isn't enough: checked as well.
+      const seen = (el: Element | null | undefined) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility === "visible";
+      if (!seen(pageRoot.current)) return;
+      if ([...document.querySelectorAll("[role=dialog]")].some(seen)) return;
       e.preventDefault();
       setFind((f) => f ?? "");
       requestAnimationFrame(() => (findBox.current?.focus(), findBox.current?.select()));
@@ -235,6 +267,10 @@ export default function BoardPage() {
     // Done with it either way: close the chat rather than flip to the finished task's summary
     if (action === "accept" || action === "drop") void act(action, { id: t.id }).then(() => setOpen(""));
     if (action === "restore") void act("restore", { id: t.id });
+    if (action.startsWith("move:")) {
+      const c = action.slice(5) as Col;
+      void moveTo(act, t.id, c).then(() => c === "done" && setOpen(""));
+    }
     // A human step it's waiting for: leave the chat for that task's own panel (its steps, what to hand back)
     if (action.startsWith("human:")) return setOpen(action.slice(6));
   };
@@ -533,7 +569,7 @@ function chatPanelFor(t: Task, byId: Record<string, Task>): { label: string; act
   // The user finished it themselves, or it's good enough as it is: done, whatever the worker last reported
   const done: ChatAction = { id: "accept", label: "标为完成", confirm: "确定完成？" };
   // Over: what it came to, above the conversation it came out of
-  if (t.status === "done") return { label: `${t.id} · ${day(t.doneAt ?? t.updatedAt)} 完成${t.summary ? `：${t.summary}` : ""}`, actions: [] };
+  if (t.status === "done") return { label: `${t.id} · ${day(t.doneAt ?? t.updatedAt)} 完成${t.summary ? `：${t.summary}` : ""}`, actions: moveActions(t) };
   if (t.status === "dropped") return { label: `${t.id} · 已放弃${t.summary ? `：${t.summary}` : ""}`, actions: [{ id: "restore", label: "恢复这个任务", kind: "primary" }] };
   const c = colOf(t);
   // Steps only the user can do that hold this task up: shown here, where they are, with a way to go and do them
@@ -543,11 +579,11 @@ function chatPanelFor(t: Task, byId: Record<string, Task>): { label: string; act
       // A short line, then one row per thing (Gerdr draws them with a yellow edge and a jump icon): the run-on text and
       // a row of buttons left nothing readable on a phone. Each row jumps to its card in this chat.
       label: `在等你处理 ${steps.length} 件`,
-      actions: [drop, done],
+      actions: [...moveActions(t), drop, done],
       items: steps,
     };
   if (c === "review") {
-    return { label: `${t.id} · 待验收：没问题就通过；要改直接在下面说，它会接着改`, actions: [drop, { id: "accept", label: "通过", kind: "primary" }] };
+    return { label: `${t.id} · 待验收：没问题就通过；要改直接在下面说，它会接着改`, actions: [...moveActions(t), drop, { id: "accept", label: "通过", kind: "primary" }] };
   }
   if (c === "you")
     return {
@@ -565,11 +601,13 @@ function chatPanelFor(t: Task, byId: Record<string, Task>): { label: string; act
                 ? `${t.stopWhy ?? "停下了"}${t.said ? `。它最后说：「${t.said}」` : ""}`
                 : "它在等你，见最后一条回复"
       }`,
-      actions: [drop, done],
+      actions: [...moveActions(t), drop, done],
     };
   // In progress: what it waits on, if anything, and what will wake it — the same words as the 在等 list
   const w = (t.waits ?? []).find((x) => !x.user);
-  return { label: `${t.id} · 进行中${w ? ` · 在等：${w.what}（${w.wake ?? ""}）` : ""}`, actions: [drop, done] };
+  // Stopped with nothing going on: said here, but it stays in 进行中 until the user moves it
+  const halt = t.stopped ? ` · ${t.stopWhy ?? "停下了"}` : "";
+  return { label: `${t.id} · 进行中${w ? ` · 在等：${w.what}（${w.wake ?? ""}）` : halt}`, actions: [...moveActions(t), drop, done] };
 }
 
 /** A task as a small card in its column: what it is, where, and how it's doing. Click for everything else. */
@@ -734,12 +772,13 @@ function Drawer({ t, byId, act, onClose, onGo }: { t: Task; byId: Record<string,
               {toggle}
               {t.owner === "agent" && !done && (
                 <Menu
-                  actions={[{ id: "accept", label: "标为完成", confirm: "确定完成？" }, { id: "drop", label: "放弃", kind: "danger", confirm: "确定放弃？" }]}
+                  actions={[...moveActions(t), { id: "accept", label: "标为完成", confirm: "确定完成？" }, { id: "drop", label: "放弃", kind: "danger", confirm: "确定放弃？" }]}
                   armed={armed}
                   onPick={(a) => {
                     if (a.confirm && armed !== a.id) return setArmed(a.id);
                     setArmed("");
-                    void act(a.id, { id: t.id });
+                    if (a.id.startsWith("move:")) void moveTo(act, t.id, a.id.slice(5) as Col);
+                    else void act(a.id, { id: t.id });
                   }}
                   onClose={() => setArmed("")}
                 />

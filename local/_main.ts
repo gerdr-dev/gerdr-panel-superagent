@@ -267,7 +267,6 @@ export async function followUp(ctx: Ctx, id: string, e: Ev) {
     // What it waited on outside came — or something else did: it looks again either way, and waits again if it must
     ends: isOutside,
     on: e.key ? { source: e.source, key: e.key } : undefined,
-    resume: true,
     followup: e.id,
     also: (x) => {
       note(x, `${by}接着说：${text}`);
@@ -391,6 +390,7 @@ function talkText(ctx: Ctx) {
       `他要亲手做的步骤记成人工任务（\`tasks.add\` 带 \`"owner": "human"\`）。派完一句话告诉他交给了谁。\n` +
       `- 替用户回答 worker：问题 \`tasks.answerQuestion ${ex({ id: "t5", q: "1", value: "选项或他的原话" })}\`；` +
       `验收 \`tasks.accept ${ex({ id: "t5" })}\` / 打回 \`tasks.reject ${ex({ id: "t5", feedback: "…" })}\`；` +
+      `他要把任务移到某一列 \`tasks.setStatus ${ex({ id: "t5", status: "review" })}\`（todo / running / review / done；任务的列只在他要你移时才动）；` +
       `他做完了自己的步骤 \`tasks.complete ${ex({ id: "t5", value: "要交回的值（没有就不写）" })}\`；` +
       `转告 worker \`tasks.say ${ex({ id: "t5", text: "…" })}\`；不做了 \`tasks.drop ${ex({ id: "t5", reason: "…" })}\`。\n` +
       `- 不要用你自带的提问工具（AskUserQuestion）：有要问用户的，直接在回复里问，他会在这里答你。` +

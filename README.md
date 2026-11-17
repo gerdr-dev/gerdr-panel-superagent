@@ -11,7 +11,7 @@
 结果回到消息来的地方。原则照 [dsh-superagent](https://github.com/deepseek-ai/dsh-superagent-prototype)：尽量少占人的注意力，尽量多给价值。
 
 - 派活：写一句要做什么，选仓库或让它自己挑，派给 Claude Code / Codex 的 worker。
-- worker 不用汇报：任务面板跟着它的对话走，它这一轮结束、又没在等什么，任务就到你面前（待验收）；要你亲手做的步骤、要你拍板的决定都排进「等你」，在对话里也能直接答。
+- 任务在哪一列只由你来定：拖卡片，或在任务的菜单里「移到…」；worker 停下、压缩对话、被叫醒都不会挪它。worker 不用汇报，卡片上是它最后一轮回复的第一段；要你亲手做的步骤、要你拍板的决定在进行中里排最前、标黄（「等你」），在对话里也能直接答。
 - 一个任务一个 worker：点开卡片就是它的对话，要你处理的事钉在顶上。一件事要拆成几份（前后端、几集视频）就是几张卡，一份等另一份做完再开工；worker 要帮手就开自己的子 agent。
 - 外面来的活：设置 →「触发器」选收哪些事件（装了哪些插件就有哪些）、只收谁的。已有任务的对话里的后续直接交给那个任务；
   其余的由秘书判断：接（建任务派出）、并进已有任务、停掉某个任务、不接。每条去了哪，看「去向」。
@@ -37,7 +37,7 @@
 秘书就是秘书会话本身的对话（Gerdr 的 `SessionChat`），从任务面板左上角「秘书」打开（抽屉），为什么见 `DESIGN.md` 的「秘书」。
 
 这个面板只有一页：任务面板（`ui/src/pages/board.tsx`；`index.tsx` 就是它）。左上角「秘书」打开秘书的对话（会话、系统提示词和压缩在 `local/_main.ts`，
-简报这些调的函数在 `local/secretary.ts`），「去向」看外面来的每条消息去了哪。任务面板上派给 agent 的任务和要用户亲手做的人工任务，按「待办 / 进行中 / 等你 / 待验收 / 已完成」排，
+简报这些调的函数在 `local/secretary.ts`），「去向」看外面来的每条消息去了哪。任务面板上派给 agent 的任务和要用户亲手做的人工任务，按「待办 / 进行中 / 待验收 / 已完成」排（等你的在进行中里排最前、标黄），
 数据在 `user/data/reqs/`（每部分一个文件，`local/_parts.ts`；完成很久的移到 `user/data/archive/`，`local/_archive.ts`），读写都走 `local/_store.ts`。任务面板右上角的齿轮是任务面板设置：「设置」（`ui/src/settings/Settings.tsx`，`user/settings.json`）、「流程」（`ui/src/settings/Flow.tsx`，
 编辑 `skills/my-workflow/`）和「定时任务」（`ui/src/settings/Schedules.tsx`，`schedules/`）。
 

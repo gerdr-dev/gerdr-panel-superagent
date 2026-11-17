@@ -111,41 +111,25 @@ export async function list(input: unknown, ctx: Ctx) {
     answered.length = 0;
     for (const t of s.tasks) {
       const sess = t.session && live[t.session];
-      // The user wrote to a finished worker in its chat and it's at it again (t54, 2026-11-05: "把这个做了" after it
-      // was done, the card stayed in 已完成): the task is going again. Only the user's own message: code waking a
-      // parked worker (a follow-up) decides that itself (wake resume).
-      if (t.status === "done" && t.owner === "agent" && sess?.status === "running" && t.doneAt) {
-        const said = (sess as any).personSaid as { at: number } | undefined;
-        if ((said?.at ?? 0) > t.doneAt || (sess.byPerson && (sess.turnStartedAt ?? 0) > t.doneAt)) {
-          Object.assign(t, { status: "running", doneAt: undefined, updatedAt: Date.now() });
-          // Its requirement was closed with it: open again, without judging the lead's own (idle) session afresh
-          const root = reqOf(s, t);
-          if (root && root !== t && root.status === "done") {
-            Object.assign(root, { status: "running", doneAt: undefined, updatedAt: Date.now() });
-            const rs = root.session && live[root.session];
-            if (rs) root.synced = rs.updatedAt;
-          }
-        }
-      }
       // What the user typed in its chat (Gerdr's personSaid): the feed shows it, or the lines after it make no sense
       // (t52: "等扶摇审批" with nothing saying the user asked for 扶摇)
       const ps = (sess as any)?.personSaid as { text: string; at: number } | undefined;
       if (ps?.at && ps.at > (t.heard ?? t.createdAt) && ps.text.trim()) {
         t.heard = ps.at;
-        activity(s, t, { kind: "user", by: t.id, text: `你在对话里说：${ps.text.trim()}`, at: ps.at } as any);
+        // A slash command (/compact) is upkeep of the conversation, nothing the feed needs
+        if (!/^\/\S/.test(ps.text.trim()))
+          activity(s, t, { kind: "user", by: t.id, text: `你在对话里说：${ps.text.trim()}`, at: ps.at } as any);
       }
       syncSessions(t, kids[t.id] ?? []);
       syncAgents(t, t.session, (sess?.tasks ?? []) as any[]);
-      if (sess?.status === "running") {
+      // A turn started with a slash command (/compact) is no answer to anything and no going on with the work
+      if (sess?.status === "running" && !command(sess)) {
         // The worker is at it again — the user answered in its chat, something woke it, or it carried on. What it asked
         // the user before this turn, and what it waited on outside, are no longer the state of things; it asks or
-        // waits again if it must. A result waiting for review is being reworked.
+        // waits again if it must. The task's status stays where the user put it (DESIGN.md「状态只由用户改」).
         const turn = sess.turnStartedAt ?? 0;
         for (const w of endWaits(t, (w) => w.kind === "user" && !w.item && w.since < turn, "在对话里回复了")) note(t, `问：${w.what}\n（在对话里回复了）`);
         endWaits(t, (w) => isOutside(w) && w.since < turn, "接着做了");
-        // Only a review reported before this turn: one reported in this very turn (task_update, then a closing line) is
-        // the turn's result, not rework — taking it back made the worker report it again and again (t41, 2026-11-10)
-        if (t.status === "review" && (t.reportedAt ?? 0) < turn) Object.assign(t, { status: "running", updatedAt: Date.now() });
       }
       // Stopped by the user (or Gerdr restarting): theirs, not a worker that went quiet. No "it stopped without
       // reporting" for them to answer, and no reminder — a reminder would start it again against their stop
@@ -170,23 +154,21 @@ export async function list(input: unknown, ctx: Ctx) {
         t.asked = undefined;
       }
       const b = lastBlock(sess.reply ?? "");
-      // The user asked it something in its chat and it answered: they're reading that answer and will carry on, so
-      // "review" (come and look) means nothing here; the task stays where it is with the new summary. done /
-      // question / blocked still apply: they say something changed or is needed.
-      if (b && sess.byPerson && b.state === "review" && t.status === "running") applyBlock(s, t, { ...b, state: undefined });
-      else if (b) applyBlock(s, t, b);
+      // An older worker's gerdr-task block: its summary, question or step (no status: _apply.ts)
+      if (b) applyBlock(s, t, b);
       else if (t.status === "running" && sess.status === "idle" && !settled(t) && !cancelled && !busyBehind(sess) && t.assigned?.state !== "delivered") {
-        // Its turn ended and it waits on nothing: its turn is over, so it's the user's to look at (待验收), with what it
-        // said last as the card's line. No reporting (2026-11-12, the user: workers say things in their reply; the
-        // task panel reads the session). The one thing it is still reminded of: work it handed to another session
+        // Its turn ended and it waits on nothing: what it said last becomes the card's line; the task stays in its
+        // column until the user moves it. The one thing it is still reminded of: work it handed to another session
         // with nobody waiting on it (wait_for), which nothing would wake it for.
         const out = open(t).filter((w) => w.kind === "session");
         if (out.length && (t.nudges ?? 0) < 1) {
           t.nudges = (t.nudges ?? 0) + 1;
           nudge.push({ session: sess.id, id: t.id, out: out.map((w) => w.what.replace(/^它派出的/, "")) });
-        } else {
+        } else if (!command(sess)) {
+          // The card's line follows what it said last; the column doesn't (DESIGN.md「状态只由用户改」). A turn the user
+          // started with a command (/compact) said nothing about the work.
           const said = firstWords(String(sess.reply ?? ""));
-          Object.assign(t, { status: "review", reportedAt: Date.now(), ...(said ? { summary: said } : {}) });
+          if (said) t.summary = said;
         }
       }
       t.updatedAt = Date.now();
@@ -273,11 +255,10 @@ export async function list(input: unknown, ctx: Ctx) {
 /**
  * Every agent task is a requirement card (DESIGN.md「需求和队友」), alone or with members: its members and the user's
  * steps they asked for carry `in` (the requirement's id) and the page folds them into its card; the requirement's
- * `teamColumn` is the most pressing of theirs — any of them waiting on the user puts the card under 等你.
+ * `teamColumn` is its own, marked 等你 when any of them waits on the user.
  */
 function teams<T extends Task & { column: string }>(s: Store, tasks: T[]) {
   const byId = new Map(tasks.map((t) => [t.id, t]));
-  const rank = { you: 3, review: 2, active: 1, done: 0 } as Record<string, number>;
   const out = tasks.map((t) => {
     const root = reqOf(s, t);
     return root && root.id !== t.id ? { ...t, in: root.id } : t;
@@ -286,8 +267,9 @@ function teams<T extends Task & { column: string }>(s: Store, tasks: T[]) {
     if (t.in || t.owner !== "agent") return t;
     const mine = out.filter((x: any) => x.in === t.id);
     // A member's result for review counts as the card's too: the user judges it either way
+    // Its column is its own status (the user's to change); a member waiting on the user only makes it yellow
     let col = t.column;
-    if (col !== "done") for (const x of mine) if ((rank[x.column] ?? 0) > (rank[col] ?? 0)) col = x.column;
+    if (col === "active" && mine.some((x: any) => x.column === "you")) col = "you";
     // Its last change: its own, a member's, or its feed's latest line (kept in the members' parts, not on it)
     t.updatedAt = Math.max(t.updatedAt, ...mine.map((x: any) => x.updatedAt ?? 0), ...(t.activity ?? []).map((a: any) => a.at));
     return { ...t, teamColumn: col, members: members(s, byId.get(t.id)!).map((m) => m.id) };
@@ -387,9 +369,10 @@ function dropOrphans(s: Store) {
 }
 
 /**
- * Where the board shows a task. For an agent task it follows from its waits (_waits.ts), nothing else: one waiting
- * on the user here (not through a board item of its own) → 等你; the worker running, or anything still awaited → 进行中; neither → it stopped with nothing
- * going on, and that's the user's to look at (等你) — never a card in 进行中 with nothing going on.
+ * Where the board shows a task. The column is the task's status, which only the user changes (setStatus, drag,
+ * 标为完成 / 通过 / 打回 / 放弃: DESIGN.md「状态只由用户改」). "you" is no column of its own: a task in 进行中 that
+ * waits on the user right now (an approval in its chat, an error, a question) — the page shows it first and yellow.
+ * A worker that stopped with nothing going on just says so on its card.
  */
 function column(s: Store, t: Task, sess: any): "you" | "review" | "active" | "done" {
   if (t.status === "done" || t.status === "dropped") return "done";
@@ -402,7 +385,6 @@ function column(s: Store, t: Task, sess: any): "you" | "review" | "active" | "do
   // Waiting on the user right here (a question, a helper's approval): its card is what they act on. A step / question
   // of theirs that's a board item of its own is that item's card under 等你; this task stays in 进行中, "等 tN"
   if (open(t).some((w) => w.user && !w.item)) return "you";
-  if (stopped(t, sess)) return "you";
   return "active";
 }
 
@@ -413,6 +395,16 @@ function column(s: Store, t: Task, sess: any): "you" | "review" | "active" | "do
  */
 function busyBehind(sess: any) {
   return !!sess?.tasks?.some((k: any) => k.background && k.status === "running");
+}
+
+/**
+ * Its current (or last) turn is one the user started with a slash command (/compact, /clear, /model…): upkeep of
+ * the conversation, not work. Gerdr sets personSaid when a person's message starts a turn (hub/send.go), and byPerson
+ * says the turn is theirs.
+ */
+function command(sess: any) {
+  const ps = sess?.personSaid as { text: string; at: number } | undefined;
+  return !!sess?.byPerson && !!ps && /^\/\S/.test(ps.text.trim()) && ps.at >= (sess.turnStartedAt ?? 0);
 }
 
 /** Its worker isn't running and the task waits on nothing. */
@@ -721,6 +713,36 @@ export async function accept(input: { id: string }, ctx: Ctx) {
 }
 
 
+/**
+ * The user moves an agent task to a column (a drag on the board, 移到… in its menu): { id, status: todo | running |
+ * review | done }. The only way a task changes column besides the user's other buttons (派出去 / 通过 / 打回 / 放弃):
+ * neither its worker nor its conversation's state moves it (DESIGN.md「状态只由用户改」). Into 进行中 from 待办 is
+ * 派出去; to 已完成 is 标为完成; back to 待办 only before it was sent out. The worker isn't told: the user says what
+ * they want in its chat.
+ */
+export async function setStatus(input: { id: string; status: string }, ctx: Ctx) {
+  const t = find(load(ctx).store, input.id);
+  if (t.owner !== "agent") throw new Error(`${t.id} 是要你做的一项，在它的卡片上处理`);
+  const to = input.status;
+  if (to === t.status) return t;
+  if (to === "done") return accept({ id: t.id }, ctx);
+  if (t.status === "dropped") throw new Error(`${t.id} 已经放弃了：先恢复它`);
+  if (to === "running" && t.status === "todo" && !t.session) return start({ id: t.id }, ctx);
+  if (to === "todo") {
+    if (t.session) throw new Error(`${t.id} 已经派出去了，回不到待办`);
+    return t;
+  }
+  if (to !== "running" && to !== "review") throw new Error(`没有这个状态：${to}（todo / running / review / done）`);
+  if (!t.session) throw new Error(`${t.id} 还没派出去：先派出去`);
+  const label = to === "review" ? "待验收" : "进行中";
+  return update(ctx, (s) => {
+    const x = find(s, t.id);
+    Object.assign(x, { status: to, doneAt: undefined, updatedAt: Date.now(), ...(to === "review" ? { reportedAt: Date.now() } : {}) });
+    activity(s, x, { kind: "user", by: x.id, text: `你移到了${label}` });
+    return x;
+  });
+}
+
 /** Sends it back with what's wrong. { id, feedback } */
 export async function reject(input: { id: string; feedback: string }, ctx: Ctx) {
   if (!input.feedback?.trim()) throw new Error("写一句哪里不对");
@@ -832,7 +854,6 @@ export async function refreshAsk(input: { id: string }, ctx: Ctx) {
       `- 还要问但问法变了：ask_human 带 replaces（写上旧的 id）重新问，写清现在的情况和选项；\n` +
       `- 已经不用问了：cancel_human，说明原因；\n` +
       `- 还是原样要问：不用改，用 message_user 说一句「这个问题还是要你定」。\n做完就结束这一轮。`,
-    resume: true,
     feed: `你请 ${w.repo?.split("/").pop() || w.id} 按最新情况更新 ${h.id}`,
   });
   return { sent: w.id };
@@ -874,7 +895,6 @@ export async function message(input: { id: string; to?: string[]; text: string; 
       text:
         `[任务面板] 用户在秘书那里问你：\n\n${text}${list}`,
       files: files.map((a) => a.path),
-      resume: true,
       // One line for all of them, written with the first
       feed: i === 0 ? feed : undefined,
       feedFiles: i === 0 ? files : undefined,
@@ -1424,7 +1444,6 @@ export async function sendAnswered(input: { id: string }, ctx: Ctx) {
       text:
         `用户先把答了的发给你（${h.id}）：\n${fresh.map((q) => `- ${q.title}\n  → ${q.answer}`).join("\n")}\n` +
         `还没答、之后再答的：${rest.map((q) => `${h.id}#${q.id}「${q.title}」`).join("、")}（答了会再发给你）。能照已答的先做的就先做；还没答的里已经不用问的，cancel_human 它。`,
-      resume: true,
     }).catch(() => {});
   return { sent: fresh.length };
 }

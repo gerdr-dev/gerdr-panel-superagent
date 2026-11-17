@@ -3,8 +3,8 @@
 // (waits.ts tick), the user's answer or step done on the board (tasks.ts complete / answer / answerQuestion) — it:
 //   1. ends the waits it answers, saying how (the chat's wait card, the 在等 list and the trail show it);
 //   2. marks the long waits it only touched (an MR still to merge) as woken, by what;
-//   3. picks an ended task up again when asked to (resume: a person speaking in its conversation);
-//   4. tells the worker, in one message.
+//   3. tells the worker, in one message. The task's status stays as it is: only the user moves it (DESIGN.md
+//      「状态只由用户改」).
 // A session it handed work to reports to the worker through Gerdr itself, not here: its wait ends when the session
 // does (_waits.ts syncSessions).
 
@@ -21,8 +21,6 @@ export type Wake = {
   /** The conversation it came from: a long wait on it that doesn't end (an MR still to merge) is marked woken. */
   on?: { source: string; key?: string };
   files?: string[];
-  /** A task that ended (done / review) goes back to running: a person spoke again in its conversation. */
-  resume?: boolean;
   /** Recorded on the task as handled (an event id), so a re-sent one isn't handled twice. */
   followup?: string;
   /** Also before telling, on the same write. */
@@ -59,10 +57,6 @@ export async function wake(ctx: Ctx, id: string, m: Wake): Promise<Task> {
     if (came) activity(s, x, { kind: "got", by: x.id, text: `等到了：${came.what.replace(/^等待?\s*/, "")}（${m.how}）` });
     const now = Date.now();
     if (m.on) for (const w of open(x)) if (w.on && w.on.source === m.on.source && w.on.key === m.on.key) w.woke = { how: m.how, at: now };
-    if (m.resume && x.session && (x.status === "done" || x.status === "review")) {
-      x.status = "running";
-      x.doneAt = undefined;
-    }
     m.also?.(x);
     if (m.feed) activity(s, x, { kind: "user", by: x.id, text: m.feed, ...(m.feedFiles?.length ? { files: m.feedFiles } : {}) });
     x.updatedAt = now;
