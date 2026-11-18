@@ -8,7 +8,6 @@ import { activity, find, load, note, reqOf, splitRef, update, type Store, type T
 import { handBack, isMain, state as mainState, threadsOf } from "./_main";
 import { workflow } from "./_config";
 import { hold } from "./_outbox";
-import { waitCard } from "./waits";
 import { eventCard } from "./_cards";
 import { endWaits, isOutside, open, question } from "./_waits";
 import { GENERAL, MEMORY, nameOf } from "./_memory";
@@ -52,8 +51,9 @@ const STEP = {
 };
 
 export const tools = {
-  // task_update was taken out on 2026-11-12: the card's line is the reply's first paragraph, links are in the reply.
-  // A worker started before that and still calling it gets "no such tool" and says it in its reply instead
+  // task_update was taken out on 2026-11-12 (its code too, 2026-11-18): the card's line is the worker's newest
+  // paragraph (tasks.ts newest), links are in the reply. A worker still calling it gets "no such tool" and says it in
+  // its reply instead
   ask_human: {
     description:
       "Put something on the user's task panel that needs them: a step only they can do (give steps), or a decision (give options). It shows in this chat as a card with everything you put in it (the title, steps / options, what to hand back), answerable right there, and on their task panel: don't write the question or the steps again in your reply — a line on why you're asking is enough. Their answer / 'done' comes to you as a message, maybe days later. Decisions and values asked while earlier ones are unanswered go in one item: you get all the answers together once every one is answered. cancel_human takes one back. When and how to ask: the my-workflow skill, references/human.md and task.md.",
@@ -162,49 +162,6 @@ export function mine(s: Store, ctx: Ctx): Task {
   const t = who && s.tasks.find((x) => x.owner === "agent" && (x.session === who || x.sessions?.includes(who)));
   if (!t) throw new Error("这个对话不是任务面板上任何任务的 worker（只有任务面板派出去的会话能用这些工具）");
   return t;
-}
-
-export async function task_update(input: { state: string; summary?: string; links?: { label?: string; url: string }[]; mr?: string }, ctx: Ctx) {
-  const sess = ctx.caller.session ? ctx.sessions.get(ctx.caller.session) : null;
-  const out = update(ctx, (s) => {
-    const t = mine(s, ctx);
-    if (t.status === "done" || t.status === "dropped") throw new Error(`${t.id} 已经${t.status === "done" ? "完成" : "放弃"}了`);
-    // Only the user says a task is done (DESIGN.md「只有用户能标完成」): a worker's "done" (older workers, habit) is review
-    let state = input.state === "working" ? undefined : input.state === "done" ? "review" : input.state;
-    // "Come and look" while the user still has to choose something of yours reads as two different asks (t52: a review
-    // line "有结论了，等你看" next to the choice it was really waiting on). The choice is what's next.
-    const asking = s.tasks.filter((h) => h.owner === "human" && h.status === "todo" && (h.askedBy === t.id || t.blockedBy?.includes(h.id)));
-    if (state === "review" && asking.length)
-      throw new Error(`你还有要用户决定 / 做的 ${asking.map((h) => h.id).join("、")}：等他答了再报验收（答案会发给你）。只是说进展就用 working 或 message_user`);
-    if (state === "review" && input.summary && questionsIn(input.summary))
-      throw new Error(
-        `summary 里有要用户回答的问题：写在结论里他没法答，也容易漏。要他定的用 ask_human（每个问题一项，带 options），结论和方案用 message_user 写全；` +
-          `等他答完再报验收。如果那些只是陈述、不是问他，改成不带问号的写法再报。`,
-      );
-    // Answering the user's own question in the chat: they read it there; don't move the task to "come and look"
-    if (state === "review" && sess?.byPerson && t.status === "running") state = undefined;
-    const before = new Set((t.waits ?? []).map((w) => w.id));
-    applyBlock(s, t, { ...input, state });
-    // "working" says nothing about what's next: it doesn't reset the reminder count, or a worker that answers each
-    // reminder with "still working" and stops would be reminded forever (tasks.ts settled)
-    Object.assign(t, { viaTools: true, synced: undefined, reportedAt: Date.now(), updatedAt: Date.now() });
-    // A new state is what's next: the reminder count starts over, and a wait_for before it no longer says what it waits on.
-    // "delivering" (older workers: an MR out) is a wait_for on the MR (_apply.ts), shown in the chat as wait_for's is
-    if (state && state !== "delivering") {
-      t.nudges = 0;
-      endWaits(t, isOutside, "worker 报了新进展");
-    }
-    const root = reqOf(s, t);
-    if (root && state === "review") activity(s, t, { by: t.id, kind: state, text: `有结论了，等你看${input.summary ? `：${input.summary}` : ""}` });
-    const fresh = open(t).filter((w) => isOutside(w) && !before.has(w.id));
-    const stale = staleAsks(s, t);
-    // One card per call: a wait it just started is what's next, so that one; otherwise what it changed on the card
-    const kind = state === "review" ? state : "working";
-    const said = input.summary?.trim() || (kind === "review" ? "有结论了，等你看" : "");
-    const gerdrCard = fresh.length ? waitCard(ctx, t, fresh) : said || input.links?.length ? eventCard(ctx, t.id, kind, said || "加了链接", { links: input.links }) : undefined;
-    return { id: t.id, status: t.status, column: question(t) ? "等你" : t.status, ...(stale ? { reminder: stale } : {}), ...(gerdrCard ? { gerdrCard } : {}) };
-  });
-  return out;
 }
 
 export async function closeSessions(ctx: Ctx, ids: string[]) {
@@ -417,15 +374,6 @@ export function message_user(input: { text: string; files?: { path: string; name
 }
 
 
-
-/**
- * Questions for the user in a result's summary (t74, 2026-11-11: "要你定的四件事", four questions as prose under
- * review): they get lost there, unanswerable. Two or more question marks outside links and code are counted as that.
- */
-function questionsIn(text: string) {
-  const plain = text.replace(/`[^`]*`/g, "").replace(/https?:\/\/\S+/g, "");
-  return (plain.match(/[?？]/g) ?? []).length >= 2;
-}
 
 /** The old name of message_user (see tools). */
 export function post_progress(input: { text: string }, ctx: Ctx) {
