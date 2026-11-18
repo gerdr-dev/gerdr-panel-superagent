@@ -200,7 +200,7 @@ export default function BoardPage() {
   const inChat = !!sel && sel.owner === "agent" && (!!sel.session || routingNow);
   // A session its worker handed work to is asking the user something: that's where the answer goes, so it opens
   // first (the 链路 above leads back to the worker)
-  const asking = sel?.status === "running" ? sel.helpers?.find((k) => k.status === "waiting" && k.left) : undefined;
+  const asking = sel && going(sel) ? sel.helpers?.find((k) => k.status === "waiting" && k.left) : undefined;
   const primary = sel ? (routingNow ? sel.router : asking ? asking.id : sel.session) : undefined;
   // Another conversation of the same task picked in its 链路 (the router, an earlier worker, a helper): shown in the
   // same drawer; its buttons are the task's live conversation's only
@@ -778,7 +778,7 @@ function MiniCard({ t, byId, active, onOpen, onGrab, ghost }: { t: Task; byId: R
       {t.owner === "agent" && !t.question && (t.latest || t.summary || (t.stopped && t.said)) && (
         <p className={clsx("line-clamp-2 text-[12px] text-muted-foreground", t.live?.status === "running" && "shimmer")}>{t.latest || t.summary || t.said}</p>
       )}
-      {!t.question && t.status === "running" && outside(t)[0] && <p className="line-clamp-2 text-[12px] text-muted-foreground">等：{outside(t)[0].what}</p>}
+      {!t.question && going(t) && outside(t)[0] && <p className="line-clamp-2 text-[12px] text-muted-foreground">等：{outside(t)[0].what}</p>}
       {!t.question &&
         t.helpers
           ?.filter((k) => k.status === "waiting")
@@ -1035,9 +1035,12 @@ function liveDot(t: Task) {
   if (l.status === "running") return "bg-warn animate-pulse";
   if (l.status === "waiting") return "bg-bad animate-pulse";
   if (l.status === "error") return "bg-bad";
-  if (t.helpers?.length || (t.waits ?? []).some((w) => w.kind === "agent") || (t.status === "running" && outside(t).length)) return "bg-muted-foreground";
+  if (t.helpers?.length || (t.waits ?? []).some((w) => w.kind === "agent") || (going(t) && outside(t).length)) return "bg-muted-foreground";
   return "bg-ok";
 }
+
+/** Sent out and not finished (进行中 or 待验收): its waits count in either, as in local/_store.ts going. */
+const going = (t: Task) => t.status === "running" || t.status === "review";
 
 /** What its worker waits on outside (wait_for): a reply, a time to look again. */
 function outside(t: Task) {
@@ -1056,7 +1059,7 @@ function liveText(t: Task) {
   const bg = (t.waits ?? []).filter((w) => w.kind === "agent").length;
   if (bg) return `${bg} 个后台任务在跑 · ${ago(l.updatedAt)}`;
   // It said what it waits on outside (wait_for): a reply in a conversation it follows, and / or a time to look again
-  const out = t.status === "running" ? outside(t) : [];
+  const out = going(t) ? outside(t) : [];
   if (out.length) {
     const at = out.find((w) => w.kind === "time")?.at;
     return at && at > Date.now() && !out.some((w) => w.kind === "reply") ? `等外面 · ${Math.max(1, Math.round((at - Date.now()) / 60000))} 分钟后回来看` : `等回复 · ${ago(out[0].since)}`;

@@ -20,7 +20,7 @@
 // Meanwhile the card stays in 进行中 showing what it waits on and the latest check; the worker running again (woken, or
 // the user writing to it) ends the wait — it calls wait_for again if it still waits.
 
-import { activity, load, memberName, members, note, reqOf, teamOf, update, type Task } from "./_store";
+import { activity, going, load, memberName, members, note, reqOf, teamOf, update, type Task } from "./_store";
 import { isOutside, mrConversation, open, waitOn, wakeItem, wakeText, type Wait, type WakeOn } from "./_waits";
 
 const sessionTitle = (w: Wait) => w.what.replace(/^它派出的「(.*?)」.*$/, "$1");
@@ -147,7 +147,7 @@ export function wait_for(
   });
   const { t, ws, stale } = update(ctx, (s) => {
     const t = mine(s, ctx);
-    if (t.status !== "running") throw new Error(`${t.id} 现在不是进行中（${t.status}），不用等`);
+    if (!going(t)) throw new Error(`${t.id} ${t.status === "done" ? "已经完成" : t.status === "dropped" ? "已经放弃" : "还没派出去"}，不用等`);
     const now = Date.now();
     const on: WakeOn[] = parsed.map((p) => {
       if (p.type === "message") return { type: "message", conv: p.conv };
@@ -367,7 +367,7 @@ export async function onFollowed(input: { event: GerdrEvent }, ctx: Ctx) {
 export async function tick(input: unknown, ctx: Ctx) {
   const now = Date.now();
   const due = load(ctx)
-    .store.tasks.filter((t) => t.status === "running")
+    .store.tasks.filter(going)
     .flatMap((t) => open(t).filter((w) => w.kind === "time" && (w.at ?? 0) <= now).map((w) => ({ t, w })));
   const woke: string[] = [];
   for (const { t, w } of due) {
@@ -403,7 +403,7 @@ const OUT_MAX = 1500;
 async function runChecks(ctx: Ctx): Promise<string[]> {
   const now = Date.now();
   const due = load(ctx)
-    .store.tasks.filter((t) => t.status === "running")
+    .store.tasks.filter(going)
     .flatMap((t) => open(t).filter((w) => w.kind === "check" && w.check && w.check.next <= now).map((w) => ({ t, w })));
   const woke: string[] = [];
   for (const { t, w } of due) {

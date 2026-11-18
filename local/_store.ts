@@ -363,6 +363,15 @@ export function splitRef(ref: string): [string, string | undefined] {
  * The task, brought back from the archive if it's there (_archive.ts): `s` is refilled from the files then. Inside
  * update the write that follows sees parts it didn't read and runs the change again on the full board.
  */
+/**
+ * Sent out and not finished: 进行中 or 待验收. Its worker's waits, wakes and tools work the same in both — the column is
+ * only the user's label (DESIGN.md「状态只由用户改」), and the user may move a task to 待验收 while its worker still
+ * waits on something, or talk to it there (t123: wait_for refused with "不是进行中（review）").
+ */
+export function going(t: Task) {
+  return t.status === "running" || t.status === "review";
+}
+
 export function find(s: Store, id: string): Task {
   let t = s.tasks.find((x) => x.id === id);
   if (!t && current && unarchive(current, id)) {

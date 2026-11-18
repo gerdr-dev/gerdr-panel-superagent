@@ -3,7 +3,7 @@ import { tellBadge } from "./_badge";
 import { DATA, skillFile } from "./_user";
 import { workflow } from "./_config";
 import { forWorker } from "./memory";
-import { activity, blockersDone, draftOf, find, load, members, newTask, note, reqOf, splitRef, update, type Question, type Store, type Task } from "./_store";
+import { activity, blockersDone, going, draftOf, find, load, members, newTask, note, reqOf, splitRef, update, type Question, type Store, type Task } from "./_store";
 import { applyBlock } from "./_apply";
 import { endQuestions, endWaits, isOutside, open, question, syncAgents, syncSessions, wakeText, type Wait } from "./_waits";
 import { cutLine, wake } from "./_wake";
@@ -156,7 +156,7 @@ export async function list(input: unknown, ctx: Ctx) {
       const b = lastBlock(sess.reply ?? "");
       // An older worker's gerdr-task block: its summary, question or step (no status: _apply.ts)
       if (b) applyBlock(s, t, b);
-      else if (t.status === "running" && sess.status === "idle" && !settled(t) && !cancelled && !busyBehind(sess) && t.assigned?.state !== "delivered") {
+      else if (going(t) && sess.status === "idle" && !settled(t) && !cancelled && !busyBehind(sess) && t.assigned?.state !== "delivered") {
         // Its turn ended and it waits on nothing: what it said last becomes the card's line; the task stays in its
         // column until the user moves it. The one thing it is still reminded of: work it handed to another session
         // with nobody waiting on it (wait_for), which nothing would wake it for.
@@ -807,7 +807,7 @@ export async function complete(input: { id: string; value?: string }, ctx: Ctx) 
     if ((h.handBack?.kind === "value" || h.handBack?.kind === "choice") && !input.value?.trim()) throw new Error(h.handBack.kind === "choice" ? "选一个，或者写下你的决定" : `要交回：${h.handBack.label || "一个值"}`);
     Object.assign(h, { status: "done", handedBack: input.value?.trim() || undefined, doneAt: Date.now(), updatedAt: Date.now() });
     activity(s, h, { kind: "user", by: h.askedBy, of: h.id, text: `${h.handBack?.kind === "choice" || h.handBack?.kind === "questions" ? "你答了" : "你做完了"}「${h.title}」${h.handBack?.kind === "secret" || !h.handedBack ? "" : `：${h.handedBack}`}` });
-    woken = s.tasks.filter((t) => t.owner === "agent" && t.session && t.status === "running" && t.blockedBy?.includes(h.id) && blockersDone(s, t));
+    woken = s.tasks.filter((t) => t.owner === "agent" && t.session && going(t) && t.blockedBy?.includes(h.id) && blockersDone(s, t));
     return h;
   });
   let back = "";
