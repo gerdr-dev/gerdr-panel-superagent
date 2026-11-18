@@ -724,6 +724,13 @@ function MiniCard({ t, byId, active, onOpen, onGrab, ghost }: { t: Task; byId: R
         {t.owner === "human" ? t.handBack?.kind === "choice" ? <CircleHelp className="size-3 shrink-0" /> : <Hand className="size-3 shrink-0" /> : <Bot className="size-3 shrink-0" />}
         {/* Never squeezed: a long "asked by" beside it truncates instead of wrapping the id onto two lines */}
         <span className="shrink-0 font-mono whitespace-nowrap">{t.id}</span>
+        {/* Its worker's state in the id line, with the dot Code mode's tabs use, so a glance down a column reads it */}
+        {live && open && (
+          <span className={clsx("inline-flex min-w-0 items-center gap-1", liveTone(t) !== "text-ok" && liveTone(t))}>
+            <span className={clsx("inline-block size-1.5 shrink-0 rounded-full", liveDot(t))} />
+            <span className="truncate">{live}</span>
+          </span>
+        )}
         {t.urgent && <AlertTriangle className="size-3 shrink-0 text-warn" />}
         {asker && (
           // Where it came from, in the card's own line: the task whose worker asked it, a click opening that
@@ -788,7 +795,7 @@ function MiniCard({ t, byId, active, onOpen, onGrab, ghost }: { t: Task; byId: R
           {(t.questions ?? []).filter((q) => !q.dropped).length > 1 && ` · 共 ${(t.questions ?? []).filter((q) => !q.dropped).length} 个`}
         </p>
       )}
-      {(t.repo || live || asked || blockers.length > 0 || !!t.helpers?.length) && (
+      {(t.repo || asked || t.agent || t.model || t.from || t.origin || blockers.length > 0 || !!t.helpers?.length) && (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
           {t.repo && <span>{t.repo.split("/").pop()}</span>}
           {asked && <span>{asked}</span>}
@@ -796,7 +803,6 @@ function MiniCard({ t, byId, active, onOpen, onGrab, ghost }: { t: Task; byId: R
         {t.from && <span>· 拆自 {t.from}</span>}
           {/* An outside message it came from (a chat, an MR): which, so a card waiting under 待办 to be looked at says so */}
           {t.origin && <span className="text-brand">· 来自 {t.origin.source}</span>}
-          {live && t.status !== "done" && t.status !== "dropped" && <span className={clsx("inline-flex items-center gap-1", liveTone(t))}>· {live}</span>}
           {outside(t)
             .filter((w) => w.url)
             .map((w) => (
@@ -1015,6 +1021,18 @@ function liveTone(t: Task) {
   const l = t.live;
   const stale = l?.status === "running" && l.turnStartedAt && Date.now() - l.turnStartedAt > 40 * 60000;
   return l?.status === "waiting" || l?.status === "error" || stale ? "text-warn" : l?.status === "running" ? "text-ok" : "";
+}
+
+/** The dot beside its live text, coloured as Code mode's session dots (AgentIcon StatusDot): running yellow, waiting
+ *  on the user / errored red, still busy in the background grey, its turn over green. */
+function liveDot(t: Task) {
+  const l = t.live;
+  if (!l) return notDispatched(t) ? "bg-warn" : "bg-muted-foreground/40";
+  if (l.status === "running") return "bg-warn animate-pulse";
+  if (l.status === "waiting") return "bg-bad animate-pulse";
+  if (l.status === "error") return "bg-bad";
+  if (t.helpers?.length || (t.waits ?? []).some((w) => w.kind === "agent") || (t.status === "running" && outside(t).length)) return "bg-muted-foreground";
+  return "bg-ok";
 }
 
 /** What its worker waits on outside (wait_for): a reply, a time to look again. */
