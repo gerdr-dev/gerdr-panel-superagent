@@ -916,14 +916,19 @@ type Act = (fn: string, input: unknown) => Promise<unknown>;
  * card and the folder say the same.
  */
 async function renameTask(act: Act, t: Task, title: string) {
-  await act("edit", { id: t.id, title });
-  for (const id of new Set([t.session, ...(t.sessions ?? [])].filter(Boolean) as string[]))
-    await fetch(`/api/sessions/${encodeURIComponent(id)}/rename`, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "X-Gerdr": "1", "Content-Type": "application/json" },
-      body: JSON.stringify({ Title: title }),
-    }).catch(() => {});
+  // All at once: the card shows the new title right away (act lays it over the board), and its conversations' titles
+  // (the drawer's header) needn't wait for the tasks.list that act runs after the edit
+  await Promise.all([
+    act("edit", { id: t.id, title }),
+    ...[...new Set([t.session, ...(t.sessions ?? [])].filter(Boolean) as string[])].map((id) =>
+      fetch(`/api/sessions/${encodeURIComponent(id)}/rename`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "X-Gerdr": "1", "Content-Type": "application/json" },
+        body: JSON.stringify({ Title: title }),
+      }).catch(() => {}),
+    ),
+  ]);
 }
 
 /** A button that runs an action, shows it running and its error. */
