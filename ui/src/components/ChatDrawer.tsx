@@ -16,7 +16,7 @@ import { Trail, type TrailProps } from "./Trail";
 // is using (stopping the agent) doesn't.
 
 /** A button above the chat. confirm: the first click asks (the label becomes this), the second does it. */
-export type ChatAction = { id: string; label: string; kind?: "primary" | "danger"; confirm?: string };
+export type ChatAction = { id: string; label: string; kind?: "primary" | "danger"; confirm?: string; /** Drawn before the label in the ⋯ menu. */ icon?: ReactNode };
 /**
  * A view of the page's own beside 对话 / 文件 (the team panel's 动态, its shared folder): a tab in the title row, its
  * content filling the drawer under the strip.
@@ -261,13 +261,14 @@ export function Menu({ actions, armed, onPick, onClose }: { actions: ChatAction[
             <button
               key={a.id}
               role="menuitem"
-              className={clsx("flex w-full rounded-sm px-2 py-1.5 text-left text-[13px] hover:bg-accent", (a.kind === "danger" || armed === a.id) && "text-bad")}
+              className={clsx("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[13px] hover:bg-accent", (a.kind === "danger" || armed === a.id) && "text-bad")}
               onClick={() => {
                 if (a.confirm && armed !== a.id) return onPick(a);
                 setOpen(false);
                 onPick(a);
               }}
             >
+              {a.icon}
               {armed === a.id ? a.confirm : a.label}
             </button>
           ))}

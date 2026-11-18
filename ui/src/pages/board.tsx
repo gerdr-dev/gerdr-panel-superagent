@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowRight, ArrowUp, Bot, Users, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Route, Search, Send, Settings, Undo2, X } from "lucide-react";
+import { AlertTriangle, ArrowRight, ArrowUp, Ban, Bot, Users, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Route, Search, Send, Settings, Undo2, X } from "lucide-react";
 import { EditableTitle } from "../components/EditableTitle";
 import clsx from "clsx";
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -65,10 +65,15 @@ function canMove(t: Task, c: Col) {
   return true;
 }
 
-/** 移到… rows for a task's menu (已完成 has its own 标为完成). */
+/** 移到… rows for a task's menu, each with its column's icon. 已完成 is accept (its summary, the worker let go). */
 function moveActions(t: Task): ChatAction[] {
-  return COLS.filter((c) => c.id !== "done" && canMove(t, c.id)).map((c) => ({ id: `move:${c.id}`, label: `移到${c.title}` }));
+  return COLS.filter((c) => canMove(t, c.id)).map((c) =>
+    c.id === "done" ? { id: "accept", label: `移到${c.title}`, icon: c.icon, confirm: "确定完成？" } : { id: `move:${c.id}`, label: `移到${c.title}`, icon: c.icon },
+  );
 }
+
+/** 放弃 in a task's menu. */
+const DROP: ChatAction = { id: "drop", label: "放弃", kind: "danger", confirm: "确定放弃？", icon: <Ban className="size-3.5" /> };
 
 /** Most important first: what waits on the user, then results to judge, then what's going on. */
 const PHONE_ORDER: Col[] = ["active", "review", "todo", "done"];
@@ -651,9 +656,7 @@ function chatPanel(t: Task, byId: Record<string, Task>): { label: string; action
 
 /** The line and buttons on a worker's conversation, by where its task stands. */
 function chatPanelFor(t: Task, byId: Record<string, Task>): { label: string; actions: ChatAction[]; items?: ChatItem[] } {
-  const drop: ChatAction = { id: "drop", label: "放弃", confirm: "确定放弃？" };
-  // The user finished it themselves, or it's good enough as it is: done, whatever the worker last reported
-  const done: ChatAction = { id: "accept", label: "标为完成", confirm: "确定完成？" };
+  const drop = DROP;
   // Over: what it came to, above the conversation it came out of
   if (t.status === "done") return { label: `${t.id} · ${day(t.doneAt ?? t.updatedAt)} 完成${t.summary ? `：${t.summary}` : ""}`, actions: moveActions(t) };
   if (t.status === "dropped") return { label: `${t.id} · 已放弃${t.summary ? `：${t.summary}` : ""}`, actions: [{ id: "restore", label: "恢复这个任务", kind: "primary" }] };
@@ -665,7 +668,7 @@ function chatPanelFor(t: Task, byId: Record<string, Task>): { label: string; act
       // A short line, then one row per thing (Gerdr draws them with a yellow edge and a jump icon): the run-on text and
       // a row of buttons left nothing readable on a phone. Each row jumps to its card in this chat.
       label: `在等你处理 ${steps.length} 件`,
-      actions: [...moveActions(t), drop, done],
+      actions: [...moveActions(t), drop],
       items: steps,
     };
   if (c === "review") {
@@ -687,13 +690,13 @@ function chatPanelFor(t: Task, byId: Record<string, Task>): { label: string; act
                 ? `${t.stopWhy ?? "停下了"}${t.said ? `。它最后说：「${t.said}」` : ""}`
                 : "它在等你，见最后一条回复"
       }`,
-      actions: [...moveActions(t), drop, done],
+      actions: [...moveActions(t), drop],
     };
   // In progress: what it waits on, if anything, and what will wake it — the same words as the 在等 list
   const w = (t.waits ?? []).find((x) => !x.user);
   // Stopped with nothing going on: said here, but it stays in 进行中 until the user moves it
   const halt = t.stopped ? ` · ${t.stopWhy ?? "停下了"}` : "";
-  return { label: `${t.id} · 进行中${w ? ` · 在等：${w.what}（${w.wake ?? ""}）` : halt}`, actions: [...moveActions(t), drop, done] };
+  return { label: `${t.id} · 进行中${w ? ` · 在等：${w.what}（${w.wake ?? ""}）` : halt}`, actions: [...moveActions(t), drop] };
 }
 
 /** A task as a small card in its column: what it is, where, and how it's doing. Click for everything else. */
@@ -878,7 +881,7 @@ function Drawer({ t, byId, act, onClose, onGo }: { t: Task; byId: Record<string,
               {toggle}
               {t.owner === "agent" && !done && (
                 <Menu
-                  actions={[...moveActions(t), { id: "accept", label: "标为完成", confirm: "确定完成？" }, { id: "drop", label: "放弃", kind: "danger", confirm: "确定放弃？" }]}
+                  actions={[...moveActions(t), DROP]}
                   armed={armed}
                   onPick={(a) => {
                     if (a.confirm && armed !== a.id) return setArmed(a.id);
