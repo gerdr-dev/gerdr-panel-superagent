@@ -106,24 +106,22 @@ export function useTasks() {
   // message hit the one still in flight and the message showed up only with the next 5 s poll (2026-11-06).
   const inflight = useRef<Promise<void> | null>(null);
   const again = useRef(false);
-  // What the user just changed on a task (a drag or 移到… → setStatus, a rename → edit), shown at once: the function
-  // and the tasks.list after it take a second or more (list re-reads every worker's session), and the card sat as it
-  // was all that time. Laid over what list answers until it agrees, or for 15 s at most (a list already running when
-  // the change was made answers without it).
-  const pending = useRef(new Map<string, { fields: Record<string, unknown>; at: number }>());
+  // Moves the user just made (a drag, 移到…), shown at once: tasks.setStatus and the tasks.list after it take a second
+  // or more (list re-reads every worker's session), and the card sat in its old column all that time. Laid over what
+  // list answers until it agrees, or for 15 s at most (a list already running when the move was made answers without it).
+  const moves = useRef(new Map<string, { status: string; at: number }>());
   const overlay = (ts: Task[]) => {
-    for (const [id, p] of pending.current) {
-      const t = ts.find((x) => x.id === id) as Record<string, unknown> | undefined;
-      if (!t || Object.entries(p.fields).every(([k, v]) => t[k] === v) || Date.now() - p.at > 15_000) pending.current.delete(id);
+    for (const [id, m] of moves.current) {
+      const t = ts.find((x) => x.id === id);
+      if (!t || t.status === m.status || Date.now() - m.at > 15_000) moves.current.delete(id);
     }
-    if (!pending.current.size) return ts;
+    if (!moves.current.size) return ts;
     return ts.map((t) => {
-      const p = pending.current.get(t.id);
-      if (!p) return t;
-      const st = p.fields.status as string | undefined;
-      // The column tasks.ts would give a new status: 进行中 keeps its 等你 (yellow), the rest are the status's own
-      const col = !st ? undefined : st === "review" ? "review" : st === "done" ? "done" : t.column === "you" && st === "running" ? "you" : "active";
-      return { ...t, ...p.fields, ...(col ? { column: col, ...(t.teamColumn ? { teamColumn: col } : {}) } : {}) } as Task;
+      const m = moves.current.get(t.id);
+      if (!m) return t;
+      // The column tasks.ts would give it: 进行中 keeps its 等你 (yellow), the rest are the status's own
+      const col = m.status === "review" ? "review" : m.status === "done" ? "done" : t.column === "you" && m.status === "running" ? "you" : "active";
+      return { ...t, status: m.status as Task["status"], column: col, ...(t.teamColumn ? { teamColumn: col } : {}) } as Task;
     });
   };
   const reload = useCallback(() => {
@@ -181,23 +179,22 @@ export function useTasks() {
   /** Runs a tasks.<fn> and refreshes the board after. 放弃 gets an undo in a toast: it's easy to click by mistake. */
   const act = useCallback(
     async (fn: string, input: unknown) => {
-      // Fields the change sets, to show before it's done: a status, or what edit writes (a title…)
-      const { id, ...rest } = (input ?? {}) as { id?: string } & Record<string, unknown>;
-      const fields = fn === "setStatus" ? { status: rest.status } : fn === "edit" ? rest : null;
-      if (id && fields) {
-        pending.current.set(id, { fields, at: Date.now() });
+      const move = fn === "setStatus" ? (input as { id: string; status: string }) : null;
+      if (move) {
+        moves.current.set(move.id, { status: move.status, at: Date.now() });
         setTasks((ts) => ts && overlay(ts));
       }
       let r: unknown;
       try {
         r = await run(`tasks.${fn}`, input);
       } catch (e) {
-        // Refused (back to 待办 once sent out…): the card goes back to what it was
-        if (id && fields) pending.current.delete(id);
+        // Refused (back to 待办 once sent out…): the card goes back where it was
+        if (move) moves.current.delete(move.id);
         void reload();
         throw e;
       }
       await reload();
+      const id = (input as { id?: string } | null)?.id;
       if (fn === "drop" && id && toast)
         toast(`已放弃 ${id}`, {
           duration: 10000,
