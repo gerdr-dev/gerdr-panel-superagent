@@ -604,6 +604,9 @@ export async function start(
     // What it makes that isn't committed goes in the task's folder (Gerdr names it in the worker's prompt and lets its
     // sandbox write there); an older Gerdr ignores the option and the worker uses its repository's
     artifactsDir: folder({ id: t.id }, ctx)?.path,
+    // A task runs for days or weeks while its skills (my-workflow) keep changing: Gerdr names the changed files at the
+    // top of the next message so the worker reads them again. An older Gerdr ignores the option.
+    skillUpdates: true,
     tags: { task: t.id },
     // Followed on the board (its drawer shows the chat), not in Code: no tab of it appears there
     workspace: "none",
