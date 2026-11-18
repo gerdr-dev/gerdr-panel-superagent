@@ -106,24 +106,6 @@ export function useTasks() {
   // message hit the one still in flight and the message showed up only with the next 5 s poll (2026-11-06).
   const inflight = useRef<Promise<void> | null>(null);
   const again = useRef(false);
-  // Moves the user just made (a drag, 移到…), shown at once: tasks.setStatus and the tasks.list after it take a second
-  // or more (list re-reads every worker's session), and the card sat in its old column all that time. Laid over what
-  // list answers until it agrees, or for 15 s at most (a list already running when the move was made answers without it).
-  const moves = useRef(new Map<string, { status: string; at: number }>());
-  const overlay = (ts: Task[]) => {
-    for (const [id, m] of moves.current) {
-      const t = ts.find((x) => x.id === id);
-      if (!t || t.status === m.status || Date.now() - m.at > 15_000) moves.current.delete(id);
-    }
-    if (!moves.current.size) return ts;
-    return ts.map((t) => {
-      const m = moves.current.get(t.id);
-      if (!m) return t;
-      // The column tasks.ts would give it: 进行中 keeps its 等你 (yellow), the rest are the status's own
-      const col = m.status === "review" ? "review" : m.status === "done" ? "done" : t.column === "you" && m.status === "running" ? "you" : "active";
-      return { ...t, status: m.status as Task["status"], column: col, ...(t.teamColumn ? { teamColumn: col } : {}) } as Task;
-    });
-  };
   const reload = useCallback(() => {
     if (inflight.current) {
       again.current = true;
@@ -134,7 +116,7 @@ export function useTasks() {
         again.current = false;
         try {
           const r = await run<{ tasks: Task[]; archived?: number }>("tasks.list");
-          setTasks(overlay(r.tasks));
+          setTasks(r.tasks);
           setArchived(r.archived ?? 0);
           setError("");
         } catch (e: any) {
@@ -179,20 +161,7 @@ export function useTasks() {
   /** Runs a tasks.<fn> and refreshes the board after. 放弃 gets an undo in a toast: it's easy to click by mistake. */
   const act = useCallback(
     async (fn: string, input: unknown) => {
-      const move = fn === "setStatus" ? (input as { id: string; status: string }) : null;
-      if (move) {
-        moves.current.set(move.id, { status: move.status, at: Date.now() });
-        setTasks((ts) => ts && overlay(ts));
-      }
-      let r: unknown;
-      try {
-        r = await run(`tasks.${fn}`, input);
-      } catch (e) {
-        // Refused (back to 待办 once sent out…): the card goes back where it was
-        if (move) moves.current.delete(move.id);
-        void reload();
-        throw e;
-      }
+      const r = await run(`tasks.${fn}`, input);
       await reload();
       const id = (input as { id?: string } | null)?.id;
       if (fn === "drop" && id && toast)
