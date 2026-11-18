@@ -724,11 +724,12 @@ function MiniCard({ t, byId, active, onOpen, onGrab, ghost }: { t: Task; byId: R
         {t.owner === "human" ? t.handBack?.kind === "choice" ? <CircleHelp className="size-3 shrink-0" /> : <Hand className="size-3 shrink-0" /> : <Bot className="size-3 shrink-0" />}
         {/* Never squeezed: a long "asked by" beside it truncates instead of wrapping the id onto two lines */}
         <span className="shrink-0 font-mono whitespace-nowrap">{t.id}</span>
-        {/* Its worker's state in the id line, with the dot Code mode's tabs use, so a glance down a column reads it */}
+        {/* Its worker's state in the id line, with the dot Code mode's tabs use, so a glance down a column reads it.
+            The dot says the state (在跑 / 停下 / 等你…), so only the time follows it; the words stay in the tooltip */}
         {live && open && (
-          <span className={clsx("inline-flex min-w-0 items-center gap-1", liveTone(t) !== "text-ok" && liveTone(t))}>
+          <span title={live} className={clsx("inline-flex min-w-0 items-center gap-1", liveTone(t) !== "text-ok" && liveTone(t))}>
             <span className={clsx("inline-block size-1.5 shrink-0 rounded-full", liveDot(t))} />
-            <span className="truncate">{live}</span>
+            <span className="truncate">{live.includes(" · ") ? live.slice(live.lastIndexOf(" · ") + 3) : live}</span>
           </span>
         )}
         {t.urgent && <AlertTriangle className="size-3 shrink-0 text-warn" />}
