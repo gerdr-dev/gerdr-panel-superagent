@@ -9,7 +9,7 @@ import { endQuestions, endWaits, isOutside, open, question, syncAgents, syncSess
 import { cutLine, wake } from "./_wake";
 import { allAgents, mentionsIn } from "./_agents";
 import { archived as archivedGroups, archivedCount, archiveOld, latest, revive, unarchive as bringBack } from "./_archive";
-import { isMain, rerouteTask, routeTask, sweep, toMain } from "./_main";
+import { isMain, mains, rerouteTask, routeTask, sweep, toMain } from "./_main";
 
 export type { Task };
 
@@ -1310,11 +1310,14 @@ export async function agents(input: unknown, ctx: Ctx) {
 
 /** Routing conversations whose task has gone out (or was dropped), now idle: closed, they've done their one job. */
 async function closeRouters(ctx: Ctx, live: Record<string, any>) {
+  // Read once: isMain reads the secretary's whole state file (600 KB+) each time, and every task the main session
+  // dispatched asks again on each tasks.list (it is never marked closed) — 38 reads, ~0.4 s of every list (2026-11-18)
+  const main = new Set(mains(ctx));
   const done = update(ctx, (s) => {
     const out: string[] = [];
     for (const t of s.tasks) {
       if (!t.router || t.routerClosed || (t.status === "todo" && t.routing)) continue; // still being routed
-      if (isMain(ctx, t.router)) continue; // the Superagent's main session: it stays for the next one
+      if (main.has(t.router)) continue; // the Superagent's main session: it stays for the next one
       const r = live[t.router] ?? ctx.sessions.get(t.router);
       if (r && r.status !== "idle" && r.status !== "error") continue; // still finishing its turn
       out.push(t.router);

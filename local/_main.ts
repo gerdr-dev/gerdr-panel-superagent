@@ -440,6 +440,11 @@ export function isMain(ctx: Ctx, id?: string) {
   return !!id && (state(ctx).mains ?? []).includes(id);
 }
 
+/** Every conversation that has been the Superagent's main one: for checking many ids against one read of the state. */
+export function mains(ctx: Ctx): string[] {
+  return state(ctx).mains ?? [];
+}
+
 /**
  * Hands the secretary messages: `blocks` are items in the formats the brief describes, `why` what they are (kept for
  * callers). `fold`: the one line its chat shows instead (Gerdr's send fold); without it Gerdr folds a message from
