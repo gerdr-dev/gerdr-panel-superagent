@@ -774,7 +774,10 @@ function MiniCard({ t, byId, active, onOpen, onGrab, ghost }: { t: Task; byId: R
       {t.owner === "agent" && !t.question && t.stopped && t.stopWhy && t.stopWhy !== "停下了" && t.stopWhy !== "回了你的话，等你接着说" && (
         <p className="line-clamp-1 text-[12px] text-muted-foreground">{t.stopWhy}</p>
       )}
-      {t.owner === "agent" && !t.question && (t.summary || (t.stopped && t.said)) && <p className="line-clamp-2 text-[12px] text-muted-foreground">{t.summary || t.said}</p>}
+      {/* Its worker's newest paragraph, live (falls back to the old summary): shimmers like 思考中 while it runs */}
+      {t.owner === "agent" && !t.question && (t.latest || t.summary || (t.stopped && t.said)) && (
+        <p className={clsx("line-clamp-2 text-[12px] text-muted-foreground", t.live?.status === "running" && "shimmer")}>{t.latest || t.summary || t.said}</p>
+      )}
       {!t.question && t.status === "running" && outside(t)[0] && <p className="line-clamp-2 text-[12px] text-muted-foreground">等：{outside(t)[0].what}</p>}
       {!t.question &&
         t.helpers

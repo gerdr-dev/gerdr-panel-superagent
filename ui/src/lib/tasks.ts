@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { run } from "./gerdr";
 import * as core from "@gerdr/core";
 import { sessionsKey, usePanelChange, useRefresh, useSessions } from "./visible";
@@ -60,6 +60,8 @@ export type Task = {
   /** Sessions its worker handed work to, still going: it waits on them. */
   helpers?: { id: string; title: string; status: string; waiting?: string; waitingKind?: "permission" | "ask"; /** waits on the user (an approval, or a question its worker left) */ left?: boolean }[];
   said?: string;
+  /** The newest paragraph in its worker's conversation, read live (local/tasks.ts newest): the card's line. */
+  latest?: string;
   nudges?: number;
   questions?: { id: string; title: string; kind: "choice" | "value"; options?: string[]; multi?: boolean; label?: string; steps?: string; answer?: string; dropped?: string; at?: number; skipped?: boolean; sent?: boolean }[];
   /** When the user asked its worker to bring this ask up to date (tasks.refreshAsk). */
@@ -146,7 +148,16 @@ export function useTasks() {
       (!!x.parent && watched.ids.has(x.parent)) ||
       (!!x.tags?.task && watched.taskIds.has(x.tags.task)),
   );
-  useRefresh(reload, [data, sessionsKey(sessions)]);
+  // Streamed text isn't in sessionsKey (a chunk mustn't refresh the board); while a worker runs, the card's line
+  // (its newest paragraph) is read again every 10 s instead
+  const running = sessions.some((x) => x.status === "running");
+  const [beat, setBeat] = useState(0);
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => setBeat((n) => n + 1), 10_000);
+    return () => clearInterval(id);
+  }, [running]);
+  useRefresh(reload, [data, sessionsKey(sessions), beat]);
   /** Runs a tasks.<fn> and refreshes the board after. 放弃 gets an undo in a toast: it's easy to click by mistake. */
   const act = useCallback(
     async (fn: string, input: unknown) => {

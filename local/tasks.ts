@@ -209,6 +209,9 @@ export async function list(input: unknown, ctx: Ctx) {
       const idle = sess && (sess.status === "idle" || sess.status === "error");
       const said = idle && (halted || question(t)?.startsWith(STOPPED_ASK)) ? lastWords(String(sess?.reply ?? "")) : "";
       const ks = kids[t.id] ?? [];
+      // The card's line: the newest paragraph in its worker's conversation, read live (summary is written only by
+      // task_update or when a turn ends, and workers forget the former: the card read hours behind the chat)
+      const now = t.owner === "agent" && t.status !== "done" && t.status !== "dropped" && t.session ? newest(ctx, t.session) : "";
       return {
         ...t,
         // The open waits, each with what wakes it in words (the 在等 list, the card); ended ones stay in t.waits
@@ -224,6 +227,7 @@ export async function list(input: unknown, ctx: Ctx) {
         stopped: halted || undefined,
         stopWhy: halted ? stopWhy(t, sess, s) : undefined,
         said: said || undefined,
+        latest: now || undefined,
         // 设置 → 回复对方 is 派出去时, and it's not out yet and came from a chat: the card's 回复对方 box by 派出去, filled
         // with the 回复对方 words for the user to change
         ...(t.status === "todo" && t.owner === "agent" && t.origin?.reply && !t.assigned && (ack ??= workflow(ctx)).ack === "dispatch"
@@ -297,6 +301,18 @@ export function lastWords(reply: string) {
   const ps = reply.split(/\n\s*\n/).map((p) => p.replace(/\s+/g, " ").trim()).filter((p) => p && !ENDING.test(p));
   const p = ps[ps.length - 1] ?? "";
   return [...p].length > 240 ? "…" + [...p].slice(-240).join("") : p;
+}
+
+/** The newest agent paragraph in a conversation (ctx.sessions.read: the turn going on too), "" when none or on a
+ *  Gerdr without read. */
+function newest(ctx: Ctx, id: string) {
+  try {
+    const said = (ctx.sessions as any).read?.(id, { last: 8 }) as { role: string; text: string }[] | null | undefined;
+    const a = said?.filter((x) => x.role === "agent" && x.text.trim()).pop();
+    return a ? lastWords(a.text) : "";
+  } catch {
+    return "";
+  }
 }
 
 /** Why a worker stopped with nothing going on, for the card: the user's stop, a restart, an error, or nothing said. */
