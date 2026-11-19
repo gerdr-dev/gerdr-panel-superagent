@@ -807,7 +807,8 @@ function MiniCard({
         ghost && "opacity-30",
         "block w-full space-y-1.5 rounded-lg border bg-card p-3 text-left shadow-xs transition-[border-color,box-shadow,transform] duration-150 hover:shadow-sm active:scale-[0.99]",
         // A card waiting on the user has a yellow edge (no fill: kept quiet), only brighter when hovered or open, never blue.
-        waitsOnUser(t) ? (active ? "border-warn/80" : "border-warn/25 hover:border-warn/55") : clsx("hover:border-ring/50", active && "border-ring"),
+        // Open, the border stays as it is under the pointer: a hover: class beside it won over it (2026-11-19)
+        waitsOnUser(t) ? (active ? "border-warn/80" : "border-warn/25 hover:border-warn/55") : active ? "border-ring" : "hover:border-ring/50",
       )}>
       <div className={clsx("flex min-w-0 items-center gap-1.5 overflow-hidden text-[11px] text-muted-foreground", act && "pr-6")}>
         <Bot className="size-3 shrink-0" />
