@@ -91,8 +91,8 @@ function useCardStatus<T>(project: string | undefined, key: string | null, ask: 
 /**
  * A step or decision the worker asked the user for (ask_human; an ask on its task, ref a5 or a5#2 — a human task's old
  * id, t206, on cards drawn before 2026-11-19): the built-in card while it waits, so it can be answered right there;
- * once it's done or taken back on the board, a one-line record of how it ended instead of a card that still looks
- * open. The board is asked again every 30s while the card is on screen.
+ * once it's done or taken back, the same card settled (green with the answer, or grey), keeping its height. Its state
+ * comes from the board's list, else it asks every 30s while on screen.
  */
 export function TaskStep({ card }: CardProps) {
   const id = String(card.ref ?? "");
@@ -105,7 +105,7 @@ export function TaskStep({ card }: CardProps) {
   // Changing an answer already sent: the built-in card again, its pick going to tasks.reanswer (with its few seconds
   // of undo too). The card's own undo only covers the seconds before a pick is sent.
   const [changing, setChanging] = useState<string | false>(false); // the answer it had when the change was opened
-  // The new answer arrived (a poll after tasks.reanswer): back to the one-line record, showing it
+  // The new answer arrived (a poll after tasks.reanswer): back to the settled card, showing it
   useEffect(() => {
     if (changing !== false && st?.handedBack !== changing) setChanging(false);
   }, [st?.handedBack]);
@@ -125,23 +125,23 @@ export function TaskStep({ card }: CardProps) {
   }
   if (st?.status === "done" || st?.status === "dropped") {
     const done = st.status === "done";
+    // The whole card, settled: the answer picked and green, or grey when taken back — never a one-line record instead,
+    // whose change of height moved the chat being read (2026-11-19)
     return (
-      // Done: a green edge; taken back: a grey one, with why — two different ends, not one look
-      <div className={`my-1.5 flex items-center gap-2 rounded-lg border border-l-2 bg-card px-3 py-2 text-[12px] text-muted-foreground ${done ? "border-l-ok" : "border-l-muted-foreground/40"}`}>
-        {done ? <Check className="size-3.5 shrink-0 text-ok" /> : <Undo2 className="size-3.5 shrink-0" />}
-        <span className="min-w-0 flex-1 truncate">
-          {id} {card.title}
-        </span>
-        <span className="min-w-0 shrink truncate" title={st.reason}>
-          {done ? (st.handedBack ? `已处理：${st.handedBack}` : "已处理") : st.reason ? `已撤回：${st.reason}` : "已撤回"}
-        </span>
-        {changeable && (
-          <button className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 hover:bg-accent hover:text-foreground" title="答错了？改成别的，worker 会收到新旧两个答案" onClick={() => setChanging(st.handedBack ?? "")}>
-            <Pencil className="size-3" />
-            改答案
-          </button>
-        )}
-      </div>
+      <DefaultCard
+        card={card}
+        done={{
+          value: done ? st.handedBack : undefined,
+          dropped: !done,
+          note: done ? "已处理" : st.reason ? `已撤回：${st.reason}` : "已撤回",
+          action: changeable && (
+            <button className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground" title="答错了？改成别的，worker 会收到新旧两个答案" onClick={() => setChanging(st.handedBack ?? "")}>
+              <Pencil className="size-3" />
+              改答案
+            </button>
+          ),
+        }}
+      />
     );
   }
   return <DefaultCard card={card} />;
@@ -239,7 +239,7 @@ type Wait = { state: "waiting" | "ended" | "gone"; body?: string; wakes?: Wake[]
 /**
  * A worker ending its turn to wait on someone / something outside (wait_for, local/waits.ts). Without it the chat just
  * stopped after "I'll wait", and the user couldn't tell whether anything was still going on. While the wait is on: what
- * it waits for and what will wake it, with a pulse; once over, what woke it. The board is asked every 20s.
+ * it waits for and what will wake it, with a pulse; once over, the same card green with how it ended. The board is asked every 20s.
  */
 function TaskWait({ card }: CardProps) {
   // waits: the task's waits it stands for (local/_waits.ts); cards made before those had ids carry since (+ kind "mr")
@@ -264,29 +264,25 @@ function TaskWait({ card }: CardProps) {
   const wakes: Wake[] = st?.wakes ?? (st?.body ? undefined : c.wakes) ?? (body ? body.split("；").map((text) => ({ kind: text.includes("回来看") ? "time" : "", text })) : []);
   const mins = c.since ? Math.max(0, Math.round((Date.now() - c.since) / 60000)) : 0;
   const waited = mins < 1 ? "刚开始" : mins < 60 ? `等了 ${mins} 分钟` : `等了 ${Math.floor(mins / 60)} 小时 ${mins % 60} 分`;
-  if (!on)
-    return (
-      <div className="my-1.5 flex items-center gap-2 rounded-lg border border-l-2 border-l-ok bg-card px-3 py-2 text-[12px] text-muted-foreground">
-        <Check className="size-3.5 shrink-0 text-ok" />
-        <span className="min-w-0 flex-1 truncate">等：{c.title}</span>
-        {/* `how` can be a whole MR condition (onState's title): it shrinks too, or it pushes the card past the chat */}
-        <span className="min-w-0 max-w-[60%] truncate" title={st?.how}>
-          {st?.how ?? "不等了"}
-        </span>
-        {st?.at && <span className="shrink-0">· {new Date(st.at).toTimeString().slice(0, 5)}</span>}
-      </div>
-    );
   return (
-    <div className="my-1.5 space-y-1 rounded-lg border border-l-2 border-l-brand bg-card px-3 py-2">
+    // Over: the same card, green, its last line saying how — not a one-line record, whose change of height moved the
+    // chat being read (2026-11-19)
+    <div className={`my-1.5 space-y-1 rounded-lg border border-l-2 bg-card px-3 py-2 ${on ? "border-l-brand" : "border-l-ok"}`}>
       <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
-        <span className="relative flex size-2 shrink-0">
-          <span className="absolute inline-flex size-full animate-ping rounded-full bg-brand opacity-60" />
-          <span className="relative inline-flex size-2 rounded-full bg-brand" />
+        {on ? (
+          <span className="relative flex size-2 shrink-0">
+            <span className="absolute inline-flex size-full animate-ping rounded-full bg-brand opacity-60" />
+            <span className="relative inline-flex size-2 rounded-full bg-brand" />
+          </span>
+        ) : (
+          <Check className="size-3.5 shrink-0 text-ok" />
+        )}
+        <span>
+          {on ? "在等" : "等完了"} · {c.task}
         </span>
-        <span>在等 · {c.task}</span>
-        <span className="ml-auto shrink-0">{waited}</span>
+        <span className="ml-auto shrink-0">{on ? waited : st?.at ? new Date(st.at).toTimeString().slice(0, 5) : ""}</span>
       </div>
-      <p className="text-[13px] font-medium">
+      <p className={`text-[13px] font-medium ${on ? "" : "text-muted-foreground"}`}>
         {c.url ? (
           <a href={c.url} target="_blank" rel="noreferrer" className="hover:underline">
             {c.title}
@@ -328,7 +324,14 @@ function TaskWait({ card }: CardProps) {
           上次叫醒：{st.woke.how} · {new Date(st.woke.at).toTimeString().slice(0, 5)}
         </p>
       )}
-      <p className="text-[11px] text-muted-foreground">它这一轮结束后不占着，等到了会被叫醒接着做；想催它或改主意，直接在下面说。</p>
+      {on ? (
+        <p className="text-[11px] text-muted-foreground">它这一轮结束后不占着，等到了会被叫醒接着做；想催它或改主意，直接在下面说。</p>
+      ) : (
+        // `how` can be a whole MR condition (onState's title): one line, cut, so the height stays
+        <p className="truncate text-[11px] text-ok" title={st?.how}>
+          {st?.how ?? "不等了"}
+        </p>
+      )}
     </div>
   );
 }
@@ -340,7 +343,8 @@ type Out = { state: "pending" | "sent" | "skipped" | "missing"; text?: string; w
 /**
  * Words a worker wrote to the people in a chat its task follows, held for the user (local/outbox.ts, 设置 → 回话
  * "review"): 发送 / 不发, the words editable first. Nothing waits on it and the worker isn't told which; once chosen,
- * one line says how it ended. Asked again every 30s while on screen, since the board's card can answer it too.
+ * the same card, read-only, coloured by how it ended. Asked again every 30s while on screen, since the board's card
+ * can answer it too.
  */
 function TaskOutgoing({ card }: CardProps) {
   const c = card as { ref?: string; project?: string; task?: string; where?: string; text?: string };
@@ -380,57 +384,71 @@ function TaskOutgoing({ card }: CardProps) {
       setBusy("");
     }
   };
-  if (st && st.state !== "pending") {
-    const sent = st.state === "sent";
-    return (
-      <div className={`my-1.5 rounded-lg border border-l-2 bg-card px-3 py-2 text-[12px] text-muted-foreground ${sent ? "border-l-ok" : "border-l-muted-foreground/40"}`}>
-        <div className="flex items-center gap-2">
-          {sent ? <Send className="size-3.5 shrink-0 text-ok" /> : <Undo2 className="size-3.5 shrink-0" />}
-          <span className="min-w-0 flex-1 truncate">{st.state === "missing" ? "这条待发送的消息不在了" : `${sent ? (st.edited ? "改过后发给了" : "发给了") : "没发给"} ${where}`}</span>
-          {st.doneAt && <span className="shrink-0">{new Date(st.doneAt).toTimeString().slice(0, 5)}</span>}
-        </div>
-        {st.state !== "missing" && <p className={`mt-1 line-clamp-3 whitespace-pre-wrap ${sent ? "" : "line-through"}`}>{text}</p>}
-      </div>
-    );
-  }
+  // Sent, let go or gone: the same card, its colour and last row changed. It used to collapse into one line, and the
+  // chat moved under the reader every time it did (2026-11-19)
+  const over = !!st && st.state !== "pending";
+  const sent = st?.state === "sent";
+  const edge = !over ? "border-l-warn" : sent ? "border-l-ok" : "border-l-muted-foreground/40";
+  const head = !over
+    ? "待发送"
+    : st!.state === "missing"
+      ? "这条待发送的消息不在了"
+      : sent
+        ? st!.edited
+          ? "改过后发了"
+          : "已发送"
+        : "没发";
   return (
-    <div className="my-1.5 space-y-1.5 rounded-lg border border-l-2 border-l-warn bg-card px-3 py-2">
+    <div className={`my-1.5 space-y-1.5 rounded-lg border border-l-2 bg-card px-3 py-2 ${edge}`}>
       <div className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
-        <MessageSquare className="size-3.5 shrink-0 text-warn" />
-        <span className="min-w-0 truncate">待发送 · 回给 {where}{c.task ? ` · ${c.task}` : ""}</span>
+        {!over ? <MessageSquare className="size-3.5 shrink-0 text-warn" /> : sent ? <Send className="size-3.5 shrink-0 text-ok" /> : <Undo2 className="size-3.5 shrink-0" />}
+        <span className="min-w-0 truncate">
+          {head} · 回给 {where}
+          {c.task ? ` · ${c.task}` : ""}
+        </span>
       </div>
+      {/* The box stays a textarea once it's over (read-only), so its size is the same as when it could be edited */}
       <textarea
         ref={box}
         rows={2}
-        className="w-full resize-none overflow-hidden rounded-md border bg-background px-2 py-1.5 text-[13px] leading-relaxed outline-none focus:ring-1 focus:ring-brand"
+        readOnly={over}
+        className={`w-full resize-none overflow-hidden rounded-md border bg-background px-2 py-1.5 text-[13px] leading-relaxed outline-none focus:ring-1 focus:ring-brand ${over ? "text-muted-foreground" : ""} ${over && !sent ? "line-through" : ""}`}
         value={value}
         disabled={!!busy}
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={(e) => {
           // ⌘/Ctrl+Enter sends, like the chat's own box with a modifier; a plain Enter is a new line
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && value.trim() && !busy) {
+          if (!over && e.key === "Enter" && (e.metaKey || e.ctrlKey) && value.trim() && !busy) {
             e.preventDefault();
             void act("send");
           }
         }}
       />
-      <div className="flex flex-wrap items-center gap-2 text-[12px]">
-        <button className="inline-flex items-center gap-1 rounded-md bg-brand px-2.5 py-1 font-medium text-background disabled:opacity-50" disabled={!!busy || !value.trim()} onClick={() => act("send")}>
-          <Send className="size-3" />
-          {busy === "send" ? "发送中…" : edited ? "发送改好的" : "发送"}
-        </button>
-        <button className="rounded-md border px-2.5 py-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50" disabled={!!busy} onClick={() => act("skip")}>
-          不发
-        </button>
-        {edited && (
-          <button className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-muted-foreground hover:bg-accent hover:text-foreground" disabled={!!busy} onClick={() => setDraft(null)}>
-            <Undo2 className="size-3" />
-            恢复原文
+      {over ? (
+        // The buttons' row, at their height (py-1 and a border, as the buttons have): where it ended instead
+        <div className="flex items-center gap-2 border border-transparent py-1 text-[12px] text-muted-foreground">
+          <span className={sent ? "text-ok" : ""}>{st!.state === "missing" ? "找不到了" : sent ? `发给了 ${where}` : `没发给 ${where}`}</span>
+          {st!.doneAt && <span className="ml-auto shrink-0">{new Date(st!.doneAt).toTimeString().slice(0, 5)}</span>}
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2 text-[12px]">
+          <button className="inline-flex items-center gap-1 rounded-md border border-transparent bg-brand px-2.5 py-1 font-medium text-background disabled:opacity-50" disabled={!!busy || !value.trim()} onClick={() => act("send")}>
+            <Send className="size-3" />
+            {busy === "send" ? "发送中…" : edited ? "发送改好的" : "发送"}
           </button>
-        )}
-        <span className="ml-auto text-muted-foreground/70">⌘↵ 发送</span>
-        {err && <span className="w-full text-bad">{err}</span>}
-      </div>
+          <button className="rounded-md border px-2.5 py-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50" disabled={!!busy} onClick={() => act("skip")}>
+            不发
+          </button>
+          {edited && (
+            <button className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-muted-foreground hover:bg-accent hover:text-foreground" disabled={!!busy} onClick={() => setDraft(null)}>
+              <Undo2 className="size-3" />
+              恢复原文
+            </button>
+          )}
+          <span className="ml-auto text-muted-foreground/70">⌘↵ 发送</span>
+          {err && <span className="w-full text-bad">{err}</span>}
+        </div>
+      )}
     </div>
   );
 }

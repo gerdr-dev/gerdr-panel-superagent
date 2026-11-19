@@ -34,9 +34,13 @@ export function waitsState(t: Task, ws: Wait[]) {
     const last = on.find((w) => w.check?.last)?.check?.last;
     return { state: "waiting", body: on.map((w) => wakeText(w)).join("；"), wakes: on.map(wakeItem), woke, check: last };
   }
+  // Over: how, plus what the card showed while it waited (its last check, the last wake), so the card keeps its rows
+  // and its height (cards.tsx TaskWait)
+  const woke = ws.find((w) => w.woke)?.woke;
+  const check = ws.find((w) => w.check?.last)?.check?.last;
   const end = ws.map((w) => w.end).filter(Boolean).sort((a, b) => a!.at - b!.at)[0];
-  if (end) return { state: "ended", how: end.how, at: end.at };
-  return { state: "ended", how: t.status === "done" ? "任务完成了" : t.status === "dropped" ? "任务放弃了" : "接着做了" };
+  if (end) return { state: "ended", how: end.how, at: end.at, woke, check };
+  return { state: "ended", how: t.status === "done" ? "任务完成了" : t.status === "dropped" ? "任务放弃了" : "接着做了", woke, check };
 }
 
 /**
