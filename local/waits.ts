@@ -25,6 +25,7 @@ import { isOutside, mrConversation, open, waitOn, wakeItem, wakeText, type Wait,
 
 const sessionTitle = (w: Wait) => w.what.replace(/^它派出的「(.*?)」.*$/, "$1");
 import { cutLine, wake } from "./_wake";
+import { waitsState } from "./_cardstate";
 import { evaluate, followUp, follows, record, sharers, subscribers, compact, type Ev } from "./_main";
 import { mine, staleAsks } from "./board";
 import { USER } from "./_user";
@@ -223,15 +224,7 @@ export function status(input: { id: string; waits?: string[]; since?: number; ki
   const ws = input.waits?.length
     ? all.filter((w) => input.waits!.includes(w.id))
     : all.filter((w) => w.since === input.since && isOutside(w));
-  const on = ws.filter((w) => !w.end);
-  if (on.length) {
-    const woke = on.find((w) => w.woke)?.woke;
-    const last = on.find((w) => w.check?.last)?.check?.last;
-    return { state: "waiting", body: on.map((w) => wakeText(w)).join("；"), wakes: on.map(wakeItem), woke, check: last };
-  }
-  const end = ws.map((w) => w.end).filter(Boolean).sort((a, b) => a!.at - b!.at)[0];
-  if (end) return { state: "ended", how: end.how, at: end.at };
-  return { state: "ended", how: t.status === "done" ? "任务完成了" : t.status === "dropped" ? "任务放弃了" : "接着做了" };
+  return waitsState(t, ws);
 }
 
 // ---- the trigger that brings a followed conversation in ----

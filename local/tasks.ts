@@ -7,6 +7,7 @@ import { activity, blockersDone, going, draftOf, find, findAsk, load, members, n
 import { applyBlock } from "./_apply";
 import { endQuestions, endWaits, isOutside, open, question, syncAgents, syncSessions, wakeText, type Wait } from "./_waits";
 import { cutLine, wake } from "./_wake";
+import { askState, cardStates } from "./_cardstate";
 import { allAgents, mentionsIn } from "./_agents";
 import { archived as archivedGroups, archivedCount, archiveOld, latest, revive, unarchive as bringBack } from "./_archive";
 import { isMain, mains, rerouteTask, routeTask, sweep, toMain } from "./_main";
@@ -220,6 +221,8 @@ export async function list(input: unknown, ctx: Ctx) {
         question: question(t),
         // The sessions it handed work to, for the card's chips (each is a wait as well)
         helpers: ks.length ? ks.map((k) => ({ id: k.id, title: k.title, status: k.status, waiting: k.waiting, waitingKind: k.waitingKind, left: k.user })) : undefined,
+        // Where each of its chat cards stands (_cardstate.ts): the cards read them from here while the board is loaded
+        cards: cardStates(t),
         live: sess ? { status: sess.status, waiting: sess.waiting, waitingSince: sess.waitingSince, turnStartedAt: sess.turnStartedAt, updatedAt: sess.updatedAt, error: sess.error, title: sess.title } : null,
         column: column(s, t, sess),
         ready: blockersDone(s, t),
@@ -249,11 +252,12 @@ export async function list(input: unknown, ctx: Ctx) {
     );
   const board = teams(s, tasks);
   const id = want;
-  if (!id) return { tasks: board, at: Date.now(), archived: archivedCount(ctx) };
+  // project: the key the chat cards carry (ctx.workspace.project), for the page to file the tasks' card states under
+  if (!id) return { tasks: board, at: Date.now(), archived: archivedCount(ctx), project: ctx.workspace.project };
   if (!board.some((t) => t.id === id)) throw new Error(`没有 ${id}`);
   // The task, the requirement it is in, and everything in that requirement
   const root = (board.find((t) => t.id === id) as any)?.in ?? id;
-  return { tasks: board.filter((t: any) => t.id === root || t.in === root || t.id === id), at: Date.now() };
+  return { tasks: board.filter((t: any) => t.id === root || t.in === root || t.id === id), at: Date.now(), project: ctx.workspace.project };
 }
 
 /**
@@ -1327,17 +1331,7 @@ export function status(input: { id: string }, ctx: Ctx) {
   } catch {
     return { status: "missing" };
   }
-  const { a: t, q: qid } = found;
-  // The card says "todo" while it waits (cards.tsx)
-  const st = t.status === "open" ? "todo" : t.status;
-  if (qid) {
-    const q = t.questions?.find((x) => x.id === qid);
-    if (!q) return { status: "missing" };
-    const status = q.dropped || t.status === "dropped" ? "dropped" : q.answer ? "done" : "todo";
-    return { status, title: q.title, handedBack: q.answer, kind: q.kind, reason: q.dropped };
-  }
-  const back = t.handBack.kind === "secret" ? undefined : t.handedBack;
-  return { status: st, title: t.title, handedBack: back, kind: t.handBack.kind, reason: t.dropReason };
+  return askState(found.a, found.q);
 }
 
 /**

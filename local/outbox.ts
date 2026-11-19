@@ -4,6 +4,7 @@
 // user chose (2026-11-16, the user: "无论点击是否，ai 都不用知道"). DESIGN.md「回话先过目」.
 
 import { find, load, note, update } from "./_store";
+import { outgoingState } from "./_cardstate";
 
 function split(ref: string): [string, string] {
   const [task, id] = String(ref ?? "").split("~");
@@ -15,9 +16,7 @@ function split(ref: string): [string, string] {
 export function status(input: { ref: string }, ctx: Ctx) {
   const [task, id] = split(input?.ref);
   const t = load(ctx).store.tasks.find((x) => x.id === task);
-  const o = t?.outbox?.find((x) => x.id === id);
-  if (!o) return { state: "missing" };
-  return { state: o.state, text: o.text, where: o.where, doneAt: o.doneAt, edited: o.edited };
+  return outgoingState(t?.outbox?.find((x) => x.id === id));
 }
 
 /**

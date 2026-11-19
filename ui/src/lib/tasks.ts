@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { run } from "./gerdr";
 import * as core from "@gerdr/core";
 import { sessionsKey, usePanelChange, useRefresh, useSessions } from "./visible";
+import { fileCardStates } from "./cardstates";
 
 // Gerdr's toast (sonner), through the namespace so an older Gerdr without it still runs the board
 const toast = (core as unknown as { toast?: ((m: string, o?: Record<string, unknown>) => unknown) & { error?: (m: string) => unknown } }).toast;
@@ -161,7 +162,8 @@ export function useTasks() {
       do {
         again.current = false;
         try {
-          const r = await run<{ tasks: Task[]; archived?: number }>("tasks.list");
+          const r = await run<{ tasks: Task[]; archived?: number; project?: string }>("tasks.list");
+          fileCardStates(r.project, r.tasks as { cards?: Record<string, unknown> }[]);
           setTasks(overlay(r.tasks));
           setArchived(r.archived ?? 0);
           setError("");

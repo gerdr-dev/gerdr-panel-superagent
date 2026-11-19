@@ -2,16 +2,18 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Activity, AlarmClock, BookmarkPlus, Check, CircleCheck, CornerUpLeft, Eye, FileText, Hourglass, Link2, MessageSquare, Pencil, Send, SquareTerminal, Undo2, UserPlus, Users } from "lucide-react";
 import { DefaultCard, registerCard, type CardProps } from "@gerdr/core";
 import { run } from "./lib/gerdr";
+import { boardFresh, cardState, onCardStates } from "./lib/cardstates";
 
 // Cards the board's panel tools put in a worker's chat (local/board.ts). Gerdr loads this file at start, so they're drawn
 // this way wherever the chat is shown: the board's drawer, or the worker's tab in Code.
 
 type Step = { status: string; handedBack?: string; title?: string; kind?: string; reason?: string };
 
-// The last status each card got, so a card drawn again (switching tasks or tabs remounts the whole chat) starts from
-// it instead of from "still open" and then collapsing into its one-line record a moment later — a visible flash every
-// switch. Kept in memory for this page, and the final ones (nothing can change them any more) in localStorage too, so
-// reloading the page doesn't bring the flash back.
+// Where a card stands, without asking: the board's last tasks.list carries every card's state (lib/cardstates.ts),
+// so a card in a chat opened from the board draws its real state at once. Before this each card asked on mount and
+// drew "still open" until the answer came, then collapsed — a flash on every switch of task (2026-11-19). A card the
+// board doesn't know (the chat opened in Code before the board, a task archived) asks itself, starting from the last
+// answer it got: in memory for this page, and the final ones (nothing changes them any more) in localStorage.
 const seen = new Map<string, unknown>();
 const KEPT = "superagent.cardStatus";
 const KEPT_MAX = 500;
@@ -32,29 +34,34 @@ function keep(key: string, v: unknown) {
     localStorage.setItem(KEPT, JSON.stringify(all));
   } catch {}
 }
-function lastStatus<T>(key: string | null): T | undefined {
-  if (!key) return undefined;
-  if (seen.has(key)) return seen.get(key) as T;
-  const v = kept()[key] as T | undefined;
-  if (v !== undefined) seen.set(key, v);
+function known<T>(project: string, key: string): T | undefined {
+  const b = cardState<T>(project, key);
+  if (b !== undefined) return b;
+  const k = `${project}\n${key}`;
+  if (seen.has(k)) return seen.get(k) as T;
+  const v = kept()[k] as T | undefined;
+  if (v !== undefined) seen.set(k, v);
   return v;
 }
 
 /**
- * A card's status from the board, asked now and every `every` ms while on screen, starting from the last one known
- * (see `seen`). `key` null: nothing to ask. `final`: a status that can't change any more, kept across reloads.
+ * A card's status: what the board knows, else asked with `ask` now and every `every` ms while on screen (skipped while
+ * the board is loaded and knows the card). `key` as local/_cardstate.ts cardStates names it; project or key empty:
+ * nothing to ask. `final`: a status that can't change any more. → the status, and a function asking again now.
  */
-function useCardStatus<T>(key: string | null, ask: () => Promise<T>, final: (v: T) => boolean, every: number): [T | undefined, () => Promise<void>] {
-  const [st, setSt] = useState<T | undefined>(() => lastStatus<T>(key));
+function useCardStatus<T>(project: string | undefined, key: string | null, ask: () => Promise<T>, final: (v: T) => boolean, every: number): [T | undefined, () => Promise<void>] {
+  const p = project && key ? project : "";
+  const [st, setSt] = useState<T | undefined>(() => (p ? known<T>(p, key!) : undefined));
   const askRef = useRef(ask);
   askRef.current = ask;
   const alive = useRef(true);
   const get = () => {
-    if (!key) return Promise.resolve();
+    if (!p) return Promise.resolve();
     return askRef.current().then(
       (v) => {
-        seen.set(key, v);
-        if (final(v)) keep(key, v);
+        const k = `${p}\n${key}`;
+        seen.set(k, v);
+        if (final(v)) keep(k, v);
         if (alive.current) setSt(v);
       },
       () => {},
@@ -62,14 +69,22 @@ function useCardStatus<T>(key: string | null, ask: () => Promise<T>, final: (v: 
   };
   useEffect(() => {
     alive.current = true;
-    setSt(lastStatus<T>(key));
-    void get();
-    const timer = key ? setInterval(get, every) : undefined;
+    if (!p) return;
+    setSt(known<T>(p, key!));
+    // The board answered for it (its poll runs every few seconds while it's loaded): nothing to ask
+    const byBoard = () => boardFresh(p, every * 2) && cardState(p, key!) !== undefined;
+    if (!byBoard()) void get();
+    const timer = setInterval(() => !byBoard() && get(), every);
+    const off = onCardStates(() => {
+      const v = cardState<T>(p, key!);
+      if (v !== undefined && alive.current) setSt(v);
+    });
     return () => {
       alive.current = false;
       clearInterval(timer);
+      off();
     };
-  }, [key]);
+  }, [p, key]);
   return [st, get];
 }
 
@@ -86,7 +101,7 @@ export function TaskStep({ card }: CardProps) {
   // one with neither isn't asked about at all rather than asked of the wrong board.
   const c = card as { project?: string; choose?: { project?: string } };
   const board = c.project ?? c.choose?.project;
-  const [st] = useCardStatus<Step>(id && board ? `step:${board}:${id}` : null, () => run<Step>("tasks.status", { id }, { project: board }), (v) => v.status === "done" || v.status === "dropped", 30000);
+  const [st] = useCardStatus<Step>(board, id ? `step:${id}` : null, () => run<Step>("tasks.status", { id }, { project: board }), (v) => v.status === "done" || v.status === "dropped", 30000);
   // Changing an answer already sent: the built-in card again, its pick going to tasks.reanswer (with its few seconds
   // of undo too). The card's own undo only covers the seconds before a pick is sent.
   const [changing, setChanging] = useState<string | false>(false); // the answer it had when the change was opened
@@ -229,9 +244,10 @@ type Wait = { state: "waiting" | "ended" | "gone"; body?: string; wakes?: Wake[]
 function TaskWait({ card }: CardProps) {
   // waits: the task's waits it stands for (local/_waits.ts); cards made before those had ids carry since (+ kind "mr")
   const c = card as { project?: string; task?: string; waits?: string[]; since?: number; title?: string; body?: string; wakes?: Wake[]; kind?: string; url?: string };
-  const asks = c.project && c.task && (c.waits?.length || c.since);
+  // Keyed by its since: one wait_for's waits share it (local/_cardstate.ts); every card has it, old ones too
   const [st] = useCardStatus<Wait>(
-    asks ? `wait:${c.project}:${c.task}:${c.waits?.join(",") ?? ""}:${c.since ?? ""}:${c.kind ?? ""}` : null,
+    c.project,
+    c.task && c.since ? `wait:${c.task}:${c.since}` : null,
     () => run<Wait>("waits.status", { id: c.task, waits: c.waits, since: c.since, kind: c.kind }, { project: c.project }),
     (v) => v.state !== "waiting",
     20000,
@@ -329,7 +345,8 @@ type Out = { state: "pending" | "sent" | "skipped" | "missing"; text?: string; w
 function TaskOutgoing({ card }: CardProps) {
   const c = card as { ref?: string; project?: string; task?: string; where?: string; text?: string };
   const [st, get] = useCardStatus<Out>(
-    c.ref && c.project ? `out:${c.project}:${c.ref}` : null,
+    c.project,
+    c.ref ? `out:${c.ref}` : null,
     () => run<Out>("outbox.status", { ref: c.ref }, { project: c.project }),
     (v) => v.state !== "pending",
     30000,
