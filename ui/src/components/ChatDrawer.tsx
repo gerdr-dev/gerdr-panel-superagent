@@ -261,7 +261,8 @@ function DismissButton({ title, onDismiss }: { title: string; onDismiss: () => u
         setBusy(true);
         Promise.resolve(onDismiss()).catch(() => setBusy(false));
       }}
-      className="mr-1 flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
+      // No hover fill: the theme's accent is blue, out of place on the amber row
+      className="mr-1 flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground disabled:opacity-40"
     >
       <X className="size-3.5" />
     </button>

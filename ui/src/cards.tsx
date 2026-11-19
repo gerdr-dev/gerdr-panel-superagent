@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Activity, AlarmClock, BookmarkPlus, Check, CircleCheck, CornerUpLeft, Eye, FileText, Hourglass, Link2, MessageSquare, Pencil, Send, SquareTerminal, Undo2, UserPlus, Users } from "lucide-react";
+import { X, Activity, AlarmClock, BookmarkPlus, Check, CircleCheck, CornerUpLeft, Eye, FileText, Hourglass, Link2, MessageSquare, Pencil, Send, SquareTerminal, Undo2, UserPlus, Users } from "lucide-react";
 import { DefaultCard, registerCard, type CardProps } from "@gerdr/core";
 import { run } from "./lib/gerdr";
 import { boardFresh, cardState, onCardStates } from "./lib/cardstates";
@@ -101,7 +101,7 @@ export function TaskStep({ card }: CardProps) {
   // one with neither isn't asked about at all rather than asked of the wrong board.
   const c = card as { project?: string; choose?: { project?: string } };
   const board = c.project ?? c.choose?.project;
-  const [st] = useCardStatus<Step>(board, id ? `step:${id}` : null, () => run<Step>("tasks.status", { id }, { project: board }), (v) => v.status === "done" || v.status === "dropped", 30000);
+  const [st, refresh] = useCardStatus<Step>(board, id ? `step:${id}` : null, () => run<Step>("tasks.status", { id }, { project: board }), (v) => v.status === "done" || v.status === "dropped", 30000);
   // Changing an answer already sent: the built-in card again, its pick going to tasks.reanswer (with its few seconds
   // of undo too). The card's own undo only covers the seconds before a pick is sent.
   const [changing, setChanging] = useState<string | false>(false); // the answer it had when the change was opened
@@ -134,7 +134,7 @@ export function TaskStep({ card }: CardProps) {
         done={{
           value: done ? st.handedBack : undefined,
           dropped: !done,
-          note: done ? "已处理" : st.reason === "你关掉了" ? "你关掉了，没答" : st.reason ? `已撤回：${st.reason}` : "已撤回",
+          note: done ? "已处理" : st.reason?.startsWith("你") ? st.reason : st.reason ? `已撤回：${st.reason}` : "已撤回",
           action: changeable && (
             <button className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground" title="答错了？改成别的，worker 会收到新旧两个答案" onClick={() => setChanging(st.handedBack ?? "")}>
               <Pencil className="size-3" />
@@ -145,7 +145,33 @@ export function TaskStep({ card }: CardProps) {
       />
     );
   }
-  return <DefaultCard card={card} />;
+  // Still open: an ✕ in its corner ignores it (tasks.ignore, 2026-11-19) — mostly a question gone moot that the agent
+  // never took back. Nobody is woken; the agent hears at the start of its next turn
+  return (
+    <div className="relative">
+      <DefaultCard card={card} />
+      {board && st?.status === "todo" && <IgnoreButton id={id} board={board} onDone={refresh} />}
+    </div>
+  );
+}
+
+/** The ✕ on an open question card: greyed while it goes, the card settling (grey, 你忽略了) once its state comes back. */
+function IgnoreButton({ id, board, onDone }: { id: string; board: string; onDone: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      title="忽略：不答了（多半已经过时），它下一轮开头会知道"
+      aria-label="忽略"
+      disabled={busy}
+      onClick={() => {
+        setBusy(true);
+        run("tasks.ignore", { id }, { project: board }).then(onDone, () => setBusy(false));
+      }}
+      className="absolute top-2.5 right-2.5 flex size-6 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground disabled:opacity-40"
+    >
+      <X className="size-3.5" />
+    </button>
+  );
 }
 
 registerCard("task-step", TaskStep);

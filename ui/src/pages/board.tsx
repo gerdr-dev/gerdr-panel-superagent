@@ -699,13 +699,13 @@ function MainButton({ onOpen, onAsks }: { onOpen: (id: string) => void; onAsks: 
 /** One of the secretary's own open questions (local/_secask.ts). */
 type SecAsk = { id: string; title: string; kind: string; at: number };
 
-/** The secretary's open questions as rows over its chat: each jumps to its card, ✕ closes it without an answer. */
+/** The secretary's open questions as rows over its chat: each jumps to its card, ✕ ignores it (as the card's ✕). */
 function secItems(open: SecAsk[]): ChatItem[] {
   return open.map((a) => ({
     text: `${a.kind === "none" ? "要你做" : "待你答"}：${a.title}`,
     jump: a.id,
-    onDismiss: () => run("secretary.closeAsk", { id: a.id }),
-    dismissTitle: "关掉，不答（秘书下次会知道）",
+    onDismiss: () => run("tasks.ignore", { id: a.id }),
+    dismissTitle: "忽略：不答了（多半已经过时），秘书下一轮开头会知道",
   }));
 }
 
