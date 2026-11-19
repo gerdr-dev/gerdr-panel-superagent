@@ -8,6 +8,71 @@ import { run } from "./lib/gerdr";
 
 type Step = { status: string; handedBack?: string; title?: string; kind?: string; reason?: string };
 
+// The last status each card got, so a card drawn again (switching tasks or tabs remounts the whole chat) starts from
+// it instead of from "still open" and then collapsing into its one-line record a moment later — a visible flash every
+// switch. Kept in memory for this page, and the final ones (nothing can change them any more) in localStorage too, so
+// reloading the page doesn't bring the flash back.
+const seen = new Map<string, unknown>();
+const KEPT = "superagent.cardStatus";
+const KEPT_MAX = 500;
+function kept(): Record<string, unknown> {
+  try {
+    return JSON.parse(localStorage.getItem(KEPT) ?? "{}") ?? {};
+  } catch {
+    return {};
+  }
+}
+function keep(key: string, v: unknown) {
+  try {
+    const all = kept();
+    delete all[key]; // re-added last, so the oldest go first when trimming
+    all[key] = v;
+    const keys = Object.keys(all);
+    for (const k of keys.slice(0, Math.max(0, keys.length - KEPT_MAX))) delete all[k];
+    localStorage.setItem(KEPT, JSON.stringify(all));
+  } catch {}
+}
+function lastStatus<T>(key: string | null): T | undefined {
+  if (!key) return undefined;
+  if (seen.has(key)) return seen.get(key) as T;
+  const v = kept()[key] as T | undefined;
+  if (v !== undefined) seen.set(key, v);
+  return v;
+}
+
+/**
+ * A card's status from the board, asked now and every `every` ms while on screen, starting from the last one known
+ * (see `seen`). `key` null: nothing to ask. `final`: a status that can't change any more, kept across reloads.
+ */
+function useCardStatus<T>(key: string | null, ask: () => Promise<T>, final: (v: T) => boolean, every: number): [T | undefined, () => Promise<void>] {
+  const [st, setSt] = useState<T | undefined>(() => lastStatus<T>(key));
+  const askRef = useRef(ask);
+  askRef.current = ask;
+  const alive = useRef(true);
+  const get = () => {
+    if (!key) return Promise.resolve();
+    return askRef.current().then(
+      (v) => {
+        seen.set(key, v);
+        if (final(v)) keep(key, v);
+        if (alive.current) setSt(v);
+      },
+      () => {},
+    );
+  };
+  useEffect(() => {
+    alive.current = true;
+    setSt(lastStatus<T>(key));
+    void get();
+    const timer = key ? setInterval(get, every) : undefined;
+    return () => {
+      alive.current = false;
+      clearInterval(timer);
+    };
+  }, [key]);
+  return [st, get];
+}
+
 /**
  * A step or decision the worker asked the user for (ask_human; an ask on its task, ref a5 or a5#2 — a human task's old
  * id, t206, on cards drawn before 2026-11-19): the built-in card while it waits, so it can be answered right there;
@@ -21,7 +86,7 @@ export function TaskStep({ card }: CardProps) {
   // one with neither isn't asked about at all rather than asked of the wrong board.
   const c = card as { project?: string; choose?: { project?: string } };
   const board = c.project ?? c.choose?.project;
-  const [st, setSt] = useState<Step>();
+  const [st] = useCardStatus<Step>(id && board ? `step:${board}:${id}` : null, () => run<Step>("tasks.status", { id }, { project: board }), (v) => v.status === "done" || v.status === "dropped", 30000);
   // Changing an answer already sent: the built-in card again, its pick going to tasks.reanswer (with its few seconds
   // of undo too). The card's own undo only covers the seconds before a pick is sent.
   const [changing, setChanging] = useState<string | false>(false); // the answer it had when the change was opened
@@ -29,17 +94,6 @@ export function TaskStep({ card }: CardProps) {
   useEffect(() => {
     if (changing !== false && st?.handedBack !== changing) setChanging(false);
   }, [st?.handedBack]);
-  useEffect(() => {
-    if (!id || !board) return;
-    let dead = false;
-    const get = () => run<Step>("tasks.status", { id }, { project: board }).then((v) => !dead && setSt(v), () => {});
-    void get();
-    const timer = setInterval(get, 30000);
-    return () => {
-      dead = true;
-      clearInterval(timer);
-    };
-  }, [id, board]);
   const changeable = st?.status === "done" && (st.kind === "choice" || st.kind === "value") && !!card.choose && !!board;
   if (changing && changeable) {
     // A question of several is changed the way it's answered; an older single ask through tasks.reanswer
@@ -175,19 +229,19 @@ type Wait = { state: "waiting" | "ended" | "gone"; body?: string; wakes?: Wake[]
 function TaskWait({ card }: CardProps) {
   // waits: the task's waits it stands for (local/_waits.ts); cards made before those had ids carry since (+ kind "mr")
   const c = card as { project?: string; task?: string; waits?: string[]; since?: number; title?: string; body?: string; wakes?: Wake[]; kind?: string; url?: string };
-  const [st, setSt] = useState<Wait>();
+  const asks = c.project && c.task && (c.waits?.length || c.since);
+  const [st] = useCardStatus<Wait>(
+    asks ? `wait:${c.project}:${c.task}:${c.waits?.join(",") ?? ""}:${c.since ?? ""}:${c.kind ?? ""}` : null,
+    () => run<Wait>("waits.status", { id: c.task, waits: c.waits, since: c.since, kind: c.kind }, { project: c.project }),
+    (v) => v.state !== "waiting",
+    20000,
+  );
+  // Redrawn every 20s for "等了 n 分钟", even when the status didn't change
   const [, tick] = useState(0);
   useEffect(() => {
-    if (!c.project || !c.task || (!c.waits?.length && !c.since)) return;
-    let dead = false;
-    const get = () => run<Wait>("waits.status", { id: c.task, waits: c.waits, since: c.since, kind: c.kind }, { project: c.project }).then((v) => !dead && setSt(v), () => {});
-    void get();
-    const timer = setInterval(() => (get(), tick((n) => n + 1)), 20000);
-    return () => {
-      dead = true;
-      clearInterval(timer);
-    };
-  }, [c.project, c.task, c.waits?.join(","), c.since, c.kind]);
+    const timer = setInterval(() => tick((n) => n + 1), 20000);
+    return () => clearInterval(timer);
+  }, []);
   const on = !st || st.state === "waiting";
   // Cards and boards from before wakeItem only have the prose, its parts joined by "；": one row each
   const body = st?.body ?? c.body;
@@ -274,18 +328,17 @@ type Out = { state: "pending" | "sent" | "skipped" | "missing"; text?: string; w
  */
 function TaskOutgoing({ card }: CardProps) {
   const c = card as { ref?: string; project?: string; task?: string; where?: string; text?: string };
-  const [st, setSt] = useState<Out>();
+  const [st, get] = useCardStatus<Out>(
+    c.ref && c.project ? `out:${c.project}:${c.ref}` : null,
+    () => run<Out>("outbox.status", { ref: c.ref }, { project: c.project }),
+    (v) => v.state !== "pending",
+    30000,
+  );
   // The words are an input from the start, filled with what the worker wrote: edit them in place, then send
   const [draft, setDraft] = useState<string | null>(null);
   const [busy, setBusy] = useState("");
   const [err, setErr] = useState("");
   const box = useRef<HTMLTextAreaElement>(null);
-  const get = () => (c.ref && c.project ? run<Out>("outbox.status", { ref: c.ref }, { project: c.project }).then(setSt, () => {}) : Promise.resolve());
-  useEffect(() => {
-    void get();
-    const timer = setInterval(get, 30000);
-    return () => clearInterval(timer);
-  }, [c.ref, c.project]);
   const text = st?.text ?? c.text ?? "";
   const where = st?.where ?? c.where ?? "";
   const value = draft ?? text;
