@@ -402,8 +402,9 @@ export default function BoardPage() {
         data-col={c.id}
         className={clsx(
           "flex min-w-60 flex-1 basis-0 flex-col rounded-xl max-md:min-w-0",
-          // What needs the user stands out in the board itself: 等你 with anything in it, 待验收 a little
-          you.length ? "bg-warn/[0.02] ring-1 ring-warn/25" : c.id === "review" && all.length ? "bg-ok/5 ring-1 ring-ok/30" : "bg-muted/50",
+          // Every column alike: tinted columns (等你 yellow, 待验收 green) made the board loud (2026-11-19, the user:
+          // 颜色克制一点). What needs the user shows on its cards and in the header's 等你 count instead
+          "bg-muted/50",
           // While a card is dragged: where it can go is outlined, the one under it filled
           takes && (dropOn === c.id ? "bg-brand/10 ring-2 ring-brand/60" : "ring-1 ring-brand/30"),
         )}
@@ -805,8 +806,8 @@ function MiniCard({
         // Its place while it's dragged: faded, the floating copy is the card
         ghost && "opacity-30",
         "block w-full space-y-1.5 rounded-lg border bg-card p-3 text-left shadow-xs transition-[border-color,box-shadow,transform] duration-150 hover:shadow-sm active:scale-[0.99]",
-        // A card waiting on the user stays yellow when hovered or open: only brighter, never blue.
-        waitsOnUser(t) ? clsx("bg-warn/[0.04]", active ? "border-warn/80" : "border-warn/25 hover:border-warn/55") : clsx("hover:border-ring/50", active ? "border-ring" : notDispatched(t) && "border-warn/60"),
+        // A card waiting on the user has a yellow edge (no fill: kept quiet), only brighter when hovered or open, never blue.
+        waitsOnUser(t) ? (active ? "border-warn/80" : "border-warn/25 hover:border-warn/55") : clsx("hover:border-ring/50", active ? "border-ring" : notDispatched(t) && "border-warn/60"),
       )}>
       <div className={clsx("flex min-w-0 items-center gap-1.5 overflow-hidden text-[11px] text-muted-foreground", act && "pr-6")}>
         <Bot className="size-3 shrink-0" />
