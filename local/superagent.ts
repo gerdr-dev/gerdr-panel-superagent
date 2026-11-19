@@ -56,8 +56,7 @@ async function one(d: Decision, ctx: Ctx) {
       return accept(ctx, it, d.title, d.parts, d.rule?.trim());
     }
     case "attach": {
-      const asked = live(ctx, d.task);
-      const t = receiver(ctx, asked);
+      const t = receiver(live(ctx, d.task));
       if (e.key)
         update(ctx, (s) => {
           const x = find(s, t.id);
@@ -66,7 +65,7 @@ async function one(d: Decision, ctx: Ctx) {
         });
       await followUp(ctx, t.id, e);
       settle({ state: "attached", tasks: [t.id], reason: d.reason });
-      return { item: it.id, tasks: [t.id], ...(t.id !== asked.id ? { note: `${asked.id} 是人工任务，没有 worker：消息交给了要它的 ${t.id}` } : {}) };
+      return { item: it.id, tasks: [t.id] };
     }
     case "stop": {
       const t = live(ctx, d.task);
@@ -284,21 +283,12 @@ function live(ctx: Ctx, id?: string): Task {
 }
 
 /**
- * Who an attached message actually reaches. A human step (owner "human") has no worker: wake() only records the
- * message on it, so attach reported success and nobody read it (2026-11-19, c379 → t206: a colleague's "我点了" for
- * the approval t203 had asked the user for). It goes to the worker that asked for the step instead — the one waiting
- * on it. A human step with no such worker, or an agent task sent out whose conversation is gone, is refused, so the
- * secretary picks another task or ignores it instead of believing it was delivered. An agent task not sent out yet
- * is fine: the message goes with it when it is (followUp).
+ * An attached message must reach someone: a task sent out whose conversation is gone is refused, so the secretary
+ * picks another task or ignores it instead of believing it was delivered (2026-11-19, c379: attached to a human task,
+ * which had no worker — recorded on it, read by nobody, decide said it was done). A task not sent out yet is fine:
+ * the message goes with it when it is (followUp).
  */
-function receiver(ctx: Ctx, t: Task): Task {
-  if (t.owner === "human") {
-    const tasks = load(ctx).store.tasks;
-    const ok = (x: Task) => x.owner === "agent" && !!x.session && x.status !== "dropped";
-    const w = tasks.find((x) => x.id === t.askedBy && ok(x)) ?? tasks.find((x) => ok(x) && !!x.blockedBy?.includes(t.id));
-    if (!w) throw new Error(`${t.id} 是用户自己做的人工任务，没有 worker 收消息，也没有在等它的任务；并进别的任务，或者 ignore`);
-    return w;
-  }
+function receiver(t: Task): Task {
   if (!t.session && t.status !== "todo") throw new Error(`${t.id} 没有 worker 对话，消息送不到；并进别的任务，或者 ignore`);
   return t;
 }

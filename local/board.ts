@@ -1,10 +1,10 @@
 // The board's panel tools: what a worker (a session the board started) calls to report on and change its task, from
 // inside a turn. Gerdr serves them to the worker over MCP; ctx.caller.session says which conversation called, so the
 // task is looked up, never taken from the input. Same rules as the old ```gerdr-task``` block (_apply.ts), plus what a
-// block couldn't do: take back a human step the user no longer needs to do, and answer with ids.
+// block couldn't do: take back a step the user no longer needs to do, and answer with ids.
 
 import { applyBlock } from "./_apply";
-import { activity, find, load, note, reqOf, splitRef, update, type Store, type Task } from "./_store";
+import { activity, find, findAsk, load, note, openAsks as open_, reqOf, update, type Ask, type Store, type Task } from "./_store";
 import { handBack, isMain, state as mainState, threadsOf } from "./_main";
 import { workflow } from "./_config";
 import { hold } from "./_outbox";
@@ -41,7 +41,7 @@ const STEP = {
       type: "array",
       items: { type: "string" },
       description:
-        "What you asked before that this replaces (ids as my_task / the earlier result give them: t5, or t5#1 for one question of several): taken back with this one, so the user only sees the current question. Use it whenever the situation moved on since you asked (you talked it over with the user, found something out) and the question changed.",
+        "What you asked before that this replaces (ids as my_task / the earlier result give them: a5, or a5#1 for one question of several): taken back with this one, so the user only sees the current question. Use it whenever the situation moved on since you asked (you talked it over with the user, found something out) and the question changed.",
     },
     verify: { type: "string", description: "How you will check it once the user says it's done" },
     minutes: { type: "number", description: "Roughly how long it takes the user" },
@@ -61,7 +61,7 @@ export const tools = {
   },
   cancel_human: {
     description:
-      "Take back a step or question you asked the user for with ask_human (t5, or t5#1 for one question of several): they answered it in the chat already, you found another way, or it's moot. It leaves their task panel with your reason. Do it as soon as it's moot — never leave it for the user to answer with \"any is fine\". Asking a changed question instead: ask_human with replaces.",
+      "Take back a step or question you asked the user for with ask_human (a5, or a5#1 for one question of several): they answered it in the chat already, you found another way, or it's moot. It leaves their task panel with your reason. Do it as soon as it's moot — never leave it for the user to answer with \"any is fine\". Asking a changed question instead: ask_human with replaces.",
     input: { type: "object", properties: { id: { type: "string" }, reason: { type: "string" } }, required: ["id", "reason"] },
   },
   hand_back: {
@@ -94,7 +94,7 @@ export const tools = {
     },
   },
   my_task: {
-    description: "Your task as the task panel sees it: status, summary, artifacts, the human steps you asked for (open or done, with what was handed back).",
+    description: "Your task as the task panel sees it: status, summary, artifacts, what you asked the user for (open or done, with what was handed back).",
     input: { type: "object", properties: {} },
   },
   message_user: {
@@ -125,7 +125,7 @@ export const tools = {
  */
 export function instructions(input: unknown, ctx: Ctx) {
   const who = ctx.caller.session;
-  const t = who && load(ctx).store.tasks.find((x) => x.owner === "agent" && (x.session === who || x.sessions?.includes(who)));
+  const t = who && load(ctx).store.tasks.find((x) => x.session === who || x.sessions?.includes(who));
   if (!t) return "";
   return (
     `You are the worker of task ${t.id} ("${t.title}") on the user's Superagent task panel. Opening the task there opens ` +
@@ -133,8 +133,8 @@ export function instructions(input: unknown, ctx: Ctx) {
     `nothing to report: when your turn ends and you wait on nothing, the task goes before the user with what you said. ` +
     `Waiting on someone or something: wait_for; something only the user can decide or do: ask_human. How to work on it ` +
     `is their my-workflow skill, ${skillFile(ctx, "my-workflow/references/task.md")}: read it before you stop. my_task shows the task as the panel sees it. ` +
-    `Your questions and steps for the user have ids (t5, t5#1) for your tools only: the panel doesn't show them, so to ` +
-    `the user name the question itself ("套餐商品配置那个问题"), never "卡片 t5" or "t5#1". ` +
+    `Your questions and steps for the user have ids (a5, a5#1) for your tools only: the panel doesn't show them, so to ` +
+    `the user name the question itself ("套餐商品配置那个问题"), never "卡片 a5" or "a5#1". ` +
     `What the user's memory says about this repository and all of them came in your first message; the files are ` +
     `${ctx.fs.root}/${MEMORY}/${t.repo ? nameOf(t.repo) : "…"}.md and ${GENERAL}.md there — add to them with remember ` +
     `(when: ${skillFile(ctx, "my-workflow/references/memory.md")}).` +
@@ -159,7 +159,7 @@ export function instructions(input: unknown, ctx: Ctx) {
 /** The task whose worker is the calling conversation. */
 export function mine(s: Store, ctx: Ctx): Task {
   const who = ctx.caller.session;
-  const t = who && s.tasks.find((x) => x.owner === "agent" && (x.session === who || x.sessions?.includes(who)));
+  const t = who && s.tasks.find((x) => x.session === who || x.sessions?.includes(who));
   if (!t) throw new Error("这个对话不是任务面板上任何任务的 worker（只有任务面板派出去的会话能用这些工具）");
   return t;
 }
@@ -189,8 +189,8 @@ export function ask_human(input: any, ctx: Ctx) {
     if (reviewed && last?.kind === "review" && last.by === t.id) Object.assign(last, { kind: "progress", text: last.text.replace(/^有结论了，等你看：?/, "") || "有结论了" });
     Object.assign(t, { viaTools: true, reportedAt: Date.now(), nudges: 0, updatedAt: Date.now() });
     endWaits(t, isOutside, "worker 改成问你了");
-    if (h.handBack?.kind === "questions") {
-      // Joined an item that still has earlier questions open: say which, so the moot ones are taken back now
+    if (h.handBack.kind === "questions") {
+      // Joined an ask that still has earlier questions open: say which, so the moot ones are taken back now
       const earlier = (h.questions ?? []).filter((q) => !q.dropped && q.answer == null).slice(0, -1);
       const card = { ...questionCard(h, ctx), note: SHOWN };
       return earlier.length
@@ -199,14 +199,14 @@ export function ask_human(input: any, ctx: Ctx) {
     }
     if (decision) h.urgent = false; // a decision can wait: no warning mark, it just sits under 等你
     // gerdrCard: Gerdr draws this result as a card in the chat, so the user sees the step where they are too
-    const back = h.handBack?.kind === "secret" ? `\n\n做完要交回：密钥「${h.handBack.label || h.handBack.name}」（在任务面板上存，不经过对话）` : h.handBack?.kind === "value" ? `\n\n做完要交回：${h.handBack.label || "一个值"}` : "";
+    const back = h.handBack.kind === "secret" ? `\n\n做完要交回：密钥「${h.handBack.label || h.handBack.name}」（在任务面板上存，不经过对话）` : h.handBack.kind === "value" ? `\n\n做完要交回：${h.handBack.label || "一个值"}` : "";
     const left = h.expiresAt ? `（${Math.round((h.expiresAt - Date.now()) / 60000)} 分钟内有效）` : "";
     return {
       id: h.id,
       title: h.title,
       note: `已放到用户任务面板的「等你」里；做完你会收到消息。${SHOWN}`,
-      // ref: the drawer's "跳到 tN" scrolls to this card. choose: answered right in the chat, the same tasks.complete
-      // the board calls. A secret isn't: it goes through Gerdr's password box on the board, never the chat.
+      // ref: the drawer's jump scrolls to this card. choose: answered right in the chat, the same tasks.complete the
+      // board calls. A secret isn't: it goes through Gerdr's password box on the board, never the chat.
       // type: drawn by ui/src/cards.tsx (it shows how the step ended once the board has it); the rest is the built-in card
       gerdrCard: decision
         ? {
@@ -217,20 +217,20 @@ export function ask_human(input: any, ctx: Ctx) {
             title: h.title,
             body: h.steps || undefined,
             tone: "info",
-            choose: { project: ctx.workspace.project, fn: "tasks.complete", input: { id: h.id }, field: "value", options: (h.handBack as any).options, multi: h.handBack?.multi, other: true },
+            choose: { project: ctx.workspace.project, fn: "tasks.complete", input: { id: h.id }, field: "value", options: h.handBack.options, multi: h.handBack.multi, other: true },
           }
         : {
             type: "task-step",
             ref: h.id,
             project: ctx.workspace.project,
-            kicker: `要你做 · ${h.id}${left}`,
+            kicker: `要你做${left}`,
             title: h.title,
-            body: `${h.steps ?? ""}${back}${h.handBack?.kind === "secret" ? `\n\n做完在任务面板「等你」里的 ${h.id} 上存密钥。` : ""}`,
+            body: `${h.steps ?? ""}${back}${h.handBack.kind === "secret" ? `\n\n做完在任务面板上 ${t.id} 的卡片里存密钥。` : ""}`,
             tone: "warn",
             choose:
-              h.handBack?.kind === "secret"
+              h.handBack.kind === "secret"
                 ? undefined
-                : h.handBack?.kind === "value"
+                : h.handBack.kind === "value"
                   ? { project: ctx.workspace.project, fn: "tasks.complete", input: { id: h.id }, field: "value", options: [], other: true }
                   : { project: ctx.workspace.project, fn: "tasks.complete", input: { id: h.id }, field: "value", options: ["做完了"], other: false },
           },
@@ -242,22 +242,20 @@ export function cancel_human(input: { id: string; reason: string }, ctx: Ctx) {
   return update(ctx, (s) => takeBack(s, mine(s, ctx), String(input.id), input.reason));
 }
 
-/** Takes back a step or one question (t5#2) that t asked the user: off their board, a line in the feed. */
+/** Takes back a step or one question (a5#2) that t asked the user: off their board, a line in the feed. */
 function takeBack(s: Store, t: Task, id: string, reason: string) {
-  const [hid, qid] = splitRef(id);
-  const h = find(s, hid);
-  // One question of several (t5#2): only it goes; the item stays for the rest (or goes when nothing is left)
+  const { t: by, a: h, q: qid } = findAsk(s, id);
+  if (by.id !== t.id) throw new Error(`${id} 不是你这个任务问的`);
+  // One question of several (a5#2): only it goes; the ask stays for the rest (or goes when nothing is left)
   if (qid && h.questions) {
-    if (h.askedBy !== t.id) throw new Error(`${hid} 不是你这个任务要的`);
     const q = h.questions.find((x) => x.id === qid);
-    if (!q) throw new Error(`${hid} 没有第 ${qid} 个问题`);
+    if (!q) throw new Error(`${h.id} 没有第 ${qid} 个问题`);
     if (q.answer != null) throw new Error(`${id} 用户已经答了：${q.answer}`);
     q.dropped = reason || "撤回";
-    note(h, `worker 撤回了「${q.title}」：${reason}`);
+    note(t, `worker 撤回了「${q.title}」：${reason}`);
     activity(s, t, { kind: "join", by: t.id, text: `撤回了要你决定的「${q.title}」${reason ? `：${reason}` : ""}` });
     const left = h.questions.filter((x) => !x.dropped);
     if (!left.length) Object.assign(h, { status: "dropped", doneAt: Date.now() });
-    if (!left.length) t.blockedBy = (t.blockedBy ?? []).filter((x) => x !== h.id);
     h.updatedAt = Date.now();
     // The rest were answered already (held until all were): this was the last one open, so the answers are the
     // caller's now, in this result — it is the worker, mid-turn
@@ -266,26 +264,23 @@ function takeBack(s: Store, t: Task, id: string, reason: string) {
       const sum = left.map((x) => `${x.title}：${x.answer}`).join("；");
       Object.assign(h, { status: "done", handedBack: sum, doneAt: Date.now() });
       for (const x of left) x.sent = true;
-      t.blockedBy = (t.blockedBy ?? []).filter((x) => x !== h.id);
       activity(s, t, { kind: "user", by: t.id, of: h.id, text: `你答了 ${left.length} 个问题：${sum}` });
     }
     return {
       id,
       status: "dropped",
-      left: left.filter((x) => !x.answer).map((x) => `${hid}#${x.id}`),
-      ...(answered ? { answers: left.map((x) => ({ id: `${hid}#${x.id}`, title: x.title, answer: x.answer })), note: "其余的问题用户都答了，答案在 answers 里：照这些接着做" } : {}),
-      gerdrCard: takenBack(`${hid}#${q.id}`, q.title, reason),
+      left: left.filter((x) => !x.answer).map((x) => `${h.id}#${x.id}`),
+      ...(answered ? { answers: left.map((x) => ({ id: `${h.id}#${x.id}`, title: x.title, answer: x.answer })), note: "其余的问题用户都答了，答案在 answers 里：照这些接着做" } : {}),
+      gerdrCard: takenBack(`${h.id}#${q.id}`, q.title, reason),
     };
   }
-  if (h.owner !== "human" || (h.askedBy !== t.id && !t.blockedBy?.includes(h.id))) throw new Error(`${h.id} 不是你这个任务要的人工步骤`);
   if (h.status === "done") throw new Error(`${h.id} 用户已经做完了${h.handedBack ? `（交回：${h.handedBack}）` : ""}`);
   if (h.status !== "dropped") {
-    note(h, `worker 撤回了：${reason}`);
+    note(t, `worker 撤回了「${h.title}」：${reason}`);
     Object.assign(h, { status: "dropped", doneAt: Date.now(), updatedAt: Date.now(), dropReason: reason });
     // Said in the feed: the item leaving 等你 with no word was all the user saw (t55, 2026-11-05)
-    activity(s, t, { kind: "join", by: t.id, text: `撤回了要你做的 ${h.id}「${h.title}」${reason ? `：${reason}` : ""}` });
+    activity(s, t, { kind: "join", by: t.id, text: `撤回了要你做的「${h.title}」${reason ? `：${reason}` : ""}` });
   }
-  t.blockedBy = (t.blockedBy ?? []).filter((x) => x !== h.id);
   return { id: h.id, status: "dropped", gerdrCard: takenBack(h.id, h.title, reason) };
 }
 
@@ -294,14 +289,13 @@ function takeBack(s: Store, t: Task, id: string, reason: string) {
  * shaped like a new ask — it read as one more thing to do, next to the ask's own card already saying 已撤回.
  */
 function takenBack(id: string, title: string, reason: string) {
-  return { type: "task-taken-back", ref: `${id}:taken-back`, title: `撤回了 ${id}「${title}」`, body: reason || undefined, tone: "info" };
+  return { type: "task-taken-back", ref: `${id}:taken-back`, title: `撤回了「${title}」`, body: reason || undefined, tone: "info" };
 }
 
-/** What t still asks the user, each with when it was asked: whole steps (t5) and open questions (t5#2). */
-export function openAsks(s: Store, t: Task) {
+/** What t still asks the user, each with when it was asked: whole steps (a5) and open questions (a5#2). */
+export function openAsks(t: Task) {
   const out: { id: string; title: string; at: number }[] = [];
-  for (const h of s.tasks) {
-    if (h.owner !== "human" || h.status !== "todo" || (h.askedBy !== t.id && !t.blockedBy?.includes(h.id))) continue;
+  for (const h of open_(t)) {
     if (h.questions) for (const q of h.questions) if (!q.dropped && q.answer == null) out.push({ id: `${h.id}#${q.id}`, title: q.title, at: q.at ?? h.createdAt });
     if (!h.questions) out.push({ id: h.id, title: h.title, at: h.createdAt });
   }
@@ -316,7 +310,7 @@ export function openAsks(s: Store, t: Task) {
 export function staleAsks(s: Store, t: Task) {
   const root = reqOf(s, t);
   const said = Math.max(0, ...(root?.activity ?? []).filter((a) => a.kind === "user" && a.by === t.id).map((a) => a.at));
-  const old = openAsks(s, t).filter((a) => a.at < said);
+  const old = openAsks(t).filter((a) => a.at < said);
   if (!old.length) return "";
   return (
     `你还在问用户 ${old.map((a) => `${a.id}「${a.title}」`).join("、")}，是在你们后来的对话之前问的。` +
@@ -325,12 +319,12 @@ export function staleAsks(s: Store, t: Task) {
 }
 
 /** Told with each question: its id is for the tools, the board doesn't show it. */
-const noIds = "编号只给工具用，任务面板上不显示：跟用户提起时说问题本身，别写 tN / tN#1。";
+const noIds = "编号只给工具用，任务面板上不显示：跟用户提起时说问题本身，别写 aN / aN#1。";
 
 export function my_task(input: unknown, ctx: Ctx) {
   const { store } = load(ctx);
   const t = mine(store, ctx);
-  const humans = store.tasks.filter((x) => x.owner === "human" && (x.askedBy === t.id || t.blockedBy?.includes(x.id)));
+  const humans = t.asks ?? [];
   return {
     id: t.id,
     title: t.title,
@@ -342,8 +336,14 @@ export function my_task(input: unknown, ctx: Ctx) {
     artifacts: t.links ?? [],
     // The ids are for the tools: the board shows questions without them (2026-11-16), and a worker that wrote
     // "都在卡片 t124 上，t124#1" made the user decode them
-    ...(humans.length ? { note: "humanSteps 的 id 只给工具用，任务面板上不显示：跟用户说时用问题本身，别写 t5 / t5#1。" } : {}),
-    humanSteps: humans.map((h) => ({ id: h.id, title: h.title, status: h.status, handedBack: h.handBack?.kind === "secret" ? (h.status === "done" ? `secret ${h.handBack.name} saved` : undefined) : h.handedBack })),
+    ...(humans.length ? { note: "asks 的 id 只给工具用，任务面板上不显示：跟用户说时用问题本身，别写 a5 / a5#1。" } : {}),
+    asks: humans.map((h) => ({
+      id: h.id,
+      title: h.title,
+      status: h.status,
+      handedBack: h.handBack.kind === "secret" ? (h.status === "done" ? `secret ${h.handBack.name} saved` : undefined) : h.handedBack,
+      ...(h.questions ? { questions: h.questions.filter((q) => !q.dropped).map((q) => ({ id: `${h.id}#${q.id}`, title: q.title, answer: q.answer })) } : {}),
+    })),
   };
 }
 
@@ -391,14 +391,14 @@ export async function hand_back(input: { event: string; reason: string }, ctx: C
  * The chat card for the question just asked (one of an item's several, "t5#2"): answered in place through
  * tasks.answerQuestion, like the board. ref is the question, so the drawer's jump and the card's state are per question.
  */
-function questionCard(h: Task, ctx: Ctx) {
+function questionCard(h: Ask, ctx: Ctx) {
   const qs = (h.questions ?? []).filter((x) => !x.dropped);
   const q = qs[qs.length - 1];
   const ref = `${h.id}#${q.id}`;
   const choice = q.kind === "choice";
   return {
     id: ref,
-    note: qs.length > 1 ? `和你前面问的 ${qs.length - 1} 个放在同一个任务面板事项 ${h.id} 里；用户都答完，你会一次收到全部答案。${noIds}` : `已放到用户任务面板的「等你」里（${h.id}）；再问的会并进同一项，都答完你一次收到全部答案。${noIds}`,
+    note: qs.length > 1 ? `和你前面问的 ${qs.length - 1} 个放在同一项 ${h.id} 里；用户都答完，你会一次收到全部答案。${noIds}` : `已放到用户任务面板的「等你」里（${h.id}）；再问的会并进同一项，都答完你一次收到全部答案。${noIds}`,
     gerdrCard: {
       type: "task-step",
       ref,

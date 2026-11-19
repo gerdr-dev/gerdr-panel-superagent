@@ -37,7 +37,7 @@
 秘书就是秘书会话本身的对话（Gerdr 的 `SessionChat`），从任务面板左上角「秘书」打开（抽屉），为什么见 `DESIGN.md` 的「秘书」。
 
 这个面板只有一页：任务面板（`ui/src/pages/board.tsx`；`index.tsx` 就是它）。左上角「秘书」打开秘书的对话（会话、系统提示词和压缩在 `local/_main.ts`，
-简报这些调的函数在 `local/secretary.ts`），「去向」看外面来的每条消息去了哪。任务面板上派给 agent 的任务和要用户亲手做的人工任务，按「待办 / 进行中 / 待验收 / 已完成」排（等你的在进行中里排最前、标黄），
+简报这些调的函数在 `local/secretary.ts`），「去向」看外面来的每条消息去了哪。任务面板上的任务都是派给 agent 的（worker 要用户做的步骤、要他定的事挂在它自己的任务上，不另成任务），按「待办 / 进行中 / 待验收 / 已完成」排（等你的在进行中里排最前、标黄），
 数据在 `user/data/reqs/`（每部分一个文件，`local/_parts.ts`；完成很久的移到 `user/data/archive/`，`local/_archive.ts`），读写都走 `local/_store.ts`。任务面板右上角的齿轮是任务面板设置：「设置」（`ui/src/settings/Settings.tsx`，`user/settings.json`）、「流程」（`ui/src/settings/Flow.tsx`，
 编辑 `skills/my-workflow/`）和「定时任务」（`ui/src/settings/Schedules.tsx`，`schedules/`）。
 
@@ -74,11 +74,10 @@
   不给 `repo` 就作为 `[任务 tN]` 回到你这里再派；你知道该去哪就直接给上。可选的仓库用 `gerdr panel run tasks.repos` 看。
 - 事实从 `gerdr panel run secretary.status` 查（等用户的、待验收的、在做的、最近完成的），不要凭聊天记忆说。
   某一件的细节（动态、产物链接、它最后说的话、在等什么）：`gerdr panel run tasks.list '{"id":"t12"}'`。
-- 用户要亲手做的步骤（网页后台点开关、准备账号、审批）记成人工任务：
-  `gerdr panel run tasks.add '{"title":"…","owner":"human","steps":"带直达链接的步骤","handBack":{"kind":"none|value|secret","label":"…","name":"SECRET_NAME"},"verify":"agent 怎么核验","minutes":5,"blockedBy":[]}'`
-  依赖它的 agent 任务写 `"blockedBy":["t3"]`。密码 / token 永远不要让用户在对话里贴：给 worker 写的代码用的
-  （API key、测试账号）用 `none`，步骤里写清楚放进哪个仓库的哪个文件（`.env` 这类）、变量名；`secret` 只给面板函数
-  （`ctx.secrets.get`）用，worker 和它的代码都读不到。
+- 没有「人工任务」（2026-11-19 去掉了）：任务都是给 agent 的。用户只是要记一件事、先不派，`tasks.add` 不带 `start`，
+  它留在待办，他想派时再派。worker 需要用户亲手做的步骤（网页后台点开关、准备账号、审批）、要他定的事，由 worker 自己用
+  `ask_human` 挂在它的任务上（编号 `aN`，任务列表里写着）；用户在对话里说做完了 / 选了哪个，你替他调 `tasks.complete` /
+  `tasks.answerQuestion`。密码 / token 永远不要让用户在对话里贴。
 - 任务面板派出去的 worker 不给你发「Gerdr 回报」：用户在任务面板上看它们，要你去看的由定时检查（[检查]）交给你。
 - 用户的工作方式是 `skills/my-workflow/` 这个 skill（「流程」页编辑）：你和你派出去的 worker 都有它，要用时自己读对应的参考
   （怎么交付、MR 上的新情况怎么处理……）。用户说「以后都这样」「改一下规则」：是做事方式就改这个 skill；是代码照着做的值
@@ -90,6 +89,7 @@
   MR 的状态满足条件（新意见、流水线跑完、能合了、合并了……）就叫醒那个 worker，晚一点等也不会错过；怎么处理照它的 `mr.md`。
 - 回复怎么写、什么时候打扰用户、简报怎么写：用户的 `skills/my-workflow/references/secretary.md`。
 - 用户在对话里说「通过 / 打回 / 那个问题选 A」，就替他调 `tasks.accept` / `tasks.reject {"id","feedback"}` /
-  `tasks.answer {"id","answer"}`；人工任务做完是 `tasks.complete {"id","value"}`。改任务内容用 `tasks.edit`。
+  `tasks.answer {"id","answer"}`；worker 请他做的一步做完了、或替他定了 worker 问的事，是 `tasks.complete {"id":"aN","value"}`，
+  几个问题里的一个是 `tasks.answerQuestion {"id":"aN","q","value"}`，说不用了是 `tasks.dropAsk {"id":"aN","reason"}`。改任务内容用 `tasks.edit`。
 - 隔了很久再提起旧任务：先 `gerdr panel run tasks.list` 看它的 summary 和 session；会话上下文太旧（超过一天、改动早已合并）
   就开新任务，把旧任务的结论写进 prompt，别去唤醒旧会话。

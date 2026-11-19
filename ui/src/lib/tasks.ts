@@ -10,11 +10,50 @@ const toast = (core as unknown as { toast?: ((m: string, o?: Record<string, unkn
 export type Link = { label: string; url: string; at?: number };
 export type Live = { status: string; waiting?: string; waitingSince?: number; turnStartedAt?: number; updatedAt: number; error?: string; title?: string } | null;
 /** A line in a requirement's activity feed (local/_store.ts). */
-export type Activity = { at: number; by?: string; to?: string; kind: "progress" | "tell" | "join" | "done" | "review" | "user" | "stuck" | "wait" | "got" | "message" | "brief"; text: string; files?: { path: string; name?: string }[]; /** The step / question item whose answer this line records (local/_store.ts) */ of?: string };
+export type Activity = { at: number; by?: string; to?: string; kind: "progress" | "tell" | "join" | "done" | "review" | "user" | "stuck" | "wait" | "got" | "message" | "brief"; text: string; files?: { path: string; name?: string }[]; /** The ask (or one of its questions) whose answer this line records (local/_store.ts) */ of?: string };
+/** One of several questions in an ask (handBack "questions"), each answered on its own (local/_store.ts). */
+export type Question = { id: string; title: string; kind: "choice" | "value"; options?: string[]; multi?: boolean; label?: string; steps?: string; answer?: string; dropped?: string; at?: number; skipped?: boolean; sent?: boolean };
+
+/**
+ * Something a task's worker needs from the user (ask_human): a step only they can do, a decision, a value, several
+ * questions. Kept on the task that asked (local/_store.ts Ask): there are no tasks for people (2026-11-19).
+ */
+export type Ask = {
+  id: string;
+  /** The human task it was before 2026-11-19 (t206). */
+  was?: string;
+  title: string;
+  status: "open" | "done" | "dropped";
+  steps?: string;
+  handBack: { kind: "none" | "value" | "secret" | "choice" | "questions"; name?: string; label?: string; options?: string[]; multi?: boolean };
+  questions?: Question[];
+  verify?: string;
+  minutes?: number;
+  urgent?: boolean;
+  expiresAt?: number;
+  handedBack?: string;
+  dropReason?: string;
+  /** When the user asked its worker to bring it up to date (tasks.refreshAsk). */
+  refreshing?: number;
+  createdAt: number;
+  updatedAt: number;
+  doneAt?: number;
+};
+
+/** What t still asks the user. */
+export function openAsks(t: Task): Ask[] {
+  return (t.asks ?? []).filter((a) => a.status === "open");
+}
+
+/** An ask by its id (or a human task's old id) and the task that asked it. */
+export function findAsk(tasks: Task[] | undefined, id: string): { t: Task; a: Ask } | undefined {
+  for (const t of tasks ?? []) for (const a of t.asks ?? []) if (a.id === id || a.was === id) return { t, a };
+  return undefined;
+}
+
 export type Task = {
   id: string;
   title: string;
-  owner: "agent" | "human";
   /** Work someone asked of the user (local/assign.ts): agree to it, reply to them, deliver. */
   assigned?: { state: "ask" | "agreed" | "delivered" | "done"; by?: string; how?: "agent" | "self"; agent?: string; repos?: string[]; share?: "" | "view" | "talk"; draft?: string; shareDir?: string; unattended?: boolean };
   /** 设置 → 回复对方 is 派出去时 and it's still in 待办: the card's 回复对方 box, and what it starts with (local/tasks.ts list). */
@@ -24,7 +63,6 @@ export type Task = {
   remark?: string;
   /** What its worker wrote to a chat, held for the user to send or not (local/outbox.ts). */
   outbox?: { id: string; text: string; where: string; at: number; state: "pending" | "sent" | "skipped"; doneAt?: number; edited?: boolean }[];
-  origin?: { source: string; key?: string; title?: string; url?: string };
   status: "todo" | "running" | "review" | "done" | "dropped";
   /** Images and files the user gave with it (local paths on Gerdr's machine). */
   attachments?: { path: string; name: string; mime?: string }[];
@@ -48,9 +86,8 @@ export type Task = {
   question?: string;
   summary?: string;
   links?: Link[];
-  steps?: string;
-  handBack?: { kind: "none" | "value" | "secret" | "choice" | "questions"; name?: string; label?: string; options?: string[]; multi?: boolean };
-  /** handBack "questions": several decisions / values asked at once, each answered on its own (local/_store.ts). */
+  /** What its worker asks of the user (ask_human), open and answered. */
+  asks?: Ask[];
   /** Everything it waits on now, of every kind (local/_waits.ts): where it stands follows from these; the 在等 view. */
   waits?: Wait[];
   /** Its worker stopped with nothing to wait on (tasks.ts list): under 等你, with what it last said. */
@@ -63,22 +100,13 @@ export type Task = {
   /** The newest paragraph in its worker's conversation, read live (local/tasks.ts newest): the card's line. */
   latest?: string;
   nudges?: number;
-  questions?: { id: string; title: string; kind: "choice" | "value"; options?: string[]; multi?: boolean; label?: string; steps?: string; answer?: string; dropped?: string; at?: number; skipped?: boolean; sent?: boolean }[];
-  /** When the user asked its worker to bring this ask up to date (tasks.refreshAsk). */
-  refreshing?: number;
-  handedBack?: string;
-  verify?: string;
-  minutes?: number;
-  urgent?: boolean;
-  expiresAt?: number;
-  askedBy?: string;
   notes?: { at: number; text: string }[];
   createdAt: number;
   updatedAt: number;
   doneAt?: number;
   live: Live;
   column: "you" | "review" | "active" | "done";
-  /** A member of a requirement, or a step its member asked the user for: folded into requirement `in`'s card. */
+  /** A member of a requirement: folded into requirement `in`'s card. */
   in?: string;
   team?: string;
   /** A requirement with members: their ids (itself, the lead, first), its feed, and the column of the most pressing. */
@@ -227,11 +255,12 @@ export function ago(ms?: number) {
 }
 
 /**
- * Since when a card in 等你 has been waiting on the user: a human item since it was asked, an agent task since its
- * worker started waiting / stopped. The card shows this time and the column is sorted by it, so the two agree.
+ * Since when a card in 等你 has been waiting on the user: its newest open ask since it was asked, else since its worker
+ * started waiting / stopped. The card shows this time and the column is sorted by it, so the two agree.
  */
 export function waitedSince(t: Task) {
-  if (t.owner === "human") return t.createdAt;
+  const asks = openAsks(t);
+  if (asks.length) return Math.max(...asks.map((a) => Math.max(a.createdAt, ...(a.questions ?? []).filter((q) => !q.dropped && q.answer == null).map((q) => q.at ?? 0))));
   const l = t.live;
   return (l?.status === "waiting" ? l.waitingSince : l?.updatedAt) ?? t.updatedAt;
 }

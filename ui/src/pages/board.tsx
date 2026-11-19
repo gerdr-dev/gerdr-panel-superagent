@@ -1,7 +1,7 @@
-import { AlertTriangle, ArrowRight, ArrowUp, Ban, Bot, Users, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Route, Search, Send, Settings, Undo2, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, Ban, Bot, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Search, Send, Settings, Undo2, X } from "lucide-react";
 import { EditableTitle } from "../components/EditableTitle";
 import clsx from "clsx";
-import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "../components/Button";
 import { Dialog, DialogContent, DialogTitle } from "../components/ui/dialog";
 import { Sheet, SheetContent, SheetTitle } from "../components/ui/sheet";
@@ -9,16 +9,15 @@ import { type Attachment } from "../components/Attachments";
 import { TaskBox, TaskDialog, mentionsOf, uploading, type AgentInfo } from "../components/TaskBox";
 import { askSecret, secretNames } from "../lib/bridge";
 import { ChatDrawer, Menu, type ChatAction, type ChatItem } from "../components/ChatDrawer";
-import { TaskStep } from "../cards";
 import { Trail } from "../components/Trail";
 import { Linger } from "../lib/linger";
 import { SettingsSheet, TABS, type SettingsTab } from "../components/SettingsSheet";
 import { phoneMenu, usePhoneMenu } from "../lib/phoneMenu";
 import { useSearchItems } from "../lib/search";
-import { ago, day, since, type Task, useTasks, waitedSince } from "../lib/tasks";
+import { ago, day, findAsk, openAsks, since, type Ask, type Task, useTasks, waitedSince } from "../lib/tasks";
 import { project, run } from "../lib/gerdr";
 import * as core from "@gerdr/core";
-import { DefaultCard, onShowSession } from "@gerdr/core";
+import { onShowSession } from "@gerdr/core";
 import { isSubmitEnter } from "../lib/utils";
 import { Md } from "../lib/markdown";
 import { usePhone, useSwipePages } from "../lib/swipe";
@@ -54,8 +53,8 @@ function moveTo(act: Act, id: string, c: Col) {
   return act("setStatus", { id, status: STATUS[c] }).catch((e: any) => toastError?.(String(e?.message ?? e)));
 }
 
-/** Where the user can move a task by hand: agent tasks, alone on the board (a requirement's members are in its card). */
-const movable = (t: Task) => t.owner === "agent" && !t.in && t.status !== "dropped";
+/** Where the user can move a task by hand: alone on the board (a requirement's members are in its card). */
+const movable = (t: Task) => !t.in && t.status !== "dropped";
 
 /** Whether task t can go to column c by hand: 待办 only before it was sent out, 待验收 only after. */
 function canMove(t: Task, c: Col) {
@@ -124,7 +123,7 @@ const boardCol = (t: Task): Col => (colOf(t) === "you" ? "active" : colOf(t));
 function colOf(t: Task): Col {
   // A requirement with members: where the most pressing of them is (any waiting on the user → 等你)
   const c = t.teamColumn ?? t.column;
-  if (c === "active" && (t.status === "todo" || (t.owner === "human" && !t.ready))) return "todo";
+  if (c === "active" && t.status === "todo") return "todo";
   return c;
 }
 
@@ -169,15 +168,15 @@ export default function BoardPage() {
     return () => window.removeEventListener("keydown", on);
   }, []);
   const words = (find ?? "").trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const textOf = (t: Task) => [t.id, t.title, t.repo, t.origin?.title, t.prompt, t.question, t.summary, t.said].filter(Boolean).join("\n").toLowerCase();
-  // Every word somewhere in the card's task or in a task inside its card (a requirement's members, the steps asked)
+  const textOf = (t: Task) => [t.id, t.title, t.repo, t.origin?.title, t.prompt, t.question, t.summary, t.said, ...(t.asks ?? []).map((a) => a.title)].filter(Boolean).join("\n").toLowerCase();
+  // Every word somewhere in the card's task (what it asked the user too) or in a member inside its card
   const hit = (t: Task) => {
     if (!words.length) return true;
     const text = [t, ...(tasks ?? []).filter((x) => x.in === t.id)].map(textOf).join("\n");
     return words.every((w) => text.includes(w));
   };
   const list = (c: Col) => {
-    // Members of a requirement and the steps they asked for are in its card, not cards of their own
+    // Members of a requirement are in its card, not cards of their own
     const l = (tasks ?? []).filter((t) => !t.in && boardCol(t) === c);
     if (c === "done") return l.sort((a, b) => Number(a.status === "dropped") - Number(b.status === "dropped") || (b.doneAt ?? 0) - (a.doneAt ?? 0));
     // What waits on the user first (newest first, by when it started waiting), then the rest, newest first
@@ -195,14 +194,16 @@ export default function BoardPage() {
   const pageRoot = useRef<HTMLDivElement>(null);
   useSwipePages(pagerView, pagerTrack, PHONE_ORDER.indexOf(phoneCol), phone ? PHONE_ORDER.length : 0, (i) => setPhoneTab(PHONE_ORDER[i]), pageRoot);
   const sel = open ? byId[open] : undefined;
-  // An agent task with a worker opens as its conversation (Gerdr's chat in our drawer): the whole chat to decide
-  // from, and its input box for the answer. Everything else (to do, human tasks, finished ones) in our own panel.
+  // Something a worker asked of the user (an ask: a5), opened from its card's line or a link: its own small drawer
+  const askSel = open && !sel ? findAsk(tasks ?? undefined, open) : undefined;
+  // A task with a worker opens as its conversation (Gerdr's chat in our drawer): the whole chat to decide from, and its
+  // input box for the answer. Everything else (to do, finished ones) in our own panel.
   // Still being handed out: it opens as the routing conversation, live, so the user sees how it's deciding and can
   // put it right
-  const routingNow = !!sel && sel.owner === "agent" && sel.status === "todo" && !!sel.routing && !!sel.router;
+  const routingNow = !!sel && sel.status === "todo" && !!sel.routing && !!sel.router;
   // Every agent task with a worker opens as its conversation, finished ones too: that is where everything it said is
   // (2026-11-11: a feed of summaries next to it left the user going board → requirement → chat for the real answer)
-  const inChat = !!sel && sel.owner === "agent" && (!!sel.session || routingNow);
+  const inChat = !!sel && (!!sel.session || routingNow);
   // A session its worker handed work to is asking the user something: that's where the answer goes, so it opens
   // first (the 链路 above leads back to the worker)
   const asking = sel && going(sel) ? sel.helpers?.find((k) => k.status === "waiting" && k.left) : undefined;
@@ -251,6 +252,7 @@ export default function BoardPage() {
   const openRef = useRef(open);
   openRef.current = open;
   openChat = (session: string, task?: string) => setPeek({ session, task, from: openRef.current || undefined });
+  openAsk = setOpen;
   // A worker's conversation brought up from elsewhere in Gerdr (a notification, the inbox): it's this board's, so it
   // opens here, as its task's drawer (or just the chat when no task has it)
   const tasksRef = useRef(tasks);
@@ -260,7 +262,7 @@ export default function BoardPage() {
       onShowSession(project, (session) => {
         // The Superagent's main session dispatched every task: it's a task's only while that task is being dispatched
         const t = (tasksRef.current ?? []).find((x) => x.session === session || x.sessions?.includes(session) || (x.router === session && x.status === "todo" && !!x.routing));
-        const live = t && t.owner === "agent" && t.status !== "done" && t.status !== "dropped";
+        const live = t && t.status !== "done" && t.status !== "dropped";
         if (live && (t.session === session || (t.router === session && t.status === "todo" && t.routing))) {
           setPeek(null);
           setOpen(t.id);
@@ -278,8 +280,6 @@ export default function BoardPage() {
       const c = action.slice(5) as Col;
       void moveTo(act, t.id, c).then(() => c === "done" && setOpen(""));
     }
-    // A human step it's waiting for: leave the chat for that task's own panel (its steps, what to hand back)
-    if (action.startsWith("human:")) return setOpen(action.slice(6));
   };
 
   // Dragging a card to another column: the user moving it (moveTo), the only way besides its menu and buttons.
@@ -337,7 +337,7 @@ export default function BoardPage() {
     // Searching: every finished one that matches, not the first 20
     const shown = c.id === "done" && !words.length ? all.slice(0, doneLimit) : all;
     const you = all.filter(waitsOnUser);
-    const minutes = you.filter((t) => t.owner === "human").reduce((n, t) => n + (t.minutes ?? 0), 0);
+    const minutes = you.flatMap(openAsks).reduce((n, a) => n + (a.minutes ?? 0), 0);
     return (
       <section
         key={c.id}
@@ -482,6 +482,7 @@ export default function BoardPage() {
         </>
       )}
       <Linger>{sel && !inChat && <Drawer t={sel} byId={byId} act={act} onClose={() => setOpen("")} onGo={setOpen} />}</Linger>
+      <Linger>{askSel && <AskDrawer a={askSel.a} by={askSel.t} act={act} onClose={() => setOpen("")} onGo={setOpen} />}</Linger>
       <Linger>{panel && sel && viewing && view && (
         <ChatDrawer
           session={view.session}
@@ -541,7 +542,7 @@ export default function BoardPage() {
 
 /** An agent task nobody is dispatching: the Superagent gave up on it, or it was added without starting. */
 function notDispatched(t: Task) {
-  return t.owner === "agent" && t.status === "todo" && !t.routing && !t.session;
+  return t.status === "todo" && !t.routing && !t.session;
 }
 
 type LogSummary = {
@@ -624,19 +625,23 @@ function useLiveMain<T extends { id: string; status: string; waiting?: string }>
 let openChat: (session: string, task?: string) => void = () => {};
 
 /**
- * Steps only the user can do that hold this task up, one line each ("待你答：…"; no ids: the user found "t124" on a
- * question of t123 one more thing to decode, 2026-11-16): under the drawer's title and on
- * the card, so the board says what it waits for without opening it.
+ * What its worker asked of the user and is still waiting for, one line each ("待你答：…"; no ids: the user found "t124"
+ * on a question of t123 one more thing to decode, 2026-11-16): under the drawer's title and on the card, so the board
+ * says what it waits for without opening it. Each jumps to its card in the chat.
  */
-function userSteps(t: Task, byId: Record<string, Task>): ChatItem[] {
-  const mine = (t.blockedBy ?? []).map((id) => byId[id]).filter((h) => h && h.owner === "human" && h.status !== "done" && h.status !== "dropped");
-  return mine.flatMap((h) => {
-    // Several questions in one item: a row each (each has its card in the chat), still one thing on the board
+function userSteps(t: Task): ChatItem[] {
+  return openAsks(t).flatMap((h) => {
+    // Several questions in one ask: a row each (each has its card in the chat), still one thing on the board
     if (h.questions) return unanswered(h).map((q) => ({ text: `待你答：${q.title}`, jump: `${h.id}#${q.id}` }));
     const left = h.expiresAt ? (h.expiresAt > Date.now() ? `（还剩 ${Math.round((h.expiresAt - Date.now()) / 60000)} 分钟）` : "（已过期）") : "";
-    return [{ text: `${h.handBack?.kind === "choice" ? "待决定" : "要你做"}：${h.title}${left}`, jump: h.id }];
+    // A secret is stored and an expired link redone on the board, not in the chat's card: those open the ask itself
+    const board = h.handBack.kind === "secret" || (!!h.expiresAt && h.expiresAt < Date.now());
+    return [{ text: `${h.handBack.kind === "choice" ? "待决定" : "要你做"}：${h.title}${left}`, jump: h.id, ...(board ? { onClick: () => openAsk(h.id) } : {}) }];
   });
 }
+
+/** Opens an ask's own drawer, from anywhere on the page (set by BoardPage). */
+let openAsk: (id: string) => void = () => {};
 
 /**
  * What its worker wrote to a chat, waiting for the user to send or not (local/outbox.ts): a row each, jumping to the
@@ -662,7 +667,7 @@ function chatPanelFor(t: Task, byId: Record<string, Task>): { label: string; act
   if (t.status === "dropped") return { label: `${t.id} · 已放弃${t.summary ? `：${t.summary}` : ""}`, actions: [{ id: "restore", label: "恢复这个任务", kind: "primary" }] };
   const c = colOf(t);
   // Steps only the user can do that hold this task up: shown here, where they are, with a way to go and do them
-  const steps = userSteps(t, byId);
+  const steps = userSteps(t);
   if (steps.length)
     return {
       // A short line, then one row per thing (Gerdr draws them with a yellow edge and a jump icon): the run-on text and
@@ -701,16 +706,15 @@ function chatPanelFor(t: Task, byId: Record<string, Task>): { label: string; act
 
 /** A task as a small card in its column: what it is, where, and how it's doing. Click for everything else. */
 function MiniCard({ t, byId, active, onOpen, onGrab, ghost }: { t: Task; byId: Record<string, Task>; active: boolean; onOpen: () => void; onGrab?: (e: React.PointerEvent<HTMLElement>) => void; ghost?: boolean }) {
-  const steps = t.status === "done" || t.status === "dropped" ? [] : userSteps(t, byId);
-  // The user's own steps are spelled out above (steps); the chips are for the rest (another task it waits for)
-  const blockers = (t.blockedBy ?? []).filter((b) => byId[b] && byId[b].status !== "done" && byId[b].status !== "dropped" && !steps.some((x) => x.jump?.split("#")[0] === b));
-  const live = t.owner === "agent" ? liveText(t) : "";
-  // A human step / question: the agent task that asked for it, when its conversation can be opened
-  const by = t.owner === "human" ? (t.askedBy && byId[t.askedBy]) || Object.values(byId).find((x) => x.owner === "agent" && x.blockedBy?.includes(t.id)) : undefined;
-  const asker = by?.session ? by : undefined;
-  // When a human item came in, so every card under 等你 carries a time (an agent card has it in its live text)
   const open = t.status !== "done" && t.status !== "dropped";
-  const asked = t.owner === "human" && open ? `${ago(t.createdAt)}${t.handBack?.kind === "choice" || t.questions ? "问的" : "交给你"}` : "";
+  const steps = open ? userSteps(t) : [];
+  const asks = open ? openAsks(t) : [];
+  // Another task it waits for (what it asks the user is spelled out above: steps)
+  const blockers = (t.blockedBy ?? []).filter((b) => byId[b] && byId[b].status !== "done" && byId[b].status !== "dropped");
+  const live = liveText(t);
+  // What it asked that runs out soonest (a sign-in link), and roughly how long its steps take the user
+  const expires = Math.min(...asks.map((a) => a.expiresAt ?? Infinity));
+  const minutes = asks.reduce((n, a) => n + (a.minutes ?? 0), 0);
   return (
     <button
       data-task-card=""
@@ -724,8 +728,8 @@ function MiniCard({ t, byId, active, onOpen, onGrab, ghost }: { t: Task; byId: R
         waitsOnUser(t) ? clsx("bg-warn/[0.04]", active ? "border-warn/80" : "border-warn/25 hover:border-warn/55") : clsx("hover:border-ring/50", active ? "border-ring" : notDispatched(t) && "border-warn/60"),
       )}>
       <div className="flex min-w-0 items-center gap-1.5 overflow-hidden text-[11px] text-muted-foreground">
-        {t.owner === "human" ? t.handBack?.kind === "choice" ? <CircleHelp className="size-3 shrink-0" /> : <Hand className="size-3 shrink-0" /> : <Bot className="size-3 shrink-0" />}
-        {/* Never squeezed: a long "asked by" beside it truncates instead of wrapping the id onto two lines */}
+        <Bot className="size-3 shrink-0" />
+        {/* Never squeezed: the live line beside it truncates instead of wrapping the id onto two lines */}
         <span className="shrink-0 font-mono whitespace-nowrap">{t.id}</span>
         {/* Its worker's state in the id line, with the dot Code mode's tabs use, so a glance down a column reads it.
             The dot says the state (在跑 / 停下 / 等你…), so only the time follows it; the words stay in the tooltip */}
@@ -735,29 +739,8 @@ function MiniCard({ t, byId, active, onOpen, onGrab, ghost }: { t: Task; byId: R
             <span className="truncate">{live.includes(" · ") ? live.slice(live.lastIndexOf(" · ") + 3) : live}</span>
           </span>
         )}
-        {t.urgent && <AlertTriangle className="size-3 shrink-0 text-warn" />}
-        {asker && (
-          // Where it came from, in the card's own line: the task whose worker asked it, a click opening that
-          // conversation (the context for answering). A span, not a button: the card is a <button> already.
-          <span
-            role="link"
-            title={`${asker.id} ${asker.title}：打开它的对话`}
-            onClick={(e) => {
-              e.stopPropagation();
-              openChat(asker.session!, asker.id);
-            }}
-            className="inline-flex min-w-0 items-center gap-1 rounded-sm px-1 hover:bg-accent hover:text-foreground"
-          >
-            <MessageSquare className="size-3 shrink-0" />
-            <span className="shrink-0 font-mono">{asker.id}</span>
-            <span className="min-w-0 truncate">{asker.title}</span>
-          </span>
-        )}
-        {t.expiresAt && t.status !== "done" && t.status !== "dropped" ? (
-          <Expiry at={t.expiresAt} className="ml-auto shrink-0" />
-        ) : t.minutes ? (
-          <span className="ml-auto shrink-0">约 {t.minutes} 分钟</span>
-        ) : null}
+        {asks.some((a) => a.urgent) && <AlertTriangle className="size-3 shrink-0 text-warn" />}
+        {expires < Infinity ? <Expiry at={expires} className="ml-auto shrink-0" /> : minutes ? <span className="ml-auto shrink-0">约 {minutes} 分钟</span> : null}
       </div>
       <p className={clsx("line-clamp-2 text-[13px] font-medium", t.status === "dropped" && "text-muted-foreground line-through")}>{t.title}</p>
       {t.question && waitsOnUser(t) && <p className="line-clamp-2 text-[12px] text-warn">{t.question}</p>}
@@ -774,11 +757,11 @@ function MiniCard({ t, byId, active, onOpen, onGrab, ghost }: { t: Task; byId: R
       {/* Where it stands in its worker's words (the first paragraph of its last reply): the one line a card has for it.
           A worker that stopped with nothing going on is no alarm (only the user moves the card): its live line says
           停下; an unusual stop (the user's, an error, a turn cut short) is said here, quietly */}
-      {t.owner === "agent" && !t.question && t.stopped && t.stopWhy && t.stopWhy !== "停下了" && t.stopWhy !== "回了你的话，等你接着说" && (
+      {!t.question && t.stopped && t.stopWhy && t.stopWhy !== "停下了" && t.stopWhy !== "回了你的话，等你接着说" && (
         <p className="line-clamp-1 text-[12px] text-muted-foreground">{t.stopWhy}</p>
       )}
       {/* Its worker's newest paragraph, live (falls back to the old summary): shimmers like 思考中 while it runs */}
-      {t.owner === "agent" && !t.question && (t.latest || t.summary || (t.stopped && t.said)) && (
+      {!t.question && (t.latest || t.summary || (t.stopped && t.said)) && (
         <p className={clsx("line-clamp-2 text-[12px] text-muted-foreground", t.live?.status === "running" && "shimmer")}>{t.latest || t.summary || t.said}</p>
       )}
       {!t.question && going(t) && outside(t)[0] && <p className="line-clamp-2 text-[12px] text-muted-foreground">等：{outside(t)[0].what}</p>}
@@ -796,16 +779,9 @@ function MiniCard({ t, byId, active, onOpen, onGrab, ghost }: { t: Task; byId: R
               </p>
             ),
           )}
-      {t.questions && t.status === "todo" && (
-        <p className="text-[12px] text-warn">
-          {unanswered(t).length ? `${unanswered(t).length} 个问题要你答` : "都答了"}
-          {(t.questions ?? []).filter((q) => !q.dropped).length > 1 && ` · 共 ${(t.questions ?? []).filter((q) => !q.dropped).length} 个`}
-        </p>
-      )}
-      {(t.repo || asked || t.agent || t.model || t.from || t.origin || blockers.length > 0 || !!t.helpers?.length) && (
+      {(t.repo || t.agent || t.model || t.from || t.origin || blockers.length > 0 || !!t.helpers?.length) && (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
           {t.repo && <span>{t.repo.split("/").pop()}</span>}
-          {asked && <span>{asked}</span>}
           {(t.agent || t.model) && <span>· {[t.agent, t.model].filter(Boolean).join(" / ")}</span>}
         {t.from && <span>· 拆自 {t.from}</span>}
           {/* An outside message it came from (a chat, an MR): which, so a card waiting under 待办 to be looked at says so */}
@@ -874,12 +850,12 @@ function Drawer({ t, byId, act, onClose, onGo }: { t: Task; byId: Record<string,
         {(() => {
           const header = (toggle: React.ReactNode) => (
             <div className="flex items-center gap-2 border-b px-4 py-2.5 text-[12px] text-muted-foreground">
-              {t.owner === "human" ? <Hand className="size-3.5" /> : <Bot className="size-3.5" />}
+              <Bot className="size-3.5" />
               <span className="font-mono">{t.id}</span>
               <span className="shrink-0">· {(waitsOnUser(t) ? "等你" : COLS.find((c) => c.id === boardCol(t))?.title)}</span>
               <EditableTitle value={t.title} onSave={(title) => renameTask(act, t, title)} className="text-[13px] font-medium text-foreground" />
               {toggle}
-              {t.owner === "agent" && !done && (
+              {!done && (
                 <Menu
                   actions={[...moveActions(t), DROP]}
                   armed={armed}
@@ -897,16 +873,46 @@ function Drawer({ t, byId, act, onClose, onGo }: { t: Task; byId: Record<string,
               </Button>
             </div>
           );
-          return t.owner === "agent" ? <Trail header={header} task={t.id} version={t.updatedAt} onSession={(id) => openChat(id, t.id)} onTask={onGo} /> : header(null);
+          return <Trail header={header} task={t.id} version={t.updatedAt} onSession={(id) => openChat(id, t.id)} onTask={onGo} />;
         })()}
-        {done && !(t.questions && t.status === "done") ? (
+        {done ? (
           <div className="min-h-0 flex-1 overflow-y-auto p-4"><DoneDetail t={t} act={act} /></div>
-        ) : t.owner === "human" ? (
-          <div className="min-h-0 flex-1 overflow-y-auto p-4"><HumanCard key={t.id} t={t} byId={byId} act={act} onGo={onGo} /></div>
         ) : (
           // Scrolls itself, its steps pinned below
           <div className="flex min-h-0 flex-1 flex-col"><AgentCard key={t.id} t={t} byId={byId} act={act} /></div>
         )}
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+/** Something a worker asked of the user, in a panel of its own (AskCard): the task it is for in the title row. */
+function AskDrawer({ a, by, act, onClose, onGo }: { a: Ask; by: Task; act: Act; onClose: () => void; onGo: (id: string) => void }) {
+  return (
+    <Sheet open modal={false} onOpenChange={(o) => !o && onClose()}>
+      <SheetContent
+        showCloseButton={false}
+        aria-describedby={undefined}
+        className="w-full gap-0 sm:max-w-[520px]"
+        onInteractOutside={(e) => {
+          const el = e.target as Element | null;
+          if (!el?.closest?.("[data-gerdr-mount]") || el.closest("[data-task-card]")) e.preventDefault();
+        }}
+      >
+        <SheetTitle className="sr-only">{a.title}</SheetTitle>
+        <div className="flex items-center gap-2 border-b px-4 py-2.5 text-[12px] text-muted-foreground">
+          {a.handBack.kind === "choice" || a.handBack.kind === "questions" ? <CircleHelp className="size-3.5" /> : <Hand className="size-3.5" />}
+          <span className="shrink-0">{a.status === "open" ? "等你" : a.status === "done" ? "已处理" : "已撤回"}</span>
+          <span className="min-w-0 flex-1 truncate">
+            <span className="font-mono">{by.id}</span> {by.title}
+          </span>
+          <Button variant="ghost" size="icon" aria-label="关闭" onClick={onClose}>
+            <X className="size-4" />
+          </Button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <AskCard key={a.id} a={a} by={by} act={act} onGo={onGo} />
+        </div>
       </SheetContent>
     </Sheet>
   );
@@ -949,7 +955,7 @@ function useAction(act: Act) {
   return { busy, err, go };
 }
 
-function Card({ children }: { t: Task; icon: React.ReactNode; children: React.ReactNode }) {
+function Card({ children }: { children: React.ReactNode }) {
   return <article className="space-y-3">{children}</article>;
 }
 
@@ -1121,7 +1127,7 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
   return (
     <>
     <div className="min-h-0 flex-1 overflow-y-auto p-4">
-    <Card t={t} icon={<Bot className="size-4" />}>
+    <Card>
       <div className="flex items-start justify-between gap-2">
         <h3 className="text-[16px] font-medium">{t.title}</h3>
         {t.session && (
@@ -1398,42 +1404,38 @@ function ReplyBox({ t, act }: { t: Task; act: Act }) {
   );
 }
 
-function HumanCard({ t, byId, act, onGo }: { t: Task; byId: Record<string, Task>; act: Act; onGo: (id: string) => void }) {
+/**
+ * Something a worker asked of the user (an ask), in its own drawer: a step to do (with what to hand back: a value, a
+ * secret through Gerdr's password box), a decision, several questions. Opened from the task's 等你 line when the chat's
+ * card can't do it (a secret, an expired link to redo), or by a link (?open=a5). Answered or taken back: its record.
+ */
+function AskCard({ a: t, by, act, onGo }: { a: Ask; by: Task; act: Act; onGo: (id: string) => void }) {
   const { busy, err, go } = useAction(act);
   const [value, setValue] = useState("");
   const [secretAsked, setSecretAsked] = useState(false);
   const [saved, setSaved] = useState(false);
-  const kind = t.handBack?.kind ?? "none";
-  // A secret task can only be completed once the secret exists (or, on an old Gerdr, once the user says they ran the command)
+  const kind = t.handBack.kind;
+  // A secret can only be handed back once it exists (or, on an old Gerdr, once the user says they ran the command)
   useEffect(() => {
-    if (kind === "secret" && t.handBack?.name) secretNames().then((n) => setSaved(n.includes(t.handBack!.name!)), () => {});
-  }, [kind, t.handBack?.name, secretAsked]);
-  const blocks = Object.values(byId).filter((x) => x.blockedBy?.includes(t.id) && x.status !== "done" && x.status !== "dropped");
+    if (kind === "secret" && t.handBack.name) secretNames().then((n) => setSaved(n.includes(t.handBack.name!)), () => {});
+  }, [kind, t.handBack.name, secretAsked]);
   const complete = (v?: string) => go("complete", "complete", { id: t.id, value: v ?? (kind === "value" || kind === "choice" ? value : undefined) });
-  // Asked of the user by someone and arranged by them (assign.ts): they answer whoever asked, and deliver
-  if (t.assigned && t.assigned.state !== "ask")
+  if (kind === "questions") return <Questions a={t} by={by} act={act} onGo={onGo} />;
+  if (t.status !== "open")
     return (
-      <Card t={t} icon={<Hand className="size-4" />}>
-        <h3 className="text-[16px] font-medium">{t.title}</h3>
-        <Meta t={t} byId={byId} />
-        {t.steps && <Md>{t.steps}</Md>}
-        <ReplyBox t={t} act={act} />
-        {err && <p role="alert" className="text-[12px] text-bad">{err}</p>}
-        <div className="flex justify-end gap-2">
-          <DropButton busy={!!busy} onDrop={() => go("drop", "drop", { id: t.id })} />
-          {t.assigned.state === "agreed" && t.assigned.how === "self" && (
-            <Button variant="outline" disabled={!!busy} title="让 agent 按上面的说明去做；仓库由秘书挑。做完先回到你这里看" onClick={() => go("agent", "agree", { id: t.id, how: "agent" })}>
-              {busy === "agent" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}交给 agent 做
-            </Button>
-          )}
-        </div>
+      <Card>
+        <BackToChat by={by} onGo={onGo} />
+        <h3 className="text-[14px] font-medium">{t.title}</h3>
+        {t.steps && <Steps text={t.steps} />}
+        <p className="text-[12px] whitespace-pre-wrap text-muted-foreground">
+          {t.status === "done" ? (kind === "secret" ? "已存好密钥" : t.handedBack ? `已处理：${t.handedBack}` : "已处理") : `已撤回${t.dropReason ? `：${t.dropReason}` : ""}`}
+        </p>
       </Card>
     );
-  if (kind === "questions") return <Questions t={t} byId={byId} act={act} onGo={onGo} />;
-  if (kind === "choice") return <Decision t={t} byId={byId} busy={busy} err={err} onPick={complete} onDrop={() => go("drop", "drop", { id: t.id })} onGo={onGo} />;
+  if (kind === "choice") return <Decision a={t} by={by} busy={busy} err={err} onPick={complete} onDrop={() => go("drop", "dropAsk", { id: t.id })} onGo={onGo} />;
   return (
-    <Card t={t} icon={<Hand className="size-4" />}>
-      <BackToChat t={t} byId={byId} onGo={onGo} />
+    <Card>
+      <BackToChat by={by} onGo={onGo} />
       <div className="flex items-start justify-between gap-2">
         <h3 className="text-[14px] font-medium">
           {t.urgent && <AlertTriangle className="mr-1 inline size-3.5 text-warn" />}
@@ -1441,68 +1443,64 @@ function HumanCard({ t, byId, act, onGo }: { t: Task; byId: Record<string, Task>
         </h3>
         {t.expiresAt ? <Expiry at={t.expiresAt} className="shrink-0 text-[12px]" /> : t.minutes ? <span className="shrink-0 text-[12px] text-muted-foreground">约 {t.minutes} 分钟</span> : null}
       </div>
-      <Meta t={t} byId={byId} extra={blocks.length ? <span>· 挡着 {blocks.map((b) => `${b.id} ${b.title}`).join("、")}</span> : undefined} />
+      <p className="text-[11px] text-muted-foreground">{by.id} {by.title} 在等这一步</p>
       {t.steps && <Steps text={t.steps} />}
       {t.verify && <p className="text-[12px] text-muted-foreground">做完后 agent 会核验：{t.verify}</p>}
-      {t.ready ? (
-        <div className="space-y-2">
-          {kind === "value" && (
-            <input value={value} onChange={(e) => setValue(e.target.value)} placeholder={`交回：${t.handBack?.label || "一个值"}（不要填密码）`} className="h-8 w-full rounded-md border bg-background px-2 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]" />
-          )}
-          {kind === "secret" && (
-            <div className="space-y-1 rounded-md bg-muted px-3 py-2 text-[12px] text-muted-foreground">
+      <div className="space-y-2">
+        {kind === "value" && (
+          <input value={value} onChange={(e) => setValue(e.target.value)} placeholder={`交回：${t.handBack.label || "一个值"}（不要填密码）`} className="h-8 w-full rounded-md border bg-background px-2 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]" />
+        )}
+        {kind === "secret" && (
+          <div className="space-y-1 rounded-md bg-muted px-3 py-2 text-[12px] text-muted-foreground">
+            <p>
+              要交回的是密钥「{t.handBack.label || t.handBack.name}」，存成 <span className="font-mono">{t.handBack.name}</span>，页面和 agent 都看不到值。
+            </p>
+            {secretAsked && (
               <p>
-                要交回的是密钥「{t.handBack?.label || t.handBack?.name}」，存成 <span className="font-mono">{t.handBack?.name}</span>，页面和 agent 都看不到值。
+                没弹出输入框（Gerdr 还是旧版）的话，在终端运行 <span className="font-mono">gerdr work secret set {t.handBack.name}</span> 再点「完成」。
               </p>
-              {secretAsked && (
-                <p>
-                  没弹出输入框（Gerdr 还是旧版）的话，在终端运行 <span className="font-mono">gerdr work secret set {t.handBack?.name}</span> 再点「完成」。
-                </p>
-              )}
-            </div>
-          )}
-          {err && <p role="alert" className="text-[12px] text-bad">{err}</p>}
-          {t.expiresAt && t.expiresAt < Date.now() && (
-            <div className="flex items-center justify-between gap-2 rounded-md bg-warn/10 px-3 py-2 text-[12px] text-warn">
-              <span>链接 / 验证码已经过期了。</span>
-              <Button variant="outline" disabled={!!busy} onClick={() => go("redo", "redo", { id: t.id })}>
-                {busy === "redo" ? <Loader2 className="size-3.5 animate-spin" /> : null}让它重新生成
-              </Button>
-            </div>
-          )}
-          <div className="flex flex-wrap justify-end gap-2">
-            <DropButton busy={!!busy} onDrop={() => go("drop", "drop", { id: t.id })} />
-            {kind === "secret" && (
-              <Button
-                variant="outline"
-                disabled={!!busy || !t.handBack?.name}
-                onClick={async () => {
-                  setSecretAsked(true);
-                  if (await askSecret(t.handBack!.name!, { label: t.handBack?.label || t.title, note: t.steps })) await complete();
-                }}
-              >
-                <KeyRound className="size-3.5" />
-                输入密钥
-              </Button>
-            )}
-            {(kind !== "secret" || saved || secretAsked) && (
-              <Button disabled={!!busy || (kind === "value" && !value.trim())} onClick={() => complete()}>
-                {busy === "complete" ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
-                {kind === "secret" && !saved ? "已存好，完成" : "完成"}
-              </Button>
             )}
           </div>
+        )}
+        {err && <p role="alert" className="text-[12px] text-bad">{err}</p>}
+        {t.expiresAt && t.expiresAt < Date.now() && (
+          <div className="flex items-center justify-between gap-2 rounded-md bg-warn/10 px-3 py-2 text-[12px] text-warn">
+            <span>链接 / 验证码已经过期了。</span>
+            <Button variant="outline" disabled={!!busy} onClick={() => go("redo", "redo", { id: t.id })}>
+              {busy === "redo" ? <Loader2 className="size-3.5 animate-spin" /> : null}让它重新生成
+            </Button>
+          </div>
+        )}
+        <div className="flex flex-wrap justify-end gap-2">
+          <DropButton busy={!!busy} onDrop={() => go("drop", "dropAsk", { id: t.id })} />
+          {kind === "secret" && (
+            <Button
+              variant="outline"
+              disabled={!!busy || !t.handBack.name}
+              onClick={async () => {
+                setSecretAsked(true);
+                if (await askSecret(t.handBack.name!, { label: t.handBack.label || t.title, note: t.steps })) await complete();
+              }}
+            >
+              <KeyRound className="size-3.5" />
+              输入密钥
+            </Button>
+          )}
+          {(kind !== "secret" || saved || secretAsked) && (
+            <Button disabled={!!busy || (kind === "value" && !value.trim())} onClick={() => complete()}>
+              {busy === "complete" ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+              {kind === "secret" && !saved ? "已存好，完成" : "完成"}
+            </Button>
+          )}
         </div>
-      ) : (
-        <p className="text-[12px] text-muted-foreground">前置任务还没完成，先不用动。</p>
-      )}
+      </div>
     </Card>
   );
 }
 
-/** A task's questions still waiting for an answer. */
-function unanswered(t: Task) {
-  return (t.questions ?? []).filter((q) => !q.dropped && !q.answer);
+/** An ask's questions still waiting for an answer. */
+function unanswered(a: Ask) {
+  return (a.questions ?? []).filter((q) => !q.dropped && !q.answer);
 }
 
 /**
@@ -1510,7 +1508,7 @@ function unanswered(t: Task) {
  * answered here together; each answer is kept as it's given, and the worker hears them all once the last is in. An
  * answer can be changed (before the last one nobody has acted on it; after, the worker is told what changed).
  */
-function Questions({ t, byId, act, onGo }: { t: Task; byId: Record<string, Task>; act: Act; onGo: (id: string) => void }) {
+function Questions({ a: t, by, act, onGo }: { a: Ask; by: Task; act: Act; onGo: (id: string) => void }) {
   const { busy, err, go } = useAction(act);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState<Record<string, boolean>>({});
@@ -1523,8 +1521,8 @@ function Questions({ t, byId, act, onGo }: { t: Task; byId: Record<string, Task>
     }
   };
   return (
-    <Card t={t} icon={<CircleHelp className="size-4" />}>
-      <BackToChat t={t} byId={byId} onGo={onGo} />
+    <Card>
+      <BackToChat by={by} onGo={onGo} />
       <h3 className="text-[14px] font-medium">{t.title}</h3>
       <p className="text-[12px] text-muted-foreground">{left ? `还有 ${left} 个要你答；都答完 worker 一次收到全部答案` : "都答了"}</p>
       <ol className="space-y-3">
@@ -1597,22 +1595,22 @@ function Questions({ t, byId, act, onGo }: { t: Task; byId: Record<string, Task>
         })}
       </ol>
       {err && <p role="alert" className="text-[12px] text-bad">{err}</p>}
-      <div className="flex justify-end">
-        <DropButton busy={!!busy} onDrop={() => go("drop", "drop", { id: t.id })} />
-      </div>
+      {t.status === "open" && (
+        <div className="flex justify-end">
+          <DropButton busy={!!busy} onDrop={() => go("drop", "dropAsk", { id: t.id })} />
+        </div>
+      )}
     </Card>
   );
 }
 
-/** The agent task that asked for this human step / decision: a way back to its conversation, for the context. */
-function BackToChat({ t, byId, onGo }: { t: Task; byId: Record<string, Task>; onGo: (id: string) => void }) {
-  const inFeed = useContext(InFeed);
-  const asker = (t.askedBy && byId[t.askedBy]) || Object.values(byId).find((x) => x.owner === "agent" && x.blockedBy?.includes(t.id));
-  if (!asker?.session || inFeed) return null;
+/** The task whose worker asked this: a way back to its conversation, for the context. */
+function BackToChat({ by, onGo }: { by: Task; onGo: (id: string) => void }) {
+  if (!by.session) return null;
   return (
-    <button onClick={() => onGo(asker.id)} className="inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-1 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground">
+    <button onClick={() => onGo(by.id)} className="inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-1 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground">
       <MessageSquare className="size-3.5 shrink-0" />
-      <span className="truncate">回到 {asker.id} 的对话：{asker.title}</span>
+      <span className="truncate">回到 {by.id} 的对话：{by.title}</span>
     </button>
   );
 }
@@ -1621,20 +1619,19 @@ function BackToChat({ t, byId, onGo }: { t: Task; byId: Record<string, Task>; on
  * A decision a worker left on the board (ask_human with options): no hurry, no chat waiting on it. Picking an option,
  * or writing one's own, sends it to the worker, which carries on.
  */
-function Decision({ t, byId, busy, err, onPick, onDrop, onGo }: { t: Task; byId: Record<string, Task>; busy: string; err: string; onPick: (v: string) => void; onDrop: () => void; onGo: (id: string) => void }) {
+function Decision({ a: t, by, busy, err, onPick, onDrop, onGo }: { a: Ask; by: Task; busy: string; err: string; onPick: (v: string) => void; onDrop: () => void; onGo: (id: string) => void }) {
   const [own, setOwn] = useState("");
-  const asker = (t.askedBy && byId[t.askedBy]) || Object.values(byId).find((x) => x.blockedBy?.includes(t.id));
   return (
-    <Card t={t} icon={<CircleHelp className="size-4" />}>
-      <BackToChat t={t} byId={byId} onGo={onGo} />
+    <Card>
+      <BackToChat by={by} onGo={onGo} />
       <h3 className="text-[16px] font-medium">{t.title}</h3>
-      <Meta t={t} byId={byId} extra={asker ? <span>· {asker.id} {asker.title} 在等这个决定</span> : undefined} />
+      <p className="text-[11px] text-muted-foreground">{by.id} {by.title} 在等这个决定</p>
       {t.steps && <Steps text={t.steps} />}
-      {t.handBack?.multi ? (
+      {t.handBack.multi ? (
         <MultiPick options={t.handBack.options ?? []} busy={busy === "complete"} disabled={!!busy} onSubmit={onPick} />
       ) : (
         <div className="space-y-1.5">
-          {(t.handBack?.options ?? []).map((o, i) => (
+          {(t.handBack.options ?? []).map((o, i) => (
             <button key={i} disabled={!!busy} onClick={() => onPick(o)} className="flex w-full gap-2 rounded-lg border p-2.5 text-left text-[13px] hover:border-ring hover:bg-accent disabled:opacity-50">
               <span className="shrink-0 font-mono text-muted-foreground">{i + 1}</span>
               <span className="whitespace-pre-wrap">{o}</span>
@@ -1696,8 +1693,7 @@ function MultiPick({ options, answer, busy, disabled, onSubmit, children }: { op
   );
 }
 
-/** Steps as written, with bare URLs made clickable. */
-/** What a human step / question says, in the chat's Markdown (links, local videos and images shown, code). */
+/** What an ask / question says, in the chat's Markdown (links, local videos and images shown, code). */
 function Steps({ text }: { text: string }) {
   return <Md className="rounded-md bg-muted/60 px-3 py-2">{text}</Md>;
 }
@@ -1713,8 +1709,6 @@ function DoneDetail({ t, act }: { t: Task; act?: Act }) {
         <span>· {t.status === "dropped" ? "放弃于" : "完成于"} {day(t.doneAt ?? t.updatedAt)}</span>
       </div>
       {t.summary && <Md>{t.summary}</Md>}
-      {t.steps && <Steps text={t.steps} />}
-      {t.handedBack && <p className="text-[12px] whitespace-pre-wrap text-muted-foreground">交回：{t.handedBack}</p>}
       <Links t={t} />
       {t.notes?.map((n) => (
         <p key={n.at} className="text-[12px] whitespace-pre-wrap text-muted-foreground">
@@ -1745,7 +1739,7 @@ function DoneDetail({ t, act }: { t: Task; act?: Act }) {
   );
 }
 
-/** How long what a human step asks for still works (a sign-in link): re-drawn every 30 s; past it, "已过期". */
+/** How long what an ask needs still works (a sign-in link): re-drawn every 30 s; past it, "已过期". */
 function Expiry({ at, className }: { at: number; className?: string }) {
   const [, tick] = useState(0);
   useEffect(() => {
@@ -1756,25 +1750,20 @@ function Expiry({ at, className }: { at: number; className?: string }) {
   return <span className={clsx(left <= 0 ? "text-bad" : left <= 5 ? "text-warn" : "text-muted-foreground", className)}>{left <= 0 ? "已过期" : `还剩 ${left} 分钟`}</span>;
 }
 
-/** Two clicks instead of window.confirm (the browser's own box, unthemed and in English); arms for 3 seconds. */
 /**
- * A step / decision drawn inside a requirement's feed: no 放弃 of its own (it only dropped that one item, and read as
- * dropping the requirement — the feed's footer has the one 放弃) and no "回到 tN 的对话" (the asker's avatar is that).
+ * 不用了 on an ask: the worker is told it isn't needed (tasks.dropAsk). Two clicks instead of window.confirm (the
+ * browser's own box, unthemed and in English); arms for 3 seconds.
  */
-const InFeed = createContext(false);
-
 function DropButton({ busy, onDrop }: { busy: boolean; onDrop: () => void }) {
   const [armed, setArmed] = useState(false);
-  const inFeed = useContext(InFeed);
   useEffect(() => {
     if (!armed) return;
     const id = setTimeout(() => setArmed(false), 3000);
     return () => clearTimeout(id);
   }, [armed]);
-  if (inFeed) return null;
   return (
-    <Button variant="ghost" className={clsx("text-[12px]", armed ? "text-bad" : "text-muted-foreground")} disabled={busy} onClick={() => (armed ? onDrop() : setArmed(true))}>
-      {armed ? "确定放弃？" : "放弃"}
+    <Button variant="ghost" className={clsx("text-[12px]", armed ? "text-bad" : "text-muted-foreground")} title="不用做了：告诉它换个做法" disabled={busy} onClick={() => (armed ? onDrop() : setArmed(true))}>
+      {armed ? "确定不用了？" : "不用了"}
     </Button>
   );
 }
@@ -1782,8 +1771,7 @@ function DropButton({ busy, onDrop }: { busy: boolean; onDrop: () => void }) {
 const input = "h-9 w-full rounded-md border bg-background px-2 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]";
 
 function NewTask({ onClose, act }: { onClose: () => void; act: Act }) {
-  const [owner, setOwner] = useState<"agent" | "human">("agent");
-  const [f, setF] = useState({ title: "", prompt: "", repo: "", agent: "", model: "", worktree: false, steps: "", kind: "none" as "none" | "value" | "secret", label: "", name: "", minutes: "" });
+  const [f, setF] = useState({ prompt: "", repo: "", agent: "", model: "", worktree: false });
   const [repos, setRepos] = useState<{ path: string; name: string }[]>([]);
   const [more, setMore] = useState(false);
   const [files, setFiles] = useState<Attachment[]>([]);
@@ -1797,26 +1785,14 @@ function NewTask({ onClose, act }: { onClose: () => void; act: Act }) {
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
     setF({ ...f, [k]: e.target.type === "checkbox" ? (e.target as HTMLInputElement).checked : e.target.value });
   const submit = async (start: boolean) => {
-    const body =
-      owner === "agent"
-        ? { owner, prompt: f.prompt, repo: f.repo, agent: f.agent || undefined, model: f.model.trim() || undefined, mentions: mentions.length ? mentions.map((a) => a.id) : undefined, worktree: f.worktree, start, attachments: files.filter((a) => a.path).map((a) => ({ path: a.path, name: a.name, mime: a.mime })) }
-        : { title: f.title, owner, steps: f.steps, minutes: Number(f.minutes) || undefined, handBack: { kind: f.kind, label: f.label || undefined, name: f.kind === "secret" ? f.name : undefined } };
+    // Every task is for an agent; 只记下 keeps it in 待办 (the user's own to-do too) until they send it out
+    const body = { prompt: f.prompt, repo: f.repo, agent: f.agent || undefined, model: f.model.trim() || undefined, mentions: mentions.length ? mentions.map((a) => a.id) : undefined, worktree: f.worktree, start, attachments: files.filter((a) => a.path).map((a) => ({ path: a.path, name: a.name, mime: a.mime })) };
     if (await go(start ? "start" : "add", "add", body)) onClose();
   };
-  const ok = !uploading(files) && (owner === "human" ? f.title.trim() : f.prompt.trim() || files.length) && (f.kind !== "secret" || /^[\w.-]+$/.test(f.name));
+  const ok = !uploading(files) && (f.prompt.trim() || files.length);
   return (
     <TaskDialog title="新任务" onClose={onClose} busy={!!busy} err={err}>
-        <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted p-1 text-[13px]">
-          {(["agent", "human"] as const).map((o) => (
-            <button key={o} className={clsx("flex items-center justify-center gap-1.5 rounded-md py-1.5", owner === o ? "bg-background font-medium shadow-sm" : "text-muted-foreground")} onClick={() => setOwner(o)}>
-              {o === "agent" ? <Bot className="size-3.5" /> : <Hand className="size-3.5" />}
-              {o === "agent" ? "交给 agent" : "我自己做"}
-            </button>
-          ))}
-        </div>
-        {owner === "human" && <input autoFocus className={input} placeholder="标题" value={f.title} onChange={set("title")} onKeyDown={(e) => isSubmitEnter(e) && ok && !busy && void submit(false)} />}
-        {owner === "agent" ? (
-          <>
+        <>
             <TaskBox
               agents={agents}
               value={f.prompt}
@@ -1860,557 +1836,20 @@ function NewTask({ onClose, act }: { onClose: () => void; act: Act }) {
               </button>
             )}
           </>
-        ) : (
-          <>
-            <textarea className={clsx(input, "h-32 resize-y py-2 leading-relaxed")} placeholder="步骤（可以贴链接）" value={f.steps} onChange={set("steps")} />
-            <div className="grid grid-cols-[auto_1fr] items-center gap-2 text-[13px]">
-              <span className="text-muted-foreground">交回</span>
-              <select className={input} value={f.kind} onChange={set("kind")}>
-                <option value="none">不用交回，点完成就行</option>
-                <option value="value">一个值（账号名、id…）</option>
-                <option value="secret">一个密钥（存成面板密钥）</option>
-              </select>
-              {f.kind !== "none" && (
-                <>
-                  <span className="text-muted-foreground">说明</span>
-                  <input className={input} placeholder="交回的是什么" value={f.label} onChange={set("label")} />
-                </>
-              )}
-              {f.kind === "secret" && (
-                <>
-                  <span className="text-muted-foreground">名字</span>
-                  <input className={clsx(input, "font-mono")} placeholder="LB_TEST_PASSWORD" value={f.name} onChange={set("name")} />
-                </>
-              )}
-              <span className="text-muted-foreground">分钟</span>
-              <input className={input} inputMode="numeric" placeholder="大概要几分钟" value={f.minutes} onChange={set("minutes")} />
-            </div>
-          </>
-        )}
         <div className="flex justify-end gap-2">
-          {owner === "agent" && (
-            <Button variant="outline" disabled={!ok || !!busy} onClick={() => submit(false)}>
-              只记下
-            </Button>
-          )}
-          <Button disabled={!ok || !!busy} onClick={() => submit(owner === "agent")}>
-            {busy ? <Loader2 className="size-3.5 animate-spin" /> : owner === "agent" ? <Send className="size-3.5" /> : <Plus className="size-3.5" />}
-            {owner === "agent" ? "创建并派出" : "创建"}
+          <Button variant="outline" disabled={!ok || !!busy} title="放进待办，先不派出去" onClick={() => submit(false)}>
+            只记下
+          </Button>
+          <Button disabled={!ok || !!busy} onClick={() => submit(true)}>
+            {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
+            创建并派出
           </Button>
         </div>
     </TaskDialog>
   );
 }
 
-// ---- a requirement with members (DESIGN.md「需求和队友」) ----
-
-/** A member as people call it: its repository's folder. */
-function memberLabel(m?: Task) {
-  return m ? m.repo?.split("/").pop() || m.id : "";
-}
-
-
-export type Need = Exclude<FeedItem, { type: "act" }>;
-
-/** Asked of the user and since answered or taken back: shown as its record, no longer waiting. */
-export const isRecord = (x: Need) => x.type === "ask" && (x.h.status === "done" || x.h.status === "dropped");
-
-/**
- * What a feed shows of the user's part, for both feeds (DESIGN.md「一个架构」): the steps and questions asked of them,
- * open (answerable cards) or answered / taken back (their record, where they were asked — as a chat keeps a card and
- * turns it into 已处理), and agents stuck on them. `tasks` is the feed's scope: a requirement's own, or every task for
- * the secretary's page; `from`: records asked before it are left out (before the conversation shown). Never filter
- * answered ones out on one page only: that is how a question vanished on the click from one and not the other.
- */
-export function needsIn(tasks: Task[], from = 0): Need[] {
-  const out: Need[] = [];
-  for (const x of tasks) {
-    const over = x.status === "done" || x.status === "dropped";
-    if (x.owner === "human" && (over ? askedAt(x) >= from : x.ready)) out.push({ at: askedAt(x), key: `h${x.id}`, type: "ask", h: x });
-    else if (x.owner === "agent" && !over && x.column === "you") out.push({ at: waitedSince(x), key: `s${x.id}`, type: "stuck", m: x });
-  }
-  return out;
-}
-
-/**
- * A line that records an answer shown by its item's record (Activity.of), or, from before lines carried `of`, one of
- * the lines the board wrote for an answer: not drawn, the record says it. Kept in the feed's data all the same (team
- * mode syncs it; the worker's chat has it).
- */
-export function recordedElsewhere(a: NonNullable<Task["activity"]>[number], records: Set<string>) {
-  if (a.kind !== "user") return false;
-  if (a.of) return records.has(a.of);
-  return records.size > 0 && /^你(答了 \d+ 个问题：|答了「|做完了「|说「.*」不用答了|先发了答案：)/.test(a.text);
-}
-
-/**
- * A step / decision as the chat's card draws it (local/board.ts ask_human and questionCard): Gerdr's built-in card,
- * answered through the same functions. One per question still open; the ones answered while others wait as a line.
- * Null for what that card can't do — a secret (Gerdr's password dialog on the board), an expired link to redo.
- */
-function askCards(h: Task): Record<string, unknown>[] | null {
-  const kind = h.handBack?.kind ?? "none";
-  if (kind === "secret" || (h.expiresAt && h.expiresAt < Date.now())) return null;
-  if (kind === "questions") {
-    const qs = (h.questions ?? []).filter((q) => !q.dropped);
-    const out: Record<string, unknown>[] = [];
-    qs.forEach((q, i) => {
-      const choice = q.kind === "choice";
-      out.push({
-        ref: `${h.id}#${q.id}`,
-        // Answered ones wait for the rest (sent together) unless the user sends them first: say which
-        kicker: `${choice ? "等你决定" : "要你给"}${q.answer ? ` · 已答${q.sent || qs.length === 1 ? "" : "，等其它的答完一起发"}：${q.answer}` : ""}`,
-        title: q.title,
-        body: [q.steps, !choice && q.label ? `要交回：${q.label}` : ""].filter(Boolean).join("\n\n") || undefined,
-        tone: "info",
-        choose: q.answer ? undefined : { project, fn: "tasks.answerQuestion", input: { id: h.id, q: q.id }, field: "value", options: q.options ?? [], multi: q.multi, other: true },
-      });
-    });
-    return out;
-  }
-  const left = h.expiresAt ? `（${Math.round((h.expiresAt - Date.now()) / 60000)} 分钟内有效）` : "";
-  const choose =
-    kind === "choice"
-      ? { project, fn: "tasks.complete", input: { id: h.id }, field: "value", options: h.handBack?.options ?? [], multi: h.handBack?.multi, other: true }
-      : kind === "value"
-        ? { project, fn: "tasks.complete", input: { id: h.id }, field: "value", options: [], other: true }
-        : { project, fn: "tasks.complete", input: { id: h.id }, field: "value", options: ["做完了"], other: false };
-  return [
-    {
-      ref: h.id,
-      kicker: `${kind === "choice" ? "等你决定" : "要你做"}${left}`,
-      title: h.title,
-      body: [h.steps, kind === "value" ? `做完要交回：${h.handBack?.label || "一个值"}` : "", h.verify ? `做完后 agent 会核验：${h.verify}` : ""].filter(Boolean).join("\n\n") || undefined,
-      tone: kind === "choice" ? "info" : "warn",
-      choose,
-    },
-  ];
-}
-
-/**
- * A member waiting on the user with a question of its own (its words), not one of the board's states: an approval, an
- * error, a session it started, a stop — or the board's old ask about a stop.
- */
-function realQuestion(x: Task) {
-  if (x.live?.status === "waiting" || x.live?.status === "error" || x.helpers?.some((h) => h.left)) return false;
-  return !!x.question && !x.question.startsWith("Worker 停下了");
-}
-
-/**
- * What a waiting conversation needs, settled right here: the approval's own buttons (allow / deny…) or a single
- * question's choices, the same ones as gerdr's inbox, for a conversation on this computer or another. Anything else (a
- * plan, several questions), or a gerdr too old to have the buttons: the way to its conversation.
- */
-const usePending = (core as Partial<typeof core>).usePending;
-const PendingActions = (core as Partial<typeof core>).PendingActions;
-function Waiting({ session, task }: { session: string; task?: string }) {
-  const p = usePending ? usePending(session) : [];
-  const chat = (
-    <button className="inline-flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground" onClick={() => openChat(session, task)}>
-      <MessageSquare className="size-3.5" />
-      {p[0]?.inline ? "看对话" : "去对话处理"}
-    </button>
-  );
-  if (!PendingActions || !p[0]?.inline) return <div className="pl-5">{chat}</div>;
-  return (
-    <div className="space-y-1 pl-5">
-      <PendingActions id={session} />
-      {chat}
-    </div>
-  );
-}
-
-/** What a member stuck on the user needs, in a line. */
-function stuckText(x: Task) {
-  const k = x.helpers?.find((h) => h.left);
-  if (x.live?.status === "waiting") return `等你批准 / 回答${x.live.waiting ? `：${x.live.waiting}` : ""}`;
-  if (x.live?.status === "error") return `出错了：${x.live.error ?? ""}`;
-  if (k) return `它派出的「${k.title}」${k.waitingKind === "ask" ? "在问" : "要你批准"}：${k.waiting ?? ""}`;
-  // The board's own ask on older tasks when a worker stopped without reporting: a stop, not a question from it
-  if (x.question?.startsWith("Worker 停下了")) return "停下了";
-  if (x.question) return `问你：${x.question}`;
-  if (x.stopped) return x.stopWhy ?? "停下了";
-  return "在等你";
-}
-
-function memberDot(x: Task) {
-  if (x.status === "done") return "bg-ok";
-  if (x.status === "dropped") return "bg-muted-foreground/30";
-  if (x.column === "you") return "bg-warn";
-  if (x.live?.status === "running") return "bg-ok animate-pulse";
-  return "bg-muted-foreground/40";
-}
-
-
-/**
- * A 在等 line still in effect: its member's latest line, and the member still waits on that (wait_for). Shimmers like
- * "思考中…", in the feed and on the card: the card is the one place the user glances at (2026-11-05: t54's card read
- * like any other line while it waited on an approval).
- */
-function stillWaiting(t: Task, a: NonNullable<Task["activity"]>[number], m?: Task) {
-  return a.kind === "wait" && m?.status === "running" && (t.activity ?? []).filter((y) => y.by === a.by).pop() === a && !!m.waits?.some((w) => w.what === a.text);
-}
-
-/** When a step / question item was last asked: its newest open question's time (older items have none: created). */
-export function askedAt(h: Task) {
-  const qs = (h.questions ?? []).filter((q) => !q.dropped && q.answer == null);
-  // Items from before questions had a time: the last one joined when the item last changed
-  if (qs.length && !qs.some((q) => q.at)) return Math.max(h.createdAt, h.updatedAt);
-  return Math.max(h.createdAt, ...qs.map((q) => q.at ?? 0));
-}
-
-/** When its oldest open question was asked: the one most likely overtaken by what was said since. */
-function firstAsked(h: Task) {
-  const qs = (h.questions ?? []).filter((q) => !q.dropped && q.answer == null);
-  return Math.min(...(qs.length ? qs.map((q) => q.at ?? h.createdAt) : [h.createdAt]));
-}
-
-/** When every task started getting a feed (842e672, 2026-11-05): older ones have none to show. */
-const FEEDS_SINCE = new Date("2026-11-05T12:00:00+08:00").getTime();
-
-const KIND: Record<string, string> = { wait: "在等", progress: "进展", tell: "通知", join: "加入", done: "完成", review: "待你看", user: "你", stuck: "卡住", got: "等到了", message: "说", brief: "简报" };
-
-/** A member's face in the feed: its repository's initials (order-api → OA); the lead's ringed. A click opens its chat. */
-function Avatar({ m, lead, size = "md" }: { m?: Task; lead?: boolean; size?: "sm" | "md" }) {
-  const name = memberLabel(m) || "?";
-  const parts = name.split(/[-_.\s]+/).filter(Boolean);
-  const initials = (parts.length > 1 ? parts[0][0] + parts[1][0] : name.slice(0, 2)).toUpperCase();
-  const box = size === "sm" ? "size-6 text-[10px]" : "size-8 text-[11px]";
-  const face = <span className={clsx("grid shrink-0 place-items-center rounded-full font-medium", box, lead ? "bg-brand/15 text-brand ring-1 ring-brand/40" : "bg-muted text-foreground/70")}>{initials}</span>;
-  if (!m?.session) return face;
-  return (
-    <button title={`${m.id} ${name}：打开它的对话`} onClick={() => openChat(m.session!, m.id)} className="shrink-0 rounded-full hover:opacity-80">
-      {face}
-    </button>
-  );
-}
-
-/**
- * A thing waiting on the user, as a requirement's feed draws it: a step / decision its worker asked (answered right
- * here, Gerdr's own card), or a member stuck on them (an approval, an error, stopped, a question in its chat). Shared
- * with the secretary's page, which draws its conversation the way a feed is drawn (DESIGN.md「秘书」). `lead`: the
- * requirement's lead (ringed); `activity`: its feed, to tell a question overtaken by what was said since.
- */
-export function NeedRow({ x, lead, activity, byId, act, onGo, nobody }: { x: Exclude<FeedItem, { type: "act" }>; lead?: string; activity: NonNullable<Task["activity"]>; byId: Record<string, Task>; act: Act; onGo: (id: string) => void; /** Who a step nobody's worker asked is from (one the secretary noted down): its name and face */ nobody?: { name: string; face: React.ReactNode } }) {
-  const { busy, go } = useAction(act);
-  const ms = Object.values(byId);
-  const who = (id?: string) => (id ? byId[id] : undefined);
-  const when = (ms: number) => new Date(ms).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
-  const head = (m: Task | undefined, label: string, at: number, tone?: string) => (
-    <div className="flex items-baseline gap-1.5 text-[11px] text-muted-foreground">
-      <span className="font-medium text-foreground/80">{memberLabel(m) || nobody?.name || "?"}</span>
-      {/* Its number, unless the name already is it (a member with no repository is named by its id) */}
-      {m && memberLabel(m) !== m.id && <span>{m.id}</span>}
-      <span className={tone}>{label}</span>
-      <span className="tabular-nums">{when(at)}</span>
-    </div>
-  );
-  const t = { id: lead, activity };
-  if (x.type === "ask" && (x.h.status === "done" || x.h.status === "dropped")) {
-    // Answered (or taken back) where it was asked, as the card in a chat turns into its one-line record (TaskStep:
-    // 已处理：the answer, with 改答案). The secretary's page keeps these; it used to drop them the moment they were
-    // answered, so a click made the question vanish with nothing to show for it.
-    const m = who(x.h.askedBy) ?? ms.find((y) => y.blockedBy?.includes(x.h.id));
-    const cards = askCards({ ...x.h, expiresAt: undefined }) ?? [];
-    return (
-      <div className="flex gap-2">
-        {!m && nobody ? nobody.face : <Avatar m={m} lead={m?.id === lead} />}
-        <div className="min-w-0 flex-1 space-y-1">
-          {head(m, x.h.status === "done" ? "问过你" : "撤回了", x.at)}
-          {cards.length ? (
-            cards.map((c) => <TaskStep key={String(c.ref)} card={{ ...c, project } as any} />)
-          ) : (
-            <p className="rounded-lg border border-l-2 border-l-ok bg-card px-3 py-2 text-[12px] text-muted-foreground">
-              {x.h.id} {x.h.title} · {x.h.status === "done" ? "已处理" : "已撤回"}
-            </p>
-          )}
-        </div>
-      </div>
-    );
-  }
-  if (x.type === "ask") {
-    const m = who(x.h.askedBy) ?? ms.find((y) => y.blockedBy?.includes(x.h.id));
-    const cards = askCards(x.h);
-    // Asked before the user and its worker talked on: it may be moot or different now. One click has the worker
-    // ask it again as things stand (it then shows at the bottom) or take it back
-    const said = Math.max(0, ...(t.activity ?? []).filter((a) => a.kind === "user" && a.by === m?.id).map((a) => a.at));
-    // Until it asks again (a newer question) or its turn is over (it kept the question as is)
-    const refreshing = (x.h.refreshing ?? 0) > x.at && (m?.live?.status === "running" || Date.now() - x.h.refreshing! < 60_000);
-    const stale = said > firstAsked(x.h);
-    return (
-      <div className="flex gap-2">
-        {!m && nobody ? nobody.face : <Avatar m={m} lead={m?.id === t.id} />}
-        <div className="min-w-0 flex-1 space-y-1">
-          <div className="flex items-baseline gap-2">
-            {head(m, x.h.handBack?.kind === "choice" || x.h.questions ? "要你决定" : "要你做", x.at, "text-warn")}
-            {refreshing ? (
-              <span className="shimmer text-[11px] text-muted-foreground">在按最新情况更新…</span>
-            ) : (
-              stale && (
-                <button
-                  className="text-[11px] text-brand hover:underline disabled:opacity-50"
-                  disabled={!!busy}
-                  title="这个问题是在你们后来的对话之前问的：让它按现在的情况重新问，或者撤回"
-                  onClick={() => go(`refresh${x.h.id}`, "refreshAsk", { id: x.h.id })}
-                >
-                  {busy === `refresh${x.h.id}` ? "发送中…" : "按最新情况更新"}
-                </button>
-              )
-            )}
-          </div>
-          {cards ? (
-            // The same card as in its chat (Gerdr's built-in one): answered right here, one card per question
-            <>
-              {cards.map((c) => {
-                // After the step's own id: a team id starts with "#" itself (#1-1#2)
-                const qid = String(c.ref).slice(x.h.id.length + 1);
-                const q = x.h.questions?.find((y) => y.id === qid);
-                const several = (x.h.questions ?? []).filter((y) => !y.dropped).length > 1;
-                return (
-                  <div key={String(c.ref)}>
-                    <DefaultCard card={c as any} />
-                    {/* One of several gone moot (the worker didn't take it back): set it aside, the rest go when answered */}
-                    {q && several && q.answer == null && (
-                      <button
-                        className="mt-1 ml-1 text-[11px] text-muted-foreground hover:text-foreground hover:underline disabled:opacity-50"
-                        disabled={!!busy}
-                        onClick={() => go(`skip${c.ref}`, "skipQuestion", { id: x.h.id, q: qid })}
-                      >
-                        {busy === `skip${c.ref}` ? "…" : "这个不用答了"}
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-              {(() => {
-                // Some answered, some not: the answers wait for the rest unless sent now
-                const qs = (x.h.questions ?? []).filter((y) => !y.dropped);
-                const ready = qs.filter((y) => y.answer != null && !y.sent).length;
-                const left = qs.filter((y) => y.answer == null).length;
-                return ready > 0 && left > 0 ? (
-                  <div className="flex items-center gap-2 px-1 text-[11px] text-muted-foreground">
-                    <span>已答 {qs.length - left} / {qs.length}，答完一起发给它</span>
-                    <button className="text-brand hover:underline disabled:opacity-50" disabled={!!busy} onClick={() => go(`send${x.h.id}`, "sendAnswered", { id: x.h.id })}>
-                      {busy === `send${x.h.id}` ? "发送中…" : "先把已答的发给它"}
-                    </button>
-                  </div>
-                ) : null;
-              })()}
-            </>
-          ) : (
-            <div className="rounded-lg rounded-tl-sm border border-warn/50 bg-card p-3">
-              <InFeed.Provider value>
-                <HumanCard t={x.h} byId={byId} act={act} onGo={onGo} />
-              </InFeed.Provider>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-  if (x.type === "stuck") {
-    // A question the worker itself asked is its words: a message from it. Everything else here is the board saying
-    // how things stand (stopped, an error, an approval, a session it started) — a system line, not a bubble
-    const said = (
-      // Its last words are its own: quoted under the line, two lines at most (the rest is in its chat)
-      x.m.said && <p className="ml-5 line-clamp-2 border-l-2 pl-2 text-[12px] text-muted-foreground">{x.m.said}</p>
-    );
-    if (!realQuestion(x.m)) {
-      // The conversation that waits: its own, or the helper it started that wants an approval (maybe on another
-      // computer). Opening the member's own chat there left the user nowhere near the button to press
-      const waiter = x.m.live?.status === "waiting" ? x.m.session : x.m.helpers?.find((k) => k.left)?.id;
-      return (
-        <div className="space-y-1.5">
-          <div className="space-y-1.5 rounded-md border border-warn/40 bg-warn/5 px-3 py-1.5 text-[12px]">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="size-3.5 shrink-0 text-warn" />
-              <span className="min-w-0 flex-1">
-                <span className="font-medium">{memberLabel(x.m)}</span> {memberLabel(x.m) !== x.m.id && `${x.m.id} `}「{x.m.title}」 · {stuckText(x.m)}
-                <span className="text-muted-foreground tabular-nums"> · {when(x.at)}</span>
-              </span>
-              {!waiter && x.m.session && (
-                <Button variant="outline" onClick={() => openChat(x.m.session!, x.m.id)}>
-                  <MessageSquare className="size-3.5" />
-                  去对话
-                </Button>
-              )}
-            </div>
-            {waiter && <Waiting session={waiter} task={waiter === x.m.session ? x.m.id : undefined} />}
-          </div>
-          {said}
-        </div>
-      );
-    }
-    return (
-      <div className="flex gap-2">
-        <Avatar m={x.m} lead={x.m.id === t.id} />
-        <div className="min-w-0 flex-1 space-y-1">
-          {head(x.m, "问你", x.at, "text-warn")}
-          <div className="flex items-start gap-2 rounded-lg rounded-tl-sm border border-warn/50 bg-warn/5 px-3 py-2 text-[13px]">
-            <Md className="flex-1">{x.m.question ?? ""}</Md>
-            {x.m.session && (
-              <Button variant="outline" onClick={() => openChat(x.m.session!, x.m.id)}>
-                <MessageSquare className="size-3.5" />
-                去回答
-              </Button>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-  return null;
-}
-
-/** Lines the user opened in full, by line (who and when): kept across a list that unmounts rows scrolled away. */
-const unfolded = new Set<string>();
-
-/**
- * A long line shown as its first part, 展开全文 for the rest (2026-11-11: workers write results and plans in full now,
- * so the feed holds what used to be only in their chats; folded, it still reads at a glance). `fade` is the bubble's
- * colour, so the cut fades into it.
- */
-export function Fold({ id, fade, children, max = 260 }: { id: string; fade: string; children: React.ReactNode; max?: number }) {
-  const inner = useRef<HTMLDivElement>(null);
-  const [tall, setTall] = useState(false);
-  const [open, setOpen] = useState(unfolded.has(id));
-  // Markdown grows after it mounts (images, code): measured as it changes, not once
-  useLayoutEffect(() => {
-    const el = inner.current;
-    if (!el) return;
-    const check = () => setTall(el.scrollHeight > max + 60);
-    check();
-    const ro = new ResizeObserver(check);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [max]);
-  const toggle = () => {
-    if (open) unfolded.delete(id);
-    else unfolded.add(id);
-    setOpen(!open);
-  };
-  const cut = tall && !open;
-  return (
-    <>
-      <div className={clsx("relative", cut && "overflow-hidden")} style={cut ? { maxHeight: max } : undefined}>
-        <div ref={inner}>{children}</div>
-        {cut && <div className={clsx("pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t to-transparent", fade)} />}
-      </div>
-      {tall && (
-        <button className="mt-1 text-[12px] text-brand hover:underline" onClick={toggle}>
-          {open ? "收起" : "展开全文"}
-        </button>
-      )}
-    </>
-  );
-}
-
-/** For a page other than the board (the secretary's): where Avatar, 去对话 and the cards' links open a conversation. */
-export function setOpenChat(fn: (session: string, task?: string) => void) {
-  openChat = fn;
-}
-
-/** Who a line is by on a page where that's no task: the secretary on its own page. */
-export type Speaker = { id: string; name: string; face: React.ReactNode };
-
-/**
- * A line of a feed (Activity), as a requirement's feed draws it: the user's on the right, the board's own across the
- * middle, a member's (or the secretary's: `speaker`) with its face, name and kind. Shared with the secretary's page,
- * so both are one feed (DESIGN.md「一个架构」). `lead`: the requirement's lead (ringed); `activity`: the whole feed, to
- * tell a 在等 line still in effect.
- */
-export function LineRow({ a, lead, activity, byId, speaker }: { a: NonNullable<Task["activity"]>[number]; lead?: string; activity: NonNullable<Task["activity"]>; byId: Record<string, Task>; speaker?: Speaker }) {
-  const who = (id?: string) => (id ? byId[id] : undefined);
-  const when = (at: number) => new Date(at).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
-  const sp = a.by && !byId[a.by] && speaker?.id === a.by ? speaker : undefined;
-  const head = (m: Task | undefined, label: string, at: number, tone?: string) => (
-    <div className="flex items-baseline gap-1.5 text-[11px] text-muted-foreground">
-      <span className="font-medium text-foreground/80">{sp?.name ?? (memberLabel(m) || "?")}</span>
-      <span className={tone}>{label}</span>
-      <span className="tabular-nums">{when(at)}</span>
-    </div>
-  );
-  const t = { id: lead, activity } as unknown as Task;
-  // The user's own doing: on the right, like their messages in a chat
-  if (a.kind === "user")
-    return (
-      <div className="flex justify-end">
-        <div className="max-w-[85%] space-y-1 text-right">
-          <div className="text-[11px] text-muted-foreground tabular-nums">你 · {when(a.at)}</div>
-          <p className="rounded-lg rounded-tr-sm bg-brand/10 px-3 py-2 text-left text-[13px] whitespace-pre-wrap">{a.text}</p>
-        </div>
-      </div>
-    );
-  // The board's own lines (who joined, members going round): across, like a group chat's "X invited Y"
-  if (a.kind === "stuck")
-    return (
-      <p className="flex items-center justify-center gap-1.5 px-6 text-center text-[11px] text-warn">
-        <AlertTriangle className="size-3 shrink-0" />
-        {who(a.by) ? `${memberLabel(who(a.by))} ` : ""}
-        {a.text} · {when(a.at)}
-      </p>
-    );
-  // What a wait came to (an approval, a reply): the board's line, the worker's own result follows it
-  if (a.kind === "got")
-    return (
-      <p className="flex items-center justify-center gap-1.5 px-6 text-center text-[11px] text-ok">
-        <Check className="size-3 shrink-0" />
-        <span className="line-clamp-2">
-          {who(a.by) ? `${memberLabel(who(a.by))} ` : ""}
-          {a.text} · {when(a.at)}
-        </span>
-      </p>
-    );
-  if (a.kind === "join" || !a.by)
-    return (
-      <p className="px-6 text-center text-[11px] text-muted-foreground">
-        {who(a.by) ? `${memberLabel(who(a.by))} ` : ""}
-        {a.text} · {when(a.at)}
-      </p>
-    );
-  const m = who(a.by);
-  const to = who(a.to);
-  // A 在等 line still in effect (its member's latest line, and it still waits on that) shimmers like "思考中…"
-  const waiting = stillWaiting(t, a, m);
-  return (
-    <div className="flex gap-2">
-      {sp ? sp.face : <Avatar m={m} lead={m?.id === t.id} />}
-      <div className="min-w-0 flex-1 space-y-1">
-        {head(m, `${KIND[a.kind] ?? a.kind}${to ? ` → ${memberLabel(to)}` : ""}`, a.at, a.kind === "done" ? "text-ok" : a.kind === "review" ? "text-warn" : waiting ? "shimmer text-foreground/80" : undefined)}
-        {/* What members write is Markdown (code, lists, paths, links): drawn as the chat draws it */}
-        <div className={clsx("w-fit max-w-full rounded-lg rounded-tl-sm px-3 py-2", a.kind === "done" ? "bg-ok/10" : a.kind === "brief" ? "border bg-card" : "bg-muted")}>
-          {/* bg-ok/10 over the page reads as the page's colour faded: the cut fades into the page there */}
-          <Fold id={`${a.by}:${a.at}`} fade={a.kind === "done" ? "from-background" : a.kind === "brief" ? "from-card" : "from-muted"}>
-            <Md>{a.text}</Md>
-          </Fold>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** Who's on it right now, as the chat's "working…" line: each one's face, name and how long its turn has run. */
-export function WorkingRow({ items }: { items: { key: string; face: React.ReactNode; name: string; since?: number }[] }) {
-  return (
-    <div className="space-y-1.5">
-      {items.map((x) => (
-        <div key={x.key} className="flex items-center gap-2 text-[12px] text-muted-foreground">
-          {x.face}
-          {PixelLoader ? <PixelLoader className="size-3.5 text-brand" /> : <Loader2 className="size-3.5 animate-spin text-brand" />}
-          <span className="shimmer font-medium text-foreground/80">{x.name}</span>
-          <span>在跑{x.since ? ` · ${since(x.since)}` : ""}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/** One thing in the feed, in time order: a line of activity, a step / decision waiting on the user, a member stuck on them. */
-export type FeedItem = { at: number; key: string } & ({ type: "act"; a: NonNullable<Task["activity"]>[number] } | { type: "ask"; h: Task } | { type: "stuck"; m: Task });
-
-const PixelLoader = (core as unknown as { PixelLoader?: (p: { className?: string }) => React.ReactNode }).PixelLoader;
-
-type Archived = { root: string; doneAt: number; tasks: { id: string; title: string; owner: string; status: string; doneAt?: number; summary?: string }[] };
+type Archived = { root: string; doneAt: number; tasks: { id: string; title: string; status: string; doneAt?: number; summary?: string }[] };
 
 /**
  * Requirements finished long ago (local/_archive.ts, 设置 → 归档): searchable; opening one puts it back under 已完成

@@ -24,16 +24,17 @@ export function waitingLines(tasks: Listed[]): Line[] {
   const items: Line[] = [];
   for (const t of tasks) {
     if (t.column !== "you") continue;
-    if (t.owner === "human") {
-      // A step of the user's: opening it goes to the chat of the task it holds up, where its card is
-      const blocked = tasks.find((x) => x.blockedBy?.includes(t.id) && x.session && x.status !== "done" && x.status !== "dropped");
-      const left = (t.questions ?? []).filter((q) => !q.dropped && !q.answer);
-      const what = t.questions ? `待你答 ${left.length} 个问题` : t.handBack?.kind === "choice" ? "待你决定" : "要你做";
-      // Named by the task it holds up (t113), the card the user knows: the step's own id (t149) is shown nowhere on the
-      // board (2026-11-16). One question: the body is that task's title, not the question a second time
-      const head = blocked ? `${blocked.id} ` : "";
-      const body = left.length > 1 ? left.map((q) => `· ${q.title}`).join("\n") : blocked ? blocked.title : left.length ? undefined : t.steps;
-      items.push({ id: t.id, title: `${head}${what}：${cut(t.title, 80)}`, body, session: blocked?.session });
+    // What its worker asked of the user (its asks): opening it goes to the task's chat, where the ask's card is.
+    // Named by the task (t113), the card the user knows; one question: the body is the task's title, not the question
+    // a second time
+    const asks = (t.asks ?? []).filter((a) => a.status === "open");
+    if (asks.length) {
+      const h = asks[asks.length - 1];
+      const left = (h.questions ?? []).filter((q) => !q.dropped && !q.answer);
+      const what = h.questions ? `待你答 ${left.length} 个问题` : h.handBack.kind === "choice" ? "待你决定" : "要你做";
+      const more = asks.length > 1 ? `（还有 ${asks.length - 1} 项）` : "";
+      const body = left.length > 1 ? left.map((q) => `· ${q.title}`).join("\n") : t.title;
+      items.push({ id: t.id, title: `${t.id} ${what}：${cut(h.title, 80)}${more}`, body, session: t.session });
       continue;
     }
     if (t.live?.status === "waiting" || t.live?.status === "error") continue;

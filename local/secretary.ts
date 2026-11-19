@@ -66,22 +66,17 @@ export async function status(input: { since?: number }, ctx: Ctx) {
     const head = `${t.id}「${t.title}」`;
     if (t.status === "dropped") continue;
     if (t.status === "done") {
-      if ((t.doneAt ?? t.updatedAt) >= since) done.push(`- ${head} ${when(t.doneAt ?? t.updatedAt)}${t.summary ? `：${cut(t.summary, 200)}` : t.handedBack ? `：${cut(t.handedBack, 200)}` : ""}`);
+      if ((t.doneAt ?? t.updatedAt) >= since) done.push(`- ${head} ${when(t.doneAt ?? t.updatedAt)}${t.summary ? `：${cut(t.summary, 200)}` : ""}`);
       continue;
     }
     if (t.column === "you") {
-      if (t.owner === "human") {
-        const ask = askText(t);
-        you.push(`- ${head} ${t.handBack?.kind === "choice" ? "待决定" : t.questions?.length ? "待回答" : "要用户亲手做"}${t.askedBy ? `（${t.askedBy} 问的）` : ""}${ask ? `\n${ask}` : ""}`);
-      } else {
-        const ask = askText(t);
-        if (ask && !t.live?.status?.match(/waiting|error/)) {
-          you.push(`- ${head} 在等用户回答\n${ask}`);
-          continue;
-        }
-        const why = t.live?.status === "waiting" ? `worker 在等批准：${t.live.waiting ?? ""}` : t.live?.status === "error" ? "worker 出错了" : t.question ? `问：${t.question}` : t.stopped ? `${t.stopWhy ?? "停下了"}${t.said ? `，它最后说：${cut(t.said, 200)}` : ""}` : "在等用户";
-        you.push(`- ${head} ${why}`);
+      const ask = askText(t);
+      if (ask && !t.live?.status?.match(/waiting|error/)) {
+        you.push(`- ${head} 在等用户回答 / 做\n${ask}`);
+        continue;
       }
+      const why = t.live?.status === "waiting" ? `worker 在等批准：${t.live.waiting ?? ""}` : t.live?.status === "error" ? "worker 出错了" : t.question ? `问：${t.question}` : t.stopped ? `${t.stopWhy ?? "停下了"}${t.said ? `，它最后说：${cut(t.said, 200)}` : ""}` : "在等用户";
+      you.push(`- ${head} ${why}`);
     } else if (t.column === "review") review.push(`- ${head} ${cut(t.summary ?? "", 300)}`);
     else if (t.session || t.status === "running" || t.status === "delivering") active.push(`- ${head} ${when(t.updatedAt)}更新${t.summary ? `：${cut(t.summary, 160)}` : ""}`);
     else todo.push(`- ${head}${t.blockedBy?.length ? `（等 ${t.blockedBy.join("、")}）` : t.routing ? "（正在派）" : ""}`);
@@ -153,13 +148,14 @@ export async function checkStuck(input: { hours?: number; dry?: boolean } | null
     if (t.status === "done" || t.status === "dropped" || t.remote) continue;
     const head = `${t.id}「${t.title}」`;
     const ago = (ms: number) => when(ms);
-    if (t.owner === "human") {
-      if (t.ready && t.status === "todo" && t.createdAt < since) stuck.push({ id: t.id, line: `${head} 要你${t.handBack?.kind === "choice" || t.questions?.length ? "决定" : "亲手做"}，${ago(t.createdAt)}就在等${askText(t) ? `\n${askText(t)}` : ""}` });
+    if (t.status === "todo") continue;
+    // Waiting on something it asked of the user: that ask is what's reported, not the task's silence
+    const asks = (t.asks ?? []).filter((a: any) => a.status === "open");
+    if (asks.length) {
+      const first = Math.min(...asks.map((a: any) => a.createdAt));
+      if (first < since) stuck.push({ id: t.id, line: `${head} 在等你${asks.some((a: any) => a.handBack?.kind === "choice" || a.questions) ? "决定" : "亲手做"}，${ago(first)}就在等\n${askText(t)}` });
       continue;
     }
-    if (t.status === "todo") continue;
-    // Held up by a step of the user's: that step is what's reported (above), not this one again
-    if ((t.blockedBy ?? []).some((b: string) => (tasks as any[]).some((h) => h.id === b && h.owner === "human" && h.status === "todo"))) continue;
     const last = Math.max(t.reportedAt ?? 0, t.updatedAt ?? 0, t.live?.updatedAt ?? 0);
     if (t.live?.status === "error") stuck.push({ id: t.id, line: `${head} 的 worker 出错了：${cut(t.live.error ?? "", 120)}` });
     else if (t.live?.status === "waiting" && (t.live.waitingSince ?? last) < since) stuck.push({ id: t.id, line: `${head} 的 worker ${ago(t.live.waitingSince ?? last)}起在等你批准：${t.live.waiting ?? ""}` });

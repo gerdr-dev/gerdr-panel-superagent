@@ -3,7 +3,7 @@
 //
 //   data.assign = { title, body?, by?, agreed?, how?, agent?, repos? }
 //     not agreed: a card under 等你 — 同意 (an agent does it: picks agent and repository, sent out at once; or 我自己安排:
-//       a task of their own, split as they like) or 拒绝 (with why).
+//       it stays in 待办, sent out — whole or split — when they like) or 拒绝 (with why).
 //     agreed: no one to ask (their own, or agreed elsewhere): taken as `how` says at once.
 //   data.update = { state: "agreed" | "rejected" | "returned" | "accepted" | "dropped" | "taken", text? } on the same key: what
 //     happened there since (agreed / rejected elsewhere: this card goes; returned: back to work, the worker told why).
@@ -54,8 +54,9 @@ export async function onAssignEvent(ctx: Ctx, e: GerdrEvent): Promise<{ handled:
   const body = (a!.body ?? e.text ?? "").trim();
   const assigned: Assigned = { state: a!.agreed ? "agreed" : "ask", by: a!.by || ev.who, how: a!.how, agent: a!.agent, repos: a!.repos, shareDir: a!.shareDir, unattended: a!.unattended };
   const threads = e.key ? [{ source: e.source, key: e.key }] : undefined;
+  // Their own to arrange: a task in 待办 like any other (there are no tasks for people, 2026-11-19), sent out when they want
   if (a!.agreed && a!.how === "self") {
-    const t = await add({ owner: "human", title, steps: body, origin, threads, assigned } as any, ctx);
+    const t = await add({ title, prompt: body || title, origin, threads, assigned } as any, ctx);
     hello(ctx, t);
     return { handled: true, task: t.id };
   }
@@ -93,7 +94,7 @@ async function onUpdate(ctx: Ctx, mine: Task[], u: { state?: string; text?: stri
         });
         break;
       case "returned":
-        // Back to work, with what's wrong: an agent's worker is told; one's own task is back under 等你
+        // Back to work, with what's wrong: its worker is told; one not sent out yet waits in 待办 with the note
         update(ctx, (s) => {
           const x = find(s, t.id);
           x.assigned = { ...(x.assigned as Assigned), state: "agreed" };
@@ -101,7 +102,7 @@ async function onUpdate(ctx: Ctx, mine: Task[], u: { state?: string; text?: stri
           note(x, `对方打回了：${text}`);
           x.updatedAt = Date.now();
         });
-        if (t.owner === "agent" && t.session)
+        if (t.session)
           await wake(ctx, t.id, { how: "对方打回了", text: `[任务面板] 发起人没通过：\n\n${text}\n\n照这个改，改完在回复里说改了什么。` });
         break;
       case "dropped":
@@ -141,29 +142,29 @@ function tell(ctx: Ctx, t: Task, text: string, data: Record<string, unknown>) {
 
 /**
  * The card a source's task became here, for that source's page to act on it in place (the team panel's drawer):
- * { source, key } → { id, status, owner, assigned, session } or null.
+ * { source, key } → { id, status, assigned, session } or null.
  */
 export function forOrigin(input: { source: string; key: string }, ctx: Ctx) {
   const t = load(ctx).store.tasks.filter((x) => x.assigned && x.origin?.source === input.source && x.origin?.key === input.key).pop();
   if (!t) return null;
-  return { id: t.id, title: t.title, status: t.status, owner: t.owner, assigned: t.assigned, session: t.session, repo: t.repo, prompt: t.prompt, steps: t.steps };
+  return { id: t.id, title: t.title, status: t.status, assigned: t.assigned, session: t.session, repo: t.repo, prompt: t.prompt };
 }
 
 /**
  * The user agrees: { id, how: "agent" | "self", agent?, repo?, prompt? }. agent: sent out at once (with the agent and
- * repository chosen, else the suggested ones); self: it becomes a task of their own (split it with new tasks from it).
- * A task already agreed as self can still go to an agent this way (how: "agent").
+ * repository chosen, else the suggested ones); self: it stays in 待办 for them to send out when they like (whole, or
+ * split into new tasks from it). A task agreed as self can still go to an agent this way (how: "agent").
  */
 export async function agree(input: { id: string; how: "agent" | "self"; agent?: string; repo?: string; prompt?: string; share?: "" | "view" | "talk" }, ctx: Ctx) {
   const t = assignedTask(ctx, input.id);
   const share = input.how === "agent" && typeof input.share === "string" ? { share: input.share } : {};
   // Agreed to arrange it themselves (or one's own task, which arrives agreed), then handing it to an agent after all
-  if (t.assigned!.state === "agreed" && t.assigned!.how === "self" && input.how === "agent" && t.owner === "human") {
+  if (t.assigned!.state === "agreed" && t.assigned!.how === "self" && input.how === "agent" && !t.session) {
     tell(ctx, t, "", { step: "how", how: "agent" });
     update(ctx, (s) => {
       const x = find(s, t.id);
-      const prompt = (input.prompt ?? x.steps ?? x.title).trim();
-      Object.assign(x, { owner: "agent", prompt, status: "todo", updatedAt: Date.now(), assigned: { ...x.assigned, how: "agent", ...share } });
+      const prompt = (input.prompt ?? x.prompt ?? x.title).trim();
+      Object.assign(x, { prompt, status: "todo", updatedAt: Date.now(), assigned: { ...x.assigned, how: "agent", ...share } });
     });
     return start({ id: t.id, repo: input.repo || t.repo || t.assigned!.repos?.[0], agent: input.agent || t.agent }, ctx);
   }
@@ -173,7 +174,7 @@ export async function agree(input: { id: string; how: "agent" | "self"; agent?: 
   if (input.how === "self") {
     update(ctx, (s) => {
       const x = find(s, t.id);
-      Object.assign(x, { owner: "human", steps: input.prompt ?? x.prompt, status: "todo", updatedAt: Date.now(), assigned: { ...x.assigned, state: "agreed", how: "self" } });
+      Object.assign(x, { prompt: input.prompt ?? x.prompt, status: "todo", updatedAt: Date.now(), assigned: { ...x.assigned, state: "agreed", how: "self" } });
     });
     return find(load(ctx).store, t.id);
   }

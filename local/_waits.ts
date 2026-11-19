@@ -1,15 +1,15 @@
 // What a task waits on — one record for every kind, so where a task stands follows from one place.
 //
 // Before (until 2026-11-04) each kind had its own field, its own wake-up path and its own rules for "is it stopped?":
-// a worker's question in t.question, a wait_for in t.waiting, an MR in t.delivery, the user's steps in t.blockedBy,
-// the sessions it handed work to only in Gerdr's session list. Every new kind meant touching column(), stopped(),
+// a worker's question in t.question, a wait_for in t.waiting, an MR in t.delivery, the user's steps in t.blockedBy
+// (now t.asks), the sessions it handed work to only in Gerdr's session list. Every new kind meant touching column(), stopped(),
 // settled(), the card, the chat card and the 在等 list — and the gaps were the bugs: a worker saying "I'll wait"
 // with nothing to wake it (t29), one reporting "working" and stopping (t30), an MR wait nobody could see in the chat.
 //
 // Now a task has `waits`: each says what it waits for, whether that's the user, and what ends it. Two kinds are
 // registered by the worker's own calls (wait_for: news in a conversation — a colleague's DM, an MR — or a time; a
-// question for the user); two are kept in step with what they mirror (sync): the user's board items it's blocked by,
-// the sessions it handed work to. An MR is no kind of its own: a way of working (the worker's skill) plus a source of
+// question for the user); two are kept in step with what they mirror (sync): what it asks of the user (its asks)
+// and the tasks it's blocked by, the sessions it handed work to. An MR is no kind of its own: a way of working (the worker's skill) plus a source of
 // events (the GitLab add-on, subscribed to by the wait's follow trigger, waits.ts), waited on like any conversation. The board reads only this:
 //
 //   有直接等你的（问题、批准）→ 等你（等你在任务面板上做的那一项，是那一项的卡片在等你）
@@ -18,7 +18,7 @@
 //
 // Every wake-up goes one way too (_wake.ts): it ends the waits it answers, with how, and tells the worker.
 
-import type { Store, Task } from "./_store";
+import type { Ask, Store, Task } from "./_store";
 
 export type WaitKind = "reply" | "check" | "time" | "session" | "agent" | "user" | "task" | "teammate";
 
@@ -169,39 +169,43 @@ const short = (cmd: string) => {
 };
 
 /**
- * Brings the mirrored waits in step, on every write (_store.ts update): the board items it's blocked by; a finished
- * task ends everything. Sessions it handed work to need Gerdr's session list: syncSessions.
+ * Brings the mirrored waits in step, on every write (_store.ts update): what it asks of the user (its open asks) and
+ * the tasks it's blocked by; a finished task ends everything. Sessions it handed work to need Gerdr's session list:
+ * syncSessions.
  */
 export function sync(s: Store) {
   for (const t of s.tasks) {
-    if (t.owner !== "agent") continue;
     if (t.status === "done" || t.status === "dropped") {
       endWaits(t, () => true, t.status === "done" ? "任务完成了" : "任务放弃了");
       continue;
     }
-    // The user's board items (and any task it's blocked by): open while the item is
+    // Open while the ask / the task blocking it is
+    for (const a of t.asks ?? [])
+      if (a.status === "open" && !open(t).some((w) => w.item === a.id)) addWait(t, { kind: "user", item: a.id, what: a.title, user: true, since: a.createdAt });
     for (const id of t.blockedBy ?? []) {
       const h = s.tasks.find((x) => x.id === id);
       if (!h || h.status === "done" || h.status === "dropped") continue;
-      if (!open(t).some((w) => w.item === id))
-        addWait(t, h.owner === "human" ? { kind: "user", item: id, what: h.title, user: true, since: h.createdAt } : { kind: "task", item: id, what: `${h.id} ${h.title} 先做完`, since: h.createdAt });
+      if (!open(t).some((w) => w.item === id)) addWait(t, { kind: "task", item: id, what: `${h.id} ${h.title} 先做完`, since: h.createdAt });
     }
     for (const w of open(t)) {
-      if (!w.item || (w.kind !== "user" && w.kind !== "task")) continue;
-      const h = s.tasks.find((x) => x.id === w.item);
-      if (h && h.status !== "done" && h.status !== "dropped" && t.blockedBy?.includes(h.id)) continue;
-      w.end = { how: itemEnd(h), at: Date.now() };
+      if (!w.item) continue;
+      if (w.kind === "user") {
+        const a = t.asks?.find((x) => x.id === w.item);
+        if (a?.status !== "open") w.end = { how: askEnd(a), at: Date.now() };
+      } else if (w.kind === "task") {
+        const h = s.tasks.find((x) => x.id === w.item);
+        if (h && h.status !== "done" && h.status !== "dropped" && t.blockedBy?.includes(h.id)) continue;
+        w.end = { how: !h ? "不在了" : h.status === "dropped" ? "不需要了" : h.status === "done" ? `${h.id} 做完了` : "不再挡着它", at: Date.now() };
+      }
     }
   }
 }
 
-function itemEnd(h?: Task) {
-  if (!h) return "不在了";
-  if (h.status === "dropped") return "不需要了";
-  if (h.status !== "done") return "不再挡着它";
-  if (h.owner !== "human") return `${h.id} 做完了`;
-  const back = h.handBack?.kind === "secret" ? "" : h.handedBack ? `：${h.handedBack}` : "";
-  return `${h.handBack?.kind === "choice" || h.handBack?.kind === "questions" ? "你答了" : "你做完了"}${back}`;
+function askEnd(a?: Ask) {
+  if (!a) return "不在了";
+  if (a.status === "dropped") return "不需要了";
+  const back = a.handBack.kind === "secret" ? "" : a.handedBack ? `：${a.handedBack}` : "";
+  return `${a.handBack.kind === "choice" || a.handBack.kind === "questions" ? "你答了" : "你做完了"}${back}`;
 }
 
 type Kid = { id: string; title?: string; status: string; waiting?: string; waitingKind?: string; user?: boolean };
@@ -211,7 +215,7 @@ type Kid = { id: string; title?: string; status: string; waiting?: string; waiti
  * it just started waiting on (new, or going again after they reported): the caller puts that in the feed.
  */
 export function syncSessions(t: Task, kids: Kid[]): Kid[] {
-  if (t.owner !== "agent" || t.status === "done" || t.status === "dropped") return [];
+  if (t.status === "done" || t.status === "dropped") return [];
   const live = new Map(kids.map((k) => [k.id, k]));
   endWaits(t, (w) => w.kind === "session" && !live.has(w.session!), "回报了 / 结束了");
   const started: Kid[] = [];
@@ -232,7 +236,7 @@ type Bg = { id: string; type: string; description: string; subagent?: string; to
  * wait_for. Open while running; only the top-level ones (a subagent's own tasks are under it).
  */
 export function syncAgents(t: Task, worker: string | undefined, bg: Bg[]) {
-  if (t.owner !== "agent" || t.status === "done" || t.status === "dropped") return;
+  if (t.status === "done" || t.status === "dropped") return;
   const running = new Map(bg.filter((x) => x.status === "running" && !x.parent).map((x) => [x.toolCallId || x.id, x]));
   endWaits(t, (w) => w.kind === "agent" && (w.session !== worker || !running.has(w.sub!)), "做完了");
   for (const [sub, x] of running) {

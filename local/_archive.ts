@@ -2,7 +2,7 @@
 // minute, every tool call) stops reading them and asking Gerdr about their sessions. Nothing is deleted. A helper file
 // (leading _): nothing here is callable from a page.
 //
-// The unit is a requirement (a card): its root's part and every member's, with the human steps they asked for — all of
+// The unit is a requirement (a card): its root's part and every member's (what they asked the user is inside them) — all of
 // them ended, the last one longer ago than settings.archiveDays, and nothing still going pointing at any of them. They
 // come back (moved into reqs/ again) when something asks for one of them by id (_store.ts update / find), when the
 // user opens one from the board's archive list, or when one of their workers is running again (the user typed in its
@@ -20,7 +20,7 @@ const SESSIONS = `${ARCHIVE}/sessions.json`;
 const EVERY = 3600_000;
 
 /** What the index keeps of an archived task: enough to list it, search it and tell when it's wanted again. */
-export type ArchivedTask = { id: string; title: string; owner: Task["owner"]; status: Task["status"]; createdAt: number; doneAt?: number; summary?: string; repo?: string; sessions?: string[] };
+export type ArchivedTask = { id: string; title: string; status: Task["status"]; createdAt: number; doneAt?: number; summary?: string; repo?: string; sessions?: string[] };
 export type Group = { root: string; parts: string[]; at: number; tasks: ArchivedTask[] };
 type Index = { checkedAt?: number; groups: Record<string, Group> };
 
@@ -110,7 +110,6 @@ export function archiveOld(ctx: Ctx, read: () => Loaded, days: number, rootOf: (
       tasks: g.tasks.map((t) => ({
         id: t.id,
         title: t.title,
-        owner: t.owner,
         status: t.status,
         createdAt: t.createdAt,
         doneAt: t.doneAt,

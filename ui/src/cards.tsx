@@ -9,14 +9,14 @@ import { run } from "./lib/gerdr";
 type Step = { status: string; handedBack?: string; title?: string; kind?: string; reason?: string };
 
 /**
- * A step or decision the worker put on the board (ask_human): the built-in card while it waits, so it can be answered
- * right there; once it's done or taken back on the board, a one-line record of how it ended instead of a card that
- * still looks open. The board is asked again every 30s while the card is on screen.
+ * A step or decision the worker asked the user for (ask_human; an ask on its task, ref a5 or a5#2 — a human task's old
+ * id, t206, on cards drawn before 2026-11-19): the built-in card while it waits, so it can be answered right there;
+ * once it's done or taken back on the board, a one-line record of how it ended instead of a card that still looks
+ * open. The board is asked again every 30s while the card is on screen.
  */
-/** Also drawn on the secretary's page for a step it showed that is answered now (board.tsx NeedRow). */
 export function TaskStep({ card }: CardProps) {
   const id = String(card.ref ?? "");
-  // Which board it belongs to: one person can have this panel in several projects, each with its own t4. Not the page's
+  // Which board it belongs to: one person can have this panel in several projects, each with its own a4. Not the page's
   // project — this runs in Gerdr's own page. Older cards only carried it in their answer button (choose.project);
   // one with neither isn't asked about at all rather than asked of the wrong board.
   const c = card as { project?: string; choose?: { project?: string } };

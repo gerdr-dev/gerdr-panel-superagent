@@ -1,9 +1,8 @@
 // Where the board's tasks are kept: one file per part.
 //
-// A part is one agent task plus the human steps it asked for (a human step nobody asked for is a part of its own):
-// the unit with exactly one writer. _store.ts reads every part into the one Store the code works on, and writes back
-// only the parts a change touched — a change no longer rewrites the whole board, and two runs changing different
-// tasks don't make each other start over.
+// A part is one task, with what it asks of the user (its asks): the unit with exactly one writer. _store.ts reads
+// every part into the one Store the code works on, and writes back only the parts a change touched — a change no
+// longer rewrites the whole board, and two runs changing different tasks don't make each other start over.
 //
 // A requirement's activity lives on its root task in the Store, but each line is kept in the part of the member that
 // wrote it (`by`), so no part is written by two members. Merged by time when read.
@@ -22,11 +21,12 @@ export type Meta = { next: number; v: number };
 /** The file of a part: its id with anything a file name shouldn't have replaced. */
 export const pathOf = (key: string) => `${DIR}/${key.replace(/[^\w.-]/g, "_")}.json`;
 
-/** Which part a task is kept in: an agent task is its own, a human step goes with the agent task that asked for it. */
-export function partOf(byId: Map<string, Task>, tasks: Task[], t: Task): string {
-  if (t.owner !== "human") return t.id;
-  const by = t.askedBy ? byId.get(t.askedBy) : tasks.find((x) => x.owner === "agent" && x.blockedBy?.includes(t.id));
-  return by && by.id !== t.id && by.owner === "agent" ? by.id : t.id;
+/**
+ * Which part a task is kept in: its own. Until 2026-11-19 a human step went with the agent task that asked for it;
+ * those are asks on that task now (_store.ts Ask), kept inside it.
+ */
+export function partOf(_byId: Map<string, Task>, _tasks: Task[], t: Task): string {
+  return t.id;
 }
 
 /** The root a task's activity shows on (reqOf in _store.ts, kept here so the two files don't import each other). */

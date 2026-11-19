@@ -23,7 +23,9 @@ export type ChatAction = { id: string; label: string; kind?: "primary" | "danger
  */
 export type ChatView = { id: string; label: string; icon?: ComponentType<{ className?: string }>; render: () => ReactNode };
 /** One thing waiting on the user: a line; jump scrolls the chat to the card with that ref. */
-export type ChatItem = { text: string; jump?: string };
+/** A row under the drawer's line: jump scrolls the chat to that card; onClick, when set, does something else instead
+ *  (what the chat's card can't do: a secret to store, an expired link to redo). */
+export type ChatItem = { text: string; jump?: string; onClick?: () => void };
 
 export function ChatDrawer({
   session,
@@ -211,7 +213,7 @@ export function ChatDrawer({
               <button
                 key={n}
                 title={it.text}
-                onClick={() => it.jump && go(it.jump)}
+                onClick={() => (it.onClick ? it.onClick() : it.jump && go(it.jump))}
                 className="flex w-full items-center gap-2 rounded-md border-l-2 border-l-warn bg-warn/5 py-1.5 pr-1.5 pl-2 text-left text-[12px] hover:bg-warn/10"
               >
                 <span className="min-w-0 flex-1 truncate">{it.text}</span>

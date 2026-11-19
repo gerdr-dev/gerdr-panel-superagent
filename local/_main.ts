@@ -387,11 +387,11 @@ function talkText(ctx: Ctx) {
       `它答完，原话会作为 [t12 的回答] 出现在这段对话里，用户直接看得到：你不用转述，有要补的（下一步要他做什么）再说一句。` +
       `跨需求的、要汇总的（哪些在等他、进度、日报）才由你自己答。\n` +
       `- 用户交给你一件事：是活就派（\`tasks.add\` 带 \`"start": true\`，知道去哪个仓库就给 \`repo\`；不知道就按下面「怎么派」挑，挑不出来就先问他再派）；` +
-      `他要亲手做的步骤记成人工任务（\`tasks.add\` 带 \`"owner": "human"\`）。派完一句话告诉他交给了谁。\n` +
-      `- 替用户回答 worker：问题 \`tasks.answerQuestion ${ex({ id: "t5", q: "1", value: "选项或他的原话" })}\`；` +
+      `他只是要记一件事、还不派：\`tasks.add\` 不带 start，留在待办。派完一句话告诉他交给了谁。\n` +
+      `- 替用户回答 worker：问题 \`tasks.answerQuestion ${ex({ id: "a5", q: "1", value: "选项或他的原话" })}\`（id 是 worker 问的那一项，下面任务列表里写着）；` +
       `验收 \`tasks.accept ${ex({ id: "t5" })}\` / 打回 \`tasks.reject ${ex({ id: "t5", feedback: "…" })}\`；` +
       `他要把任务移到某一列 \`tasks.setStatus ${ex({ id: "t5", status: "review" })}\`（todo / running / review / done；任务的列只在他要你移时才动）；` +
-      `他做完了自己的步骤 \`tasks.complete ${ex({ id: "t5", value: "要交回的值（没有就不写）" })}\`；` +
+      `他做完了 worker 请他做的步骤、或替他定了 worker 问的决定 \`tasks.complete ${ex({ id: "a5", value: "要交回的值（没有就不写）" })}\`；` +
       `转告 worker \`tasks.say ${ex({ id: "t5", text: "…" })}\`；不做了 \`tasks.drop ${ex({ id: "t5", reason: "…" })}\`。\n` +
       `- 不要用你自带的提问工具（AskUserQuestion）：有要问用户的，直接在回复里问，他会在这里答你。` +
       `问了就先不派，这一轮到此为止，他的回答会是他的下一条消息。\n` +
@@ -574,19 +574,21 @@ export async function compactMain(ctx: Ctx, input?: { force?: boolean }) {
 export function askText(t: any): string {
   const ex = (o: unknown) => `'${JSON.stringify(o)}'`;
   const opts = (o?: string[]) => (o?.length ? `（选项：${o.join(" / ")}）` : "");
-  if (t.owner === "human") {
-    const qs = (t.questions ?? []).filter((q: any) => !q.dropped && !q.answer);
-    if (qs.length)
-      return qs
-        .map((q: any) => `    - 问题 ${q.id}：${q.title}${opts(q.options)}${q.kind === "value" && q.label ? `（要一个值：${q.label}）` : ""} → tasks.answerQuestion ${ex({ id: t.id, q: q.id, value: "…" })}`)
-        .join("\n");
-    const k = t.handBack?.kind;
-    if (k === "choice") return `    要用户选：${t.title}${opts(t.handBack.options)} → tasks.complete ${ex({ id: t.id, value: "选的那项" })}`;
-    if (k === "value") return `    要用户给：${t.handBack.label ?? t.title} → tasks.complete ${ex({ id: t.id, value: "…" })}`;
-    if (k === "secret") return `    要用户交一个密钥（${t.handBack.label ?? t.handBack.name ?? ""}）：不能经过对话，请他在任务面板上 ${t.id} 那里填`;
-    return t.steps ? `    要用户亲手做：${t.steps.replace(/\n/g, "\n    ")}\n    他说做完了 → tasks.complete ${ex({ id: t.id })}` : "";
+  const lines: string[] = [];
+  for (const h of (t.asks ?? []).filter((a: any) => a.status === "open")) {
+    const qs = (h.questions ?? []).filter((q: any) => !q.dropped && !q.answer);
+    if (qs.length) {
+      lines.push(...qs.map((q: any) => `    - 问题「${q.title}」${opts(q.options)}${q.kind === "value" && q.label ? `（要一个值：${q.label}）` : ""} → tasks.answerQuestion ${ex({ id: h.id, q: q.id, value: "…" })}`));
+      continue;
+    }
+    const k = h.handBack?.kind;
+    if (k === "choice") lines.push(`    要用户选：${h.title}${opts(h.handBack.options)} → tasks.complete ${ex({ id: h.id, value: "选的那项" })}`);
+    else if (k === "value") lines.push(`    要用户给：${h.handBack.label ?? h.title} → tasks.complete ${ex({ id: h.id, value: "…" })}`);
+    else if (k === "secret") lines.push(`    要用户交一个密钥（${h.handBack.label ?? h.handBack.name ?? ""}）：不能经过对话，请他在任务面板上 ${t.id} 的卡片里填`);
+    else lines.push(`    要用户亲手做：${h.title}${h.steps ? `\n    ${h.steps.replace(/\n/g, "\n    ")}` : ""}\n    他说做完了 → tasks.complete ${ex({ id: h.id })}`);
   }
-  return t.question ? `    worker 问：${t.question} → tasks.answer ${ex({ id: t.id, answer: "用户的回答" })}` : "";
+  if (t.question) lines.push(`    worker 问：${t.question} → tasks.answer ${ex({ id: t.id, answer: "用户的回答" })}`);
+  return lines.join("\n");
 }
 
 

@@ -3,7 +3,7 @@ import { tellBadge } from "./_badge";
 import { DATA, skillFile } from "./_user";
 import { workflow } from "./_config";
 import { forWorker } from "./memory";
-import { activity, blockersDone, going, draftOf, find, load, members, newTask, note, reqOf, splitRef, update, type Question, type Store, type Task } from "./_store";
+import { activity, blockersDone, going, draftOf, find, findAsk, load, members, newTask, note, reqOf, update, type Ask, type Question, type Store, type Task } from "./_store";
 import { applyBlock } from "./_apply";
 import { endQuestions, endWaits, isOutside, open, question, syncAgents, syncSessions, wakeText, type Wait } from "./_waits";
 import { cutLine, wake } from "./_wake";
@@ -13,8 +13,9 @@ import { isMain, mains, rerouteTask, routeTask, sweep, toMain } from "./_main";
 
 export type { Task };
 
-// Task board data: user/data/reqs/, a file per part (read and written through _store.ts, _parts.ts). Agent tasks are handed to coding-agent sessions (workers); human tasks are
-// things only the user can do (UI clicks, accounts, approvals). Everything here is deterministic: the page, the
+// Task board data: user/data/reqs/, a file per part (read and written through _store.ts, _parts.ts). Every task is
+// handed to a coding-agent session (its worker); what only the user can do (UI clicks, accounts, approvals) is an ask
+// on the task whose worker needs it (_store.ts Ask). Everything here is deterministic: the page, the
 // panel agent (`gerdr panel run tasks.<fn> '<json>'`) and worker replies all go through these functions.
 //
 // Workers don't report (2026-11-12): the task panel follows their sessions, and a turn that ends waiting on nothing
@@ -102,7 +103,7 @@ export async function list(input: unknown, ctx: Ctx) {
       user: k.status === "waiting" && (k.waitingKind !== "ask" || askLeft(k, t.session ? live[t.session] : null)),
     }));
   const kids: Record<string, ReturnType<typeof kidsOf>> = {};
-  for (const t of store.tasks) if (t.owner === "agent" && t.status !== "done" && t.status !== "dropped") kids[t.id] = kidsOf(t);
+  for (const t of store.tasks) if (t.status !== "done" && t.status !== "dropped") kids[t.id] = kidsOf(t);
   const nudge: { session: string; id: string; out: string[]; reply?: boolean }[] = [];
   // Answers to questions the secretary passed on (tasks.message): into its chat, where the user asked
   const answered: { id: string; asked: string; text: string }[] = [];
@@ -173,7 +174,6 @@ export async function list(input: unknown, ctx: Ctx) {
       }
       t.updatedAt = Date.now();
     }
-    dropOrphans(s);
     return s;
   });
   for (const n of nudge) {
@@ -189,7 +189,7 @@ export async function list(input: unknown, ctx: Ctx) {
       .catch(() => {});
   }
   // Workers' system files follow the user's memory (a worker restarted later reads what was learned since)
-  for (const t of s.tasks) if (t.owner === "agent" && t.session && t.repo && t.status !== "done" && t.status !== "dropped" && ctx.fs.stat(workerSystemPath(t.id))) writeWorkerSystem(ctx, t.id, t.repo);
+  for (const t of s.tasks) if (t.session && t.repo && t.status !== "done" && t.status !== "dropped" && ctx.fs.stat(workerSystemPath(t.id))) writeWorkerSystem(ctx, t.id, t.repo);
   // A reminded worker is running again: its card is back in 进行中 now, not on the next refresh
   for (const n of nudge) live[n.session] = ctx.sessions.get(n.session) ?? live[n.session];
   await closeRouters(ctx, live);
@@ -211,7 +211,7 @@ export async function list(input: unknown, ctx: Ctx) {
       const ks = kids[t.id] ?? [];
       // The card's line: the newest paragraph in its worker's conversation, read live (summary is written only by
       // task_update or when a turn ends, and workers forget the former: the card read hours behind the chat)
-      const now = t.owner === "agent" && t.status !== "done" && t.status !== "dropped" && t.session ? newest(ctx, t.session) : "";
+      const now = t.status !== "done" && t.status !== "dropped" && t.session ? newest(ctx, t.session) : "";
       return {
         ...t,
         // The open waits, each with what wakes it in words (the 在等 list, the card); ended ones stay in t.waits
@@ -230,7 +230,7 @@ export async function list(input: unknown, ctx: Ctx) {
         latest: now || undefined,
         // 设置 → 回复对方 is 派出去时, and it's not out yet and came from a chat: the card's 回复对方 box by 派出去, filled
         // with the 回复对方 words for the user to change
-        ...(t.status === "todo" && t.owner === "agent" && t.origin?.reply && !t.assigned && (ack ??= workflow(ctx)).ack === "dispatch"
+        ...(t.status === "todo" && t.origin?.reply && !t.assigned && (ack ??= workflow(ctx)).ack === "dispatch"
           ? { canReply: true, replyDraft: t.replyOnStart ?? ack.ackText.split("{id}").join(t.id).split("{title}").join(t.title) }
           : {}),
       };
@@ -257,9 +257,9 @@ export async function list(input: unknown, ctx: Ctx) {
 }
 
 /**
- * Every agent task is a requirement card (DESIGN.md「需求和队友」), alone or with members: its members and the user's
- * steps they asked for carry `in` (the requirement's id) and the page folds them into its card; the requirement's
- * `teamColumn` is its own, marked 等你 when any of them waits on the user.
+ * Every task is a requirement card (DESIGN.md「需求和队友」), alone or with members: its members carry `in` (the
+ * requirement's id) and the page folds them into its card; the requirement's `teamColumn` is its own, marked 等你 when
+ * any of them waits on the user.
  */
 function teams<T extends Task & { column: string }>(s: Store, tasks: T[]) {
   const byId = new Map(tasks.map((t) => [t.id, t]));
@@ -268,7 +268,7 @@ function teams<T extends Task & { column: string }>(s: Store, tasks: T[]) {
     return root && root.id !== t.id ? { ...t, in: root.id } : t;
   });
   return out.map((t: any) => {
-    if (t.in || t.owner !== "agent") return t;
+    if (t.in) return t;
     const mine = out.filter((x: any) => x.in === t.id);
     // A member's result for review counts as the card's too: the user judges it either way
     // Its column is its own status (the user's to change); a member waiting on the user only makes it yellow
@@ -369,22 +369,6 @@ function settled(t: Task) {
 }
 
 /**
- * A human step made to unblock other tasks is moot once all of those are finished (done or dropped, e.g. the worker
- * found another way): it leaves "needs you" by itself, with why. One the user added that blocks nothing stays.
- */
-function dropOrphans(s: Store) {
-  const over = (x?: Task) => !x || x.status === "done" || x.status === "dropped";
-  for (const h of s.tasks) {
-    if (h.owner !== "human" || over(h)) continue;
-    const blocks = s.tasks.filter((t) => t.blockedBy?.includes(h.id));
-    if (!blocks.length || !blocks.every((t) => over(t))) continue;
-    const why = blocks.map((t) => `${t.id} ${t.status === "done" ? "已完成" : "已放弃"}`).join("、");
-    note(h, `${why}，这一步不需要了（自动放弃）`);
-    Object.assign(h, { status: "dropped", orphaned: Date.now(), doneAt: Date.now(), updatedAt: Date.now() });
-  }
-}
-
-/**
  * Where the board shows a task. The column is the task's status, which only the user changes (setStatus, drag,
  * 标为完成 / 通过 / 打回 / 放弃: DESIGN.md「状态只由用户改」). "you" is no column of its own: a task in 进行中 that
  * waits on the user right now (an approval in its chat, an error, a question) — the page shows it first and yellow.
@@ -396,11 +380,9 @@ function column(s: Store, t: Task, sess: any): "you" | "review" | "active" | "do
   // Asked of the user by someone: theirs to agree to. Delivered: whoever asked has it now
   if (t.assigned?.state === "ask") return "you";
   if (t.assigned?.state === "delivered") return "active";
-  if (t.owner === "human") return blockersDone(s, t) ? "you" : "active";
   if (sess?.status === "waiting" || sess?.status === "error") return "you";
-  // Waiting on the user right here (a question, a helper's approval): its card is what they act on. A step / question
-  // of theirs that's a board item of its own is that item's card under 等你; this task stays in 进行中, "等 tN"
-  if (open(t).some((w) => w.user && !w.item)) return "you";
+  // Waiting on the user right here: a question, a step or decision it asked for (its asks), a helper's approval
+  if (open(t).some((w) => w.user)) return "you";
   return "active";
 }
 
@@ -425,7 +407,7 @@ function command(sess: any) {
 
 /** Its worker isn't running and the task waits on nothing. */
 function stopped(t: Task, sess: any) {
-  if (t.owner !== "agent" || t.status !== "running") return false;
+  if (t.status !== "running") return false;
   if (sess && (sess.status === "running" || sess.status === "starting")) return false;
   if (busyBehind(sess)) return false;
   return !open(t).length;
@@ -444,7 +426,6 @@ function askLeft(k: any, sess: any) {
  * ones reporting back to a worker, started by one, or carrying the task's tag — here or on another computer.
  */
 function helpers(t: Task, all: (Session & { parent?: string; reportTo?: string })[]) {
-  if (t.owner !== "agent") return [];
   const mine = new Set([t.session, ...(t.sessions ?? [])].filter(Boolean) as string[]);
   return all.filter(
     (x) =>
@@ -479,22 +460,27 @@ function firstLine(text?: string) {
   return [...line].length > 40 ? [...line].slice(0, 40).join("") + "…" : line;
 }
 
-/** A new task. { title, owner?, prompt?, repo?, agent?, model?, effort?, steps?, handBack?, verify?, minutes?, blockedBy?, start? } */
+/**
+ * A new task, for an agent: { title?, prompt, repo?, agent?, model?, effort?, blockedBy?, start? }. Without start it
+ * waits in 待办 (the user's own to-do too: there are no tasks for people, 2026-11-19 — what a worker needs from the
+ * user is an ask on its task, board.ts ask_human).
+ */
 export async function add(input: Partial<Task> & { title?: string; start?: boolean }, ctx: Ctx) {
   // No title given (the board only asks what to do): the first line of the prompt / steps, cut short.
-  const title = (input?.title || firstLine(input?.prompt) || firstLine(input?.steps) || (input?.attachments?.length ? `看附件：${input.attachments[0].name}` : "")).trim();
+  if ((input as any)?.owner === "human") throw new Error("没有人工任务了：要自己记一件事，就建一个任务不派出去（不加 start），它留在待办");
+  const title = (input?.title || firstLine(input?.prompt) || (input?.attachments?.length ? `看附件：${input.attachments[0].name}` : "")).trim();
   if (!title) throw new Error("任务要写清楚做什么");
   const { start: go, ...rest } = input;
   // @-mentions in the text (the board's input box, the panel's agent writing "@design …"): who the router hands it to.
   // One mention and no agent given is simply the agent.
-  if (rest.owner !== "human" && !rest.mentions && rest.prompt?.includes("@")) {
+  if (!rest.mentions && rest.prompt?.includes("@")) {
     const m = mentionsIn(rest.prompt, await allAgents(ctx));
     if (m.length) rest.mentions = m;
   }
   if (rest.mentions?.length === 1 && !rest.agent) rest.agent = rest.mentions[0];
-  const auto = !input?.title && rest.owner !== "human" ? { autoTitle: true } : {};
+  const auto = !input?.title ? { autoTitle: true } : {};
   const t = update(ctx, (s) => newTask(s, { ...rest, ...auto, title, id: undefined } as any));
-  if (go && t.owner === "agent") {
+  if (go) {
     // Blocked by something still going: started by the board once it's done (startUnblocked), not now
     if (!blockersDone(load(ctx).store, t)) return edit({ id: t.id, startWhenFree: true }, ctx);
     return start({ id: t.id }, ctx);
@@ -509,10 +495,10 @@ export async function add(input: Partial<Task> & { title?: string; start?: boole
 async function startUnblocked(ctx: Ctx) {
   const { store } = load(ctx);
   for (const t of store.tasks) {
-    if (!t.startWhenFree || t.owner !== "agent" || t.status !== "todo" || t.session || !blockersDone(store, t)) continue;
+    if (!t.startWhenFree || t.status !== "todo" || t.session || !blockersDone(store, t)) continue;
     const before = (t.blockedBy ?? [])
       .map((id) => store.tasks.find((x) => x.id === id))
-      .filter((x): x is Task => !!x && x.owner === "agent")
+      .filter((x): x is Task => !!x)
       .map((x) => [`- ${x.id}「${x.title}」${x.status === "dropped" ? "放弃了" : "做完了"}${x.summary ? `：${x.summary}` : ""}`, ...(x.links ?? []).map((l) => `  - ${l.label ?? "链接"}：${l.url}`), x.session ? `  - 它的对话：gerdr session read ${x.session}` : ""].filter(Boolean).join("\n"));
     edit({ id: t.id, startWhenFree: undefined }, ctx);
     const prompt = before.length ? `${t.prompt ?? t.title}\n\n## 你等的任务\n${before.join("\n")}` : undefined;
@@ -584,7 +570,6 @@ export async function start(
     });
   const { store } = load(ctx);
   const t = find(store, input.id);
-  if (t.owner !== "agent") throw new Error(`${t.id} 是人工任务，不能派给 agent`);
   const prompt = (input.prompt ?? t.prompt ?? "").trim();
   let repo = (input.repo ?? t.repo ?? "").trim();
   if (!prompt && !t.attachments?.length) throw new Error(`${t.id} 还没写要 agent 做什么（prompt）`);
@@ -738,7 +723,6 @@ export async function accept(input: { id: string }, ctx: Ctx) {
  */
 export async function setStatus(input: { id: string; status: string }, ctx: Ctx) {
   const t = find(load(ctx).store, input.id);
-  if (t.owner !== "agent") throw new Error(`${t.id} 是要你做的一项，在它的卡片上处理`);
   const to = input.status;
   if (to === t.status) return t;
   if (to === "done") return accept({ id: t.id }, ctx);
@@ -792,52 +776,66 @@ export async function answer(input: { id: string; answer: string }, ctx: Ctx) {
 }
 
 /**
- * The user did a human task: { id, value? }. Agent tasks it was blocking and that are now free get told (and woken),
- * with what was handed back; a secret is named, never sent.
+ * The user did what a worker asked (an ask: a step, a decision, a value): { id, value? }. Its worker is told and
+ * woken, with what was handed back; a secret is named, never sent.
  */
 export async function complete(input: { id: string; value?: string }, ctx: Ctx) {
-  let woken: Task[] = [];
-  const h = update(ctx, (s) => {
-    const h = find(s, input.id);
-    if (h.owner !== "human") throw new Error(`${h.id} 不是人工任务`);
+  const { t, h } = update(ctx, (s) => {
+    const { t, a: h } = findAsk(s, input.id);
     // Answered already (the chat card and the board both can, and a reloaded card no longer knows): never tell the
     // worker twice
-    if (h.status === "done") throw new Error(`${h.id} 已经${h.handBack?.kind === "choice" ? "决定" : "做完"}了${h.handedBack ? `：${h.handedBack}` : ""}`);
-    if (h.status === "dropped") throw new Error(`${h.id} 已经不需要了`);
-    if ((h.handBack?.kind === "value" || h.handBack?.kind === "choice") && !input.value?.trim()) throw new Error(h.handBack.kind === "choice" ? "选一个，或者写下你的决定" : `要交回：${h.handBack.label || "一个值"}`);
+    if (h.status === "done") throw new Error(`已经${h.handBack.kind === "choice" ? "决定" : "做完"}了${h.handedBack ? `：${h.handedBack}` : ""}`);
+    if (h.status === "dropped") throw new Error(`「${h.title}」已经不需要了`);
+    if (h.handBack.kind === "questions") throw new Error(`「${h.title}」是几个问题：一个一个答（tasks.answerQuestion）`);
+    if ((h.handBack.kind === "value" || h.handBack.kind === "choice") && !input.value?.trim()) throw new Error(h.handBack.kind === "choice" ? "选一个，或者写下你的决定" : `要交回：${h.handBack.label || "一个值"}`);
     Object.assign(h, { status: "done", handedBack: input.value?.trim() || undefined, doneAt: Date.now(), updatedAt: Date.now() });
-    activity(s, h, { kind: "user", by: h.askedBy, of: h.id, text: `${h.handBack?.kind === "choice" || h.handBack?.kind === "questions" ? "你答了" : "你做完了"}「${h.title}」${h.handBack?.kind === "secret" || !h.handedBack ? "" : `：${h.handedBack}`}` });
-    woken = s.tasks.filter((t) => t.owner === "agent" && t.session && going(t) && t.blockedBy?.includes(h.id) && blockersDone(s, t));
-    return h;
+    activity(s, t, { kind: "user", by: t.id, of: h.id, text: `${h.handBack.kind === "choice" ? "你答了" : "你做完了"}「${h.title}」${h.handBack.kind === "secret" || !h.handedBack ? "" : `：${h.handedBack}`}` });
+    return { t, h };
   });
   let back = "";
-  if (h.handBack?.kind === "value") back = `\n交回的${h.handBack.label || "值"}：${h.handedBack}`;
-  if (h.handBack?.kind === "secret") back = `\n密钥已存为面板密钥「${h.handBack.name}」（只有面板的本地函数能读，你看不到值）。`;
+  if (h.handBack.kind === "value") back = `\n交回的${h.handBack.label || "值"}：${h.handedBack}`;
+  if (h.handBack.kind === "secret") back = `\n密钥已存为面板密钥「${h.handBack.name}」（只有面板的本地函数能读，你看不到值）。`;
   const text =
-    h.handBack?.kind === "choice"
+    h.handBack.kind === "choice"
       ? `你问的「${h.title}」（${h.id}），用户的决定：${h.handedBack}\n照这个接着做。`
-      : `人工任务「${h.title}」（${h.id}）用户做完了。${back}\n先按你说的方式核验${h.verify ? `（${h.verify}）` : ""}，没问题再继续；核验不过就用 ask_human 再登记一个，说明哪里不对。`;
+      : `你请用户做的「${h.title}」（${h.id}）他做完了。${back}\n先按你说的方式核验${h.verify ? `（${h.verify}）` : ""}，没问题再继续；核验不过就用 ask_human 再问一次，说明哪里不对。`;
   // Its wait on h ended in the write above (_waits.ts sync); this only tells the worker, the one way every wake goes
-  for (const t of woken) await wake(ctx, t.id, { how: h.handBack?.kind === "choice" ? `你答了：${h.handedBack}` : "你做完了", text, fold: false });
-  return { task: h, woke: woken.map((t) => t.id) };
+  const woke = t.session && t.status !== "dropped";
+  if (woke) await wake(ctx, t.id, { how: h.handBack.kind === "choice" ? `你答了：${h.handedBack}` : "你做完了", text, fold: false });
+  return { ask: h, task: t.id, woke: woke ? [t.id] : [] };
 }
 
 /**
- * A human step whose link / code expired: { id } — drop it and ask the worker that needed it for a fresh one (it
- * answers with a new "blocked", which shows up as a new card).
+ * A step whose link / code expired: { id } — drop it and ask the worker that needed it for a fresh one (it answers
+ * with a new ask_human, which shows up as a new card).
  */
 export async function redo(input: { id: string }, ctx: Ctx) {
-  const { store } = load(ctx);
-  const h = find(store, input.id);
-  const t = store.tasks.find((x) => x.id === h.askedBy) ?? store.tasks.find((x) => x.blockedBy?.includes(h.id) && x.session);
-  if (!t?.session) throw new Error(`找不到要 ${h.id} 的那个 worker`);
+  const { t, a: h } = findAsk(load(ctx).store, input.id);
+  if (!t.session) throw new Error(`${t.id} 没有 worker 对话`);
   update(ctx, (s) => {
-    const x = find(s, h.id);
-    note(x, "过期了，让 worker 重新生成");
-    Object.assign(x, { status: "dropped", doneAt: Date.now(), updatedAt: Date.now() });
+    const { t: x, a } = findAsk(s, h.id);
+    note(x, `「${a.title}」过期了，让 worker 重新生成`);
+    Object.assign(a, { status: "dropped", dropReason: "过期了", doneAt: Date.now(), updatedAt: Date.now() });
   });
-  await tell(ctx, t, `人工任务「${h.title}」（${h.id}）过期了，用户还没来得及做。重新生成一个（新的链接 / 验证码），再用 ask_human 登记一次。`);
+  await tell(ctx, t, `你请用户做的「${h.title}」（${h.id}）过期了，用户还没来得及做。重新生成一个（新的链接 / 验证码），再用 ask_human 问一次。`);
   return { asked: t.id };
+}
+
+/**
+ * The user says an ask isn't needed (不用做了 on its card): { id, reason? }. It leaves 等你 and its worker is told, so it
+ * finds another way or asks again. Until 2026-11-19 this was 放弃 on a human task, which only dropped the task.
+ */
+export async function dropAsk(input: { id: string; reason?: string }, ctx: Ctx) {
+  const why = input?.reason?.trim();
+  const { t, h } = update(ctx, (s) => {
+    const { t, a: h } = findAsk(s, input.id);
+    if (h.status !== "open") throw new Error(`「${h.title}」已经不在等你了`);
+    Object.assign(h, { status: "dropped", dropReason: why ? `你说不用了：${why}` : "你说不用了", doneAt: Date.now(), updatedAt: Date.now() });
+    activity(s, t, { kind: "user", by: t.id, of: h.id, text: `你说「${h.title}」不用了${why ? `：${why}` : ""}` });
+    return { t, h };
+  });
+  if (worker(t)) await wake(ctx, t.id, { how: `你说「${h.title}」不用了`, fold: false, text: `你请用户做 / 答的「${h.title}」（${h.id}），用户说不用了${why ? `：${why}` : ""}。别再等它：换个做法接着做，真的少不了就用 ask_human 说明为什么再问一次。` }).catch(() => {});
+  return { ask: h, task: t.id };
 }
 
 /** Sends a task's worker a message (it wakes if parked): { id, text }. For the user or the panel's agent steering it. */
@@ -850,27 +848,24 @@ export async function say(input: { id: string; text: string }, ctx: Ctx) {
 
 /**
  * 按最新情况更新: a question the user is asked was put before they and its worker talked on, and may be moot or
- * different now. { id: the step / question item (t5) }. Its worker is woken to ask it again as things stand (ask_human
- * with replaces: it then shows at the bottom of the feed) or take it back; the user doesn't scroll up to answer an old
- * version of it.
+ * different now. { id: the ask (a5) }. Its worker is woken to ask it again as things stand (ask_human with replaces: it
+ * then shows at the bottom of the feed) or take it back; the user doesn't scroll up to answer an old version of it.
  */
 export async function refreshAsk(input: { id: string }, ctx: Ctx) {
-  const { store } = load(ctx);
-  const h = find(store, input.id);
-  if (h.owner !== "human" || h.status !== "todo") throw new Error(`${h.id} 已经不在等你了`);
-  const w = store.tasks.find((x) => x.id === h.askedBy) ?? store.tasks.find((x) => x.blockedBy?.includes(h.id));
-  if (!w?.session) throw new Error(`找不到问这个的 worker`);
+  const { t: w, a: h } = findAsk(load(ctx).store, input.id);
+  if (h.status !== "open") throw new Error(`「${h.title}」已经不在等你了`);
+  if (!w.session) throw new Error(`${w.id} 没有 worker 对话`);
   const qs = (h.questions ?? []).filter((q) => !q.dropped && q.answer == null);
   const ids = qs.length ? qs.map((q) => `${h.id}#${q.id}「${q.title}」`).join("、") : `${h.id}「${h.title}」`;
-  update(ctx, (s) => Object.assign(find(s, h.id), { refreshing: Date.now() }));
+  update(ctx, (s) => Object.assign(findAsk(s, h.id).a, { refreshing: Date.now() }));
   await wake(ctx, w.id, {
     how: "你请它更新问题",
     text:
       `[任务面板] 用户请你把还在问他的 ${ids} 按现在的情况更新：这些是在你们后来的对话之前问的。\n` +
       `- 还要问但问法变了：ask_human 带 replaces（写上旧的 id）重新问，写清现在的情况和选项；\n` +
       `- 已经不用问了：cancel_human，说明原因；\n` +
-      `- 还是原样要问：不用改，用 message_user 说一句「这个问题还是要你定」。\n做完就结束这一轮。`,
-    feed: `你请 ${w.repo?.split("/").pop() || w.id} 按最新情况更新 ${h.id}`,
+      `- 还是原样要问：不用改，在回复里说一句「这个问题还是要你定」。\n做完就结束这一轮。`,
+    feed: `你请 ${w.repo?.split("/").pop() || w.id} 按最新情况更新「${h.title}」`,
   });
   return { sent: w.id };
 }
@@ -994,7 +989,7 @@ export async function reroute(input: { id: string; feedback: string }, ctx: Ctx)
   if (!feedback) throw new Error("写一下哪里不对，调度照这个重新安排");
   const { store } = load(ctx);
   const root = reqOf(store, find(store, input.id));
-  if (!root || root.owner !== "agent") throw new Error(`${input.id} 不是派给 agent 的任务`);
+  if (!root) throw new Error(`没有 ${input.id}`);
   if (root.status === "todo" && !root.session) return redraft(root, feedback, ctx);
   if (root.status === "done" || root.status === "dropped") throw new Error(`${root.id} 已经${root.status === "done" ? "完成" : "放弃"}了`);
   const lines = members(store, root)
@@ -1038,33 +1033,24 @@ function oneLine(s: string, n: number) {
 }
 
 /**
- * A handover takes the old task's steps for the user with it: what it asked them to do is still needed, now by the
- * new one. Until 2026-11-05 they went with the old task: t11 was dropped for t52 to take over, its "approve the
- * release" (t51) was dropped as nothing needed it any more, and the user lost it from 等你 while t52 waited on it.
- * Steps the board dropped for that reason (orphaned) in the last hour come back.
+ * A handover takes the old task's asks with it: what it asked the user is still needed, now by the new one. Until
+ * 2026-11-05 they stayed with the old task: t11 was dropped for t52 to take over, its "approve the release" (t51) was
+ * dropped as nothing needed it any more, and the user lost it from 等你 while t52 waited on it. The ones the old task
+ * still had open move over; their answers then wake the new worker.
  */
 function takeOver(ctx: Ctx, id: string, from: string) {
   update(ctx, (s) => {
     const t = find(s, id);
     const old = find(s, from);
-    const hour = Date.now() - 3600_000;
-    const steps = s.tasks.filter(
-      (h) =>
-        h.owner === "human" &&
-        (h.askedBy === old.id || old.blockedBy?.includes(h.id)) &&
-        (h.status === "todo" || (h.status === "dropped" && (h.orphaned ?? 0) > hour)),
-    );
-    for (const h of steps) {
-      if (h.status === "dropped") {
-        note(h, `${t.id} 接手了 ${old.id}，这一步还要做`);
-        Object.assign(h, { status: "todo", orphaned: undefined, doneAt: undefined });
-      }
-      Object.assign(h, { askedBy: t.id, updatedAt: Date.now() });
-      if (!t.blockedBy?.includes(h.id)) t.blockedBy = [...(t.blockedBy ?? []), h.id];
-      old.blockedBy = (old.blockedBy ?? []).filter((x) => x !== h.id);
+    const moving = (old.asks ?? []).filter((a) => a.status === "open");
+    if (moving.length) {
+      old.asks = (old.asks ?? []).filter((a) => !moving.includes(a));
+      t.asks = [...(t.asks ?? []), ...moving.map((a) => ({ ...a, updatedAt: Date.now() }))];
+      // The old task's waits on them would end as "不在了": they aren't over, they moved
+      for (const w of old.waits ?? []) if (w.item && moving.some((a) => a.id === w.item) && !w.end) w.end = { how: `交给了 ${t.id}`, at: Date.now() };
     }
     // The card's first line: whose work this goes on with (the feed used to start at its first wait)
-    activity(s, t, { kind: "join", by: t.id, text: `接手了 ${old.id}「${old.title}」${steps.length ? `，连同要你做的：${steps.map((h) => `${h.id} ${h.title}`).join("；")}` : ""}` });
+    activity(s, t, { kind: "join", by: t.id, text: `接手了 ${old.id}「${old.title}」${moving.length ? `，连同要你做的：${moving.map((h) => h.title).join("；")}` : ""}` });
   });
 }
 
@@ -1141,7 +1127,7 @@ export function restore(input: { id: string }, ctx: Ctx) {
     for (const x of t.team ? [t] : members(s, t)) {
       if (x.status !== "dropped" || (x !== t && !x.droppedFrom)) continue;
       note(x, "恢复了（撤销放弃）");
-      Object.assign(x, { status: x.droppedFrom ?? (x.owner === "human" ? "todo" : x.session ? "running" : "todo"), droppedFrom: undefined, doneAt: undefined, updatedAt: Date.now() });
+      Object.assign(x, { status: x.droppedFrom ?? (x.session ? "running" : "todo"), droppedFrom: undefined, doneAt: undefined, updatedAt: Date.now() });
     }
     return t;
   });
@@ -1330,80 +1316,91 @@ async function closeRouters(ctx: Ctx, live: Record<string, any>) {
   for (const id of done) await ctx.sessions.close(id).catch(() => {});
 }
 
-/** Where one task stands, cheaply (the chat's task-step card asks for it): status, and what the user handed back. */
+/**
+ * Where an ask stands, cheaply (the chat's task-step card asks for it): status, and what the user handed back. { id:
+ * a5, a5#2 for one question of several, or a human task's old id (t206) for a card drawn before 2026-11-19 }.
+ */
 export function status(input: { id: string }, ctx: Ctx) {
-  const { store } = load(ctx);
-  // "t5#2": one question of a task asking several (the chat has a card per question)
-  const [tid, qid] = splitRef(String(input?.id ?? ""));
-  const t = store.tasks.find((x) => x.id === tid);
-  if (!t) return { status: "missing" };
+  let found;
+  try {
+    found = findAsk(load(ctx).store, String(input?.id ?? ""));
+  } catch {
+    return { status: "missing" };
+  }
+  const { a: t, q: qid } = found;
+  // The card says "todo" while it waits (cards.tsx)
+  const st = t.status === "open" ? "todo" : t.status;
   if (qid) {
     const q = t.questions?.find((x) => x.id === qid);
     if (!q) return { status: "missing" };
     const status = q.dropped || t.status === "dropped" ? "dropped" : q.answer ? "done" : "todo";
     return { status, title: q.title, handedBack: q.answer, kind: q.kind, reason: q.dropped };
   }
-  const back = t.handBack?.kind === "secret" ? undefined : t.handedBack;
-  return { status: t.status, title: t.title, handedBack: back, kind: t.handBack?.kind, reason: t.dropReason };
+  const back = t.handBack.kind === "secret" ? undefined : t.handedBack;
+  return { status: st, title: t.title, handedBack: back, kind: t.handBack.kind, reason: t.dropReason };
 }
 
 /**
- * Answers one question of a task asking several: { id, q, value }. The answers wait on the task until every question
- * has one; then the task is done and the worker hears them all in one message. Answering one again changes it: before
- * the rest are answered nobody has acted on it yet; after, the worker is told what changed.
+ * Answers one question of an ask with several: { id, q, value }. The answers wait on the ask until every question has
+ * one; then it's done and the worker hears them all in one message. Answering one again changes it: before the rest
+ * are answered nobody has acted on it yet; after, the worker is told what changed.
  */
 export async function answerQuestion(input: { id: string; q: string; value: string }, ctx: Ctx) {
   const value = input?.value?.trim();
   if (!value) throw new Error("选一个，或者写下你的答案");
   let changed: { q: Question; old: string } | null = null;
   let finished = false;
-  const h = update(ctx, (s) => {
-    const h = find(s, input.id);
+  const { t, h } = update(ctx, (s) => {
+    const { t, a: h } = findAsk(s, input.id);
     const q = h.questions?.find((x) => x.id === String(input.q));
     if (!q) throw new Error(`${h.id} 没有第 ${input.q} 个问题`);
-    if (h.status === "dropped" || q.dropped) throw new Error(`${h.id} 的这个问题已经不需要了`);
+    if (h.status === "dropped" || q.dropped) throw new Error(`这个问题已经不需要了`);
+    changed = null;
+    finished = false;
     const old = q.answer;
-    if (old === value) return h;
+    if (old === value) return { t, h };
     q.answer = value;
     if (h.status === "done" && old) {
       changed = { q, old };
-      note(h, `改了「${q.title}」的答案：${old} → ${value}`);
+      note(t, `改了「${q.title}」的答案：${old} → ${value}`);
     } else if (asked(h).every((x) => x.answer)) {
       finished = true;
-      finish(s, h);
+      finish(s, t, h);
     }
     if (h.status === "done") h.handedBack = summary(h);
     h.updatedAt = Date.now();
-    return h;
+    return { t, h };
   });
-  const { store } = load(ctx);
-  const workers = store.tasks.filter((t) => t.owner === "agent" && t.session && t.status !== "dropped" && t.status !== "done" && (t.id === h.askedBy || t.blockedBy?.includes(h.id)));
   if (finished) {
-    await deliver(ctx, h);
-  } else if (changed) {
+    await deliver(ctx, t, h);
+  } else if (changed && worker(t)) {
     const c = changed as { q: Question; old: string };
-    for (const t of workers) await tell(ctx, t, `用户改了「${c.q.title}」（${h.id}）的答案：原来是「${c.old}」，现在是「${value}」。\n按新的来；已经照旧答案做了的，改过来。`).catch(() => {});
+    await tell(ctx, t, `用户改了「${c.q.title}」（${h.id}）的答案：原来是「${c.old}」，现在是「${value}」。\n按新的来；已经照旧答案做了的，改过来。`).catch(() => {});
   }
-  return { task: h, done: h.status === "done" };
+  return { ask: h, task: t.id, done: h.status === "done" };
+}
+
+/** Its worker, still there to be told (a conversation, the task not dropped or done). */
+function worker(t: Task) {
+  return !!t.session && t.status !== "dropped" && t.status !== "done";
 }
 
 /** All of h's questions are answered or set aside: it's done, and the feed says what the user answered. */
-function finish(s: Store, h: Task) {
+function finish(s: Store, t: Task, h: Ask) {
   Object.assign(h, { status: "done", handedBack: summary(h), doneAt: Date.now() });
   for (const q of asked(h)) q.sent = true;
-  activity(s, h, { kind: "user", by: h.askedBy, of: h.id, text: `你答了 ${asked(h).length} 个问题：${summary(h)}` });
+  activity(s, t, { kind: "user", by: t.id, of: h.id, text: `你答了 ${asked(h).length} 个问题：${summary(h)}` });
 }
 
-/** The answers of a finished item go to its worker (and anyone it held up), with the questions the user set aside. */
-async function deliver(ctx: Ctx, h: Task) {
-  const { store } = load(ctx);
-  const workers = store.tasks.filter((t) => t.owner === "agent" && t.session && t.status !== "dropped" && t.status !== "done" && (t.id === h.askedBy || t.blockedBy?.includes(h.id)));
+/** The answers of a finished ask go to its worker, with the questions the user set aside. */
+async function deliver(ctx: Ctx, t: Task, h: Ask) {
+  if (!worker(t)) return;
   const skipped = (h.questions ?? []).filter((q) => q.skipped);
   const text =
     `你问的问题（${h.id}），用户${asked(h).length ? "答了" : "都没答"}：\n${asked(h).map((q, i) => `${i + 1}. ${q.title}\n   → ${q.answer}`).join("\n")}` +
     (skipped.length ? `\n用户说不用答了（已经过时，别再按它们做）：${skipped.map((q) => `「${q.title}」`).join("、")}` : "") +
     `\n照这些接着做。`;
-  for (const t of workers.filter((t) => blockersDone(store, t) || t.id === h.askedBy)) await wake(ctx, t.id, { how: `你答了 ${h.id}`, text, fold: false }).catch(() => {});
+  await wake(ctx, t.id, { how: `你答了「${h.title}」`, text, fold: false }).catch(() => {});
 }
 
 /**
@@ -1412,28 +1409,29 @@ async function deliver(ctx: Ctx, h: Task) {
  */
 export async function skipQuestion(input: { id: string; q: string }, ctx: Ctx) {
   let finished = false;
-  update(ctx, (s) => {
-    const h = find(s, input.id);
+  const { t, h } = update(ctx, (s) => {
+    const { t, a: h } = findAsk(s, input.id);
     const q = h.questions?.find((x) => x.id === String(input.q));
     if (!q) throw new Error(`${h.id} 没有第 ${input.q} 个问题`);
-    if (h.status !== "todo" || q.dropped) throw new Error(`${h.id} 的这个问题已经不在等你了`);
+    if (h.status !== "open" || q.dropped) throw new Error(`这个问题已经不在等你了`);
     if (q.answer != null) throw new Error(`这个问题你已经答了：${q.answer}`);
+    finished = false;
     Object.assign(q, { dropped: "你说不用答了", skipped: true });
-    note(h, `用户说「${q.title}」不用答了`);
-    activity(s, h, { kind: "user", by: h.askedBy, of: h.id, text: `你说「${q.title}」不用答了` });
+    note(t, `用户说「${q.title}」不用答了`);
+    activity(s, t, { kind: "user", by: t.id, of: h.id, text: `你说「${q.title}」不用答了` });
     const left = asked(h);
     if (!left.length) {
-      // Nothing left to ask: the item goes, and its worker hears that none of it is needed
+      // Nothing left to ask: the ask goes, and its worker hears that none of it is needed
       Object.assign(h, { status: "dropped", doneAt: Date.now() });
-      for (const t of s.tasks) if (t.blockedBy?.includes(h.id)) t.blockedBy = t.blockedBy.filter((x) => x !== h.id);
       finished = true;
     } else if (left.every((x) => x.answer != null)) {
       finished = true;
-      finish(s, h);
+      finish(s, t, h);
     }
     h.updatedAt = Date.now();
+    return { t, h };
   });
-  if (finished) await deliver(ctx, find(load(ctx).store, input.id));
+  if (finished) await deliver(ctx, t, h);
   return { ok: true };
 }
 
@@ -1444,21 +1442,20 @@ export async function skipQuestion(input: { id: string; q: string }, ctx: Ctx) {
 export async function sendAnswered(input: { id: string }, ctx: Ctx) {
   let fresh: Question[] = [];
   let rest: Question[] = [];
-  const h = update(ctx, (s) => {
-    const h = find(s, input.id);
-    if (h.status !== "todo" || !h.questions) throw new Error(`${h.id} 已经不在等你了`);
+  const { t, h } = update(ctx, (s) => {
+    const { t, a: h } = findAsk(s, input.id);
+    if (h.status !== "open" || !h.questions) throw new Error(`「${h.title}」已经不在等你了`);
     fresh = asked(h).filter((q) => q.answer != null && !q.sent);
     rest = asked(h).filter((q) => q.answer == null);
     if (!fresh.length) throw new Error("还没有答了没发的");
     for (const q of fresh) q.sent = true;
-    activity(s, h, { kind: "user", by: h.askedBy, of: h.id, text: `你先发了答案：${fresh.map((q) => `${q.title}：${q.answer}`).join("；")}` });
+    activity(s, t, { kind: "user", by: t.id, of: h.id, text: `你先发了答案：${fresh.map((q) => `${q.title}：${q.answer}`).join("；")}` });
     h.updatedAt = Date.now();
-    return h;
+    return { t, h };
   });
-  const w = h.askedBy;
-  if (w)
-    await wake(ctx, w, {
-      how: `你先发了 ${h.id} 已答的`,
+  if (worker(t))
+    await wake(ctx, t.id, {
+      how: `你先发了已答的`,
       fold: false,
       text:
         `用户先把答了的发给你（${h.id}）：\n${fresh.map((q) => `- ${q.title}\n  → ${q.answer}`).join("\n")}\n` +
@@ -1468,11 +1465,11 @@ export async function sendAnswered(input: { id: string }, ctx: Ctx) {
 }
 
 /** The questions still asked (not taken back). */
-function asked(h: Task) {
+function asked(h: Ask) {
   return (h.questions ?? []).filter((q) => !q.dropped);
 }
 
-function summary(h: Task) {
+function summary(h: Ask) {
   return asked(h)
     .map((q) => `${q.title}：${q.answer ?? "（没答）"}`)
     .join("；");
@@ -1488,24 +1485,21 @@ export async function reanswer(input: { id: string; value: string }, ctx: Ctx) {
   const value = input?.value?.trim();
   if (!value) throw new Error("写下新的答案");
   let old = "";
-  const h = update(ctx, (s) => {
-    const h = find(s, input.id);
-    if (h.owner !== "human" || h.status !== "done") throw new Error(`${h.id} 还没答，直接答就行`);
-    if (h.handBack?.kind !== "choice" && h.handBack?.kind !== "value") throw new Error(`${h.id} 没有可以改的答案`);
+  const { t, h } = update(ctx, (s) => {
+    const { t, a: h } = findAsk(s, input.id);
+    if (h.status !== "done") throw new Error(`「${h.title}」还没答，直接答就行`);
+    if (h.handBack.kind !== "choice" && h.handBack.kind !== "value") throw new Error(`「${h.title}」没有可以改的答案`);
     old = h.handedBack ?? "";
-    if (old === value) return h;
-    note(h, `改了答案：${old} → ${value}`);
+    if (old === value) return { t, h };
+    note(t, `改了「${h.title}」的答案：${old} → ${value}`);
     Object.assign(h, { handedBack: value, updatedAt: Date.now() });
-    return h;
+    return { t, h };
   });
-  if (old === value) return { task: h, changed: false };
-  const { store } = load(ctx);
-  // Who acted on the old answer: the worker that asked, and any task it was holding up
-  const told = store.tasks.filter((t) => t.owner === "agent" && t.session && t.status !== "dropped" && (t.id === h.askedBy || t.blockedBy?.includes(h.id)));
-  const what = h.handBack?.kind === "choice" ? "决定" : h.handBack?.label || "交回的值";
-  for (const t of told)
-    await tell(ctx, t, `用户改了「${h.title}」（${h.id}）的${what}：原来是「${old}」，现在是「${value}」。\n按新的来；已经照旧答案做了的，改过来（改不了的用 ask_human 说明）。`).catch(() => {});
-  return { task: h, changed: true, told: told.map((t) => t.id) };
+  if (old === value) return { ask: h, changed: false };
+  const what = h.handBack.kind === "choice" ? "决定" : h.handBack.label || "交回的值";
+  const told = t.session && t.status !== "dropped";
+  if (told) await tell(ctx, t, `用户改了「${h.title}」（${h.id}）的${what}：原来是「${old}」，现在是「${value}」。\n按新的来；已经照旧答案做了的，改过来（改不了的用 ask_human 说明）。`).catch(() => {});
+  return { ask: h, changed: true, told: told ? [t.id] : [] };
 }
 
 /**

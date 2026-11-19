@@ -16,9 +16,9 @@ export type Link = { label: string; url: string; at?: number };
 export type HandBack = { kind: "none" | "value" | "secret" | "choice" | "questions"; name?: string; label?: string; options?: string[]; multi?: boolean };
 
 /**
- * One of several things a worker needs the user to decide or give it (a human task with handBack "questions"): a
- * choice (options) or a value. They're one board item because the worker can't go on until all are answered; it
- * hears every answer at once (tasks.answerQuestion).
+ * One of several things a worker needs the user to decide or give it (an ask with handBack "questions"): a choice
+ * (options) or a value. They're one ask because the worker can't go on until all are answered; it hears every answer
+ * at once (tasks.answerQuestion).
  */
 export type Question = { id: string; title: string; kind: "choice" | "value"; options?: string[]; multi?: boolean; label?: string; steps?: string; answer?: string; dropped?: string; at?: number; skipped?: boolean; sent?: boolean };
 
@@ -27,7 +27,7 @@ export type Question = { id: string; title: string; kind: "choice" | "value"; op
  * and hand-offs only — a member finishing its part, telling a teammate, pulling one in, the user answering.
  * by: the member it's about (a task id); kind: what sort of line, for its icon.
  */
-export type Activity = { at: number; by?: string; kind: "progress" | "tell" | "join" | "done" | "review" | "user" | "stuck" | "wait" | "got" | "message"; text: string; to?: string; files?: { path: string; name?: string }[]; /** The step / question item (human task) whose answer this line records: drawn by that item's record instead (DESIGN.md「一个架构」) */ of?: string };
+export type Activity = { at: number; by?: string; kind: "progress" | "tell" | "join" | "done" | "review" | "user" | "stuck" | "wait" | "got" | "message"; text: string; to?: string; files?: { path: string; name?: string }[]; /** The ask (or one of its questions) whose answer this line records: drawn by that item's record instead (DESIGN.md「一个架构」) */ of?: string };
 
 /** One message a worker wrote for a chat, waiting for the user (local/outbox.ts). */
 export type Outgoing = {
@@ -46,6 +46,42 @@ export type Outgoing = {
   edited?: boolean;
 };
 
+/**
+ * Something a task's worker needs from the user (board.ts ask_human): a step only they can do (sign in, hand back a
+ * key), a decision, a value, or several questions at once. Kept on the task that asked, never a task of its own: a
+ * task is work for an agent, and there is nothing else on the board (2026-11-19). Until then these were "human tasks"
+ * (owner "human", askedBy): a board item with its own tN and no worker, so a message the secretary attached to one
+ * was recorded on it and read by nobody (c379 → t206, a colleague's "我点了" for the approval t203 waited on).
+ */
+export type Ask = {
+  /** "a12": unique on the board (the task counter), what the tools, the chat cards and tasks.complete name it by. */
+  id: string;
+  /** The human task it was before 2026-11-19 (t206): chat cards drawn then still find it (findAsk). */
+  was?: string;
+  title: string;
+  /** open → done (did it / answered) | dropped (taken back, set aside, no longer needed). */
+  status: "open" | "done" | "dropped";
+  /** How to do it, what to hand back, how the worker will check it, roughly how long it takes. */
+  steps?: string;
+  handBack: HandBack;
+  /** handBack "questions": what it asks, each answered on its own (in the chat or on the board). */
+  questions?: Question[];
+  verify?: string;
+  minutes?: number;
+  /** A step holding the worker up (a warning mark); a decision can wait. */
+  urgent?: boolean;
+  /** ms: when what it asks for stops working (a sign-in link valid 30 minutes). Past it, the board offers a redo. */
+  expiresAt?: number;
+  handedBack?: string;
+  /** Why its worker took it back (cancel_human): the card in the worker's chat says so. */
+  dropReason?: string;
+  /** When the user asked its worker to bring it up to date (tasks.refreshAsk): the drawer says so until it changes. */
+  refreshing?: number;
+  createdAt: number;
+  updatedAt: number;
+  doneAt?: number;
+};
+
 export type Task = {
   id: string;
   title: string;
@@ -55,10 +91,11 @@ export type Task = {
    * that name for the task. Cleared once the task is renamed by anyone else.
    */
   autoTitle?: boolean;
-  owner: "agent" | "human";
+  /** @deprecated "human" was a task for the user (2026-11-19: now asks on the task that asked; upgrade). */
+  owner?: "agent" | "human";
   /**
    * todo → running → done (nothing for the user to judge) | review (the user judges the result); dropped. Only the
-   * worker or the user says done: no rule does (a merged MR is news for the worker, not the end). Human tasks: todo → done.
+   * worker or the user says done: no rule does (a merged MR is news for the worker, not the end).
    * "delivering" (an MR the board followed to merge) is gone: read as running, waiting on the MR (upgrade).
    */
   status: "todo" | "running" | "review" | "done" | "dropped" | "delivering";
@@ -80,8 +117,6 @@ export type Task = {
    * nudged: reminded once already. Cleared by its message.
    */
   asked?: { at: number; nudged?: boolean; /** Asked through the secretary (its words): the answer goes back to its chat. */ relay?: string; /** What it sent with message_user meanwhile. */ said?: string };
-  /** Dropped by the board because nothing it unblocked was still going (tasks.ts dropOrphans), not by anyone: a handover can take it back. */
-  orphaned?: number;
   /**
    * The conversation that dispatched it: the Superagent's main session (_main.ts; a part split off shares its
    * parent's), or, for older tasks, a one-off router since closed (routerClosed). Kept, so every task traces back to
@@ -154,7 +189,7 @@ export type Task = {
   /** The worker session now and every one it had (re-runs, hand-offs). */
   session?: string;
   sessions?: string[];
-  /** Tasks that must be done first (a human task blocking an agent task, or the other way round). */
+  /** Tasks that must be done first (a split's later part waiting on the one it needs). */
   blockedBy?: string[];
   /**
    * Added with start while what it's blocked by was still going: the board starts it once those are done (tasks.ts
@@ -179,23 +214,8 @@ export type Task = {
   /** The latest result in a line or a paragraph, and where to look (MR, doc). */
   summary?: string;
   links?: Link[];
-  /** Human task: how to do it, what to hand back, how the agent will check it, roughly how long it takes. */
-  steps?: string;
-  handBack?: HandBack;
-  /** handBack "questions": what it asks, each answered on its own (in the chat or on the board). */
-  questions?: Question[];
-  /** When the user asked its worker to bring it up to date (tasks.refreshAsk): the drawer says so until it changes. */
-  refreshing?: number;
-  /** Why its worker took it back (cancel_human): the card in the worker's chat says so once it ended. */
-  dropReason?: string;
-  handedBack?: string;
-  verify?: string;
-  minutes?: number;
-  urgent?: boolean;
-  /** ms: when what it asks for stops working (a sign-in link valid 30 minutes). Past it, the board offers a redo. */
-  expiresAt?: number;
-  /** Human task: the agent task that asked for it (its worker made it), so a newer ask from that worker replaces it. */
-  askedBy?: string;
+  /** What its worker asks of the user (ask_human), open and answered: see Ask. */
+  asks?: Ask[];
   /** Its worker reports through the panel tools (board.ts): no ```gerdr-task``` block to expect at the end of a turn. */
   viaTools?: boolean;
   /** When its worker last reported (task_update / ask_human): a stop with nothing reported since is noticed (tasks.list). */
@@ -230,6 +250,7 @@ export function load(ctx: Ctx) {
 
 /** Tasks written before waits: their question and wait_for become waits (kept so on the next write). */
 function upgrade(s: Store): Store {
+  fromHumanTasks(s);
   for (const t of s.tasks) {
     if (t.question) {
       if (t.status !== "done" && t.status !== "dropped") askUser(t, t.question);
@@ -263,8 +284,79 @@ function upgrade(s: Store): Store {
       t.threads = t.threads.filter((x) => isOrigin(x) || !waited(x));
     }
   }
-  s.v = 2;
+  s.v = 3;
   return s;
+}
+
+/**
+ * Human tasks (before 2026-11-19, see Ask) become what they were for: one a worker asked for, an ask on that worker's
+ * task (same number: t206 → a206, `was` keeping the old id for the chat cards); one of the user's own (added by hand,
+ * or someone's request they took on themselves), a task in 待办 like any other — sent out to an agent when they want.
+ * Runs on every load, so an archived requirement brought back is upgraded too.
+ */
+function fromHumanTasks(s: Store) {
+  const old = s.tasks.filter((t) => t.owner === "human") as (Task & Record<string, any>)[];
+  for (const h of old) {
+    const by = s.tasks.find((x) => x.owner !== "human" && (x.id === h.askedBy || x.blockedBy?.includes(h.id)));
+    if (!by) {
+      // The user's own: a task to do (in 待办 until they send it out), its steps the prompt
+      h.prompt = h.prompt ?? h.steps ?? h.title;
+      for (const k of ["owner", "askedBy", "steps", "handBack", "questions", "verify", "minutes", "urgent", "expiresAt", "handedBack", "dropReason", "refreshing", "orphaned"]) delete h[k];
+      continue;
+    }
+    const a: Ask = {
+      id: `a${h.id.replace(/^t/, "")}`,
+      was: h.id,
+      title: h.title,
+      status: h.status === "done" ? "done" : h.status === "dropped" ? "dropped" : "open",
+      steps: h.steps,
+      handBack: h.handBack ?? { kind: "none" },
+      questions: h.questions,
+      verify: h.verify,
+      minutes: h.minutes,
+      urgent: h.urgent,
+      expiresAt: h.expiresAt,
+      handedBack: h.handedBack,
+      dropReason: h.dropReason,
+      refreshing: h.refreshing,
+      createdAt: h.createdAt,
+      updatedAt: h.updatedAt,
+      doneAt: h.doneAt,
+    };
+    by.asks = [...(by.asks ?? []), a];
+    s.tasks = s.tasks.filter((x) => x !== h);
+    for (const x of s.tasks) {
+      if (x.blockedBy?.includes(h.id)) x.blockedBy = x.blockedBy.filter((b) => b !== h.id);
+      for (const w of x.waits ?? []) if (w.item === h.id) w.item = a.id;
+      for (const l of x.activity ?? []) if (l.of === h.id) l.of = a.id;
+    }
+    // Its own feed lines (an ask has none) go to the task that asked
+    if ((h as Task).activity?.length) by.activity = [...(by.activity ?? []), ...(h as Task).activity!].sort((x, y) => x.at - y.at);
+  }
+  for (const t of s.tasks) if (t.owner) delete t.owner;
+}
+
+/**
+ * An ask by its ref: "a12" (or a human task's old id, "t206", for chat cards drawn before 2026-11-19), with a question
+ * of it after "#" (a12#2). The task that asked comes with it.
+ */
+export function findAsk(s: Store, ref: string): { t: Task; a: Ask; q?: string } {
+  const [id, q] = splitRef(ref);
+  for (const t of s.tasks) for (const a of t.asks ?? []) if (a.id === id || a.was === id) return { t, a, q };
+  throw new Error(`没有 ${ref}（要用户做 / 答的一项）`);
+}
+
+/** A new ask on t, open. */
+export function newAsk(s: Store, t: Task, p: Omit<Ask, "id" | "status" | "createdAt" | "updatedAt">): Ask {
+  const now = Date.now();
+  const a: Ask = { ...p, id: `a${s.next++}`, status: "open", createdAt: now, updatedAt: now };
+  t.asks = [...(t.asks ?? []), a];
+  return a;
+}
+
+/** What t still asks the user. */
+export function openAsks(t: Task): Ask[] {
+  return (t.asks ?? []).filter((a) => a.status === "open");
 }
 
 /** Read, change, write back; retried when another run wrote in between (the etag no longer matches). */
@@ -292,26 +384,15 @@ export function update<T>(ctx: Ctx, fn: (s: Store) => T): T {
 
 /**
  * The requirement a task belongs to, if it's part of one with several members: the member's team; the task itself
- * when others work under it; for a human step, its asker's. Undefined for a task that works alone.
+ * when others work under it. Undefined for a task that works alone.
  */
 export function teamOf(s: Store, t: Task): Task | undefined {
-  if (t.owner === "human") {
-    const by = t.askedBy ? s.tasks.find((x) => x.id === t.askedBy) : s.tasks.find((x) => x.owner === "agent" && x.blockedBy?.includes(t.id));
-    return by && by.id !== t.id ? teamOf(s, by) : undefined;
-  }
   if (t.team) return s.tasks.find((x) => x.id === t.team);
   return s.tasks.some((x) => x.team === t.id) ? t : undefined;
 }
 
-/**
- * The card a task shows on (every agent task is a requirement, alone or with members): a member's requirement, an
- * agent task itself, a human step's asker's. Undefined for a human step nobody asked for (the user's own).
- */
+/** The card a task shows on (every task is a requirement, alone or with members): a member's requirement, else itself. */
 export function reqOf(s: Store, t: Task): Task | undefined {
-  if (t.owner === "human") {
-    const by = t.askedBy ? s.tasks.find((x) => x.id === t.askedBy) : s.tasks.find((x) => x.owner === "agent" && x.blockedBy?.includes(t.id));
-    return by && by.id !== t.id ? reqOf(s, by) : undefined;
-  }
   return (t.team && s.tasks.find((x) => x.id === t.team)) || t;
 }
 
@@ -395,7 +476,7 @@ export function blockersDone(s: Store, t: Task) {
 
 export function newTask(s: Store, p: Partial<Task> & { title: string }): Task {
   const now = Date.now();
-  const t: Task = { status: "todo", owner: "agent", ...p, id: `t${s.next++}`, createdAt: now, updatedAt: now } as Task;
+  const t: Task = { status: "todo", ...p, id: `t${s.next++}`, createdAt: now, updatedAt: now } as Task;
   s.tasks.push(t);
   return t;
 }
