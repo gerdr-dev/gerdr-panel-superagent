@@ -86,10 +86,27 @@ function taskMenu(t: Task): ChatAction[] {
   return [COPY, ...moveActions(t), ...(t.status === "done" ? [] : [DROP])];
 }
 
+/**
+ * Copies text. navigator.clipboard is missing where the page isn't a secure context (Gerdr over plain http on the LAN,
+ * some frames): there a hidden textarea and execCommand("copy") still work, inside the click that asked for it.
+ */
+async function copyText(text: string) {
+  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
+  const box = document.createElement("textarea");
+  box.value = text;
+  box.setAttribute("readonly", "");
+  box.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+  document.body.appendChild(box);
+  box.select();
+  const ok = document.execCommand("copy");
+  box.remove();
+  if (!ok) throw new Error("copy refused");
+}
+
 /** Does a row of taskMenu (or the chat's 通过); true when it went through. */
 function runTaskAction(act: Act, t: Task, id: string): Promise<boolean> {
   if (id === "copy")
-    return navigator.clipboard.writeText(t.id).then(
+    return copyText(t.id).then(
       () => (toastOk?.(`已复制 ${t.id}`), true),
       () => (toastError?.("复制失败"), false),
     );
