@@ -63,5 +63,6 @@ export function browse(input: { path?: string }, ctx: Ctx) {
 
 /** The agents and roles set up in Gerdr. */
 export async function agents(input: unknown, ctx: Ctx) {
-  return (await allAgents(ctx)).map((a) => ({ id: a.id, name: a.name }));
+  // With what each takes as model / effort, for 设置's menus
+  return (await allAgents(ctx)).map((a) => ({ id: a.id, name: a.name, base: a.base, models: a.models, efforts: a.efforts }));
 }

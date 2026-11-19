@@ -57,15 +57,23 @@ export function PathPick({ value, onChange, placeholder }: { value: string; onCh
   );
 }
 
-let agentList: Promise<{ id: string; name: string }[]> | null = null;
+export type AgentChoice = { id: string; name: string; description?: string };
+export type AgentOption = { id: string; name: string; base?: string; models?: AgentChoice[]; efforts?: AgentChoice[] };
 
-/** An agent / role set up in Gerdr; "" = Gerdr's default agent. */
-export function AgentPick({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const [list, setList] = useState<{ id: string; name: string }[]>([]);
+let agentList: Promise<AgentOption[]> | null = null;
+
+/** The agents Gerdr can start, with the models / efforts each takes (settings.agents), asked once per page. */
+export function useAgents() {
+  const [list, setList] = useState<AgentOption[]>([]);
   useEffect(() => {
     agentList ??= run("settings.agents");
     agentList.then(setList, () => (agentList = null));
   }, []);
+  return list;
+}
+
+export function AgentPick({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const list = useAgents();
   return (
     <select className={input} value={value} onChange={(e) => onChange(e.target.value)}>
       <option value="">Gerdr 的默认 agent</option>
@@ -73,6 +81,24 @@ export function AgentPick({ value, onChange }: { value: string; onChange: (v: st
       {list.map((a) => (
         <option key={a.id} value={a.id}>
           {a.name} ({a.id})
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/**
+ * One of a list, or "" for the default. A value that isn't in the list (typed before this was a menu, or the agent's
+ * list changed) stays as an option of its own rather than being dropped.
+ */
+export function ChoicePick({ value, options, onChange, empty = "默认" }: { value: string; options: AgentChoice[]; onChange: (v: string) => void; empty?: string }) {
+  return (
+    <select className={input} value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">{empty}</option>
+      {value && !options.some((o) => o.id === value) && <option value={value}>{value}</option>}
+      {options.map((o) => (
+        <option key={o.id} value={o.id} title={o.description}>
+          {o.name === o.id ? o.id : `${o.name} (${o.id})`}
         </option>
       ))}
     </select>

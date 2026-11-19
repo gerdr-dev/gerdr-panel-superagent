@@ -2,7 +2,7 @@ import { Plus, X } from "lucide-react";
 import clsx from "clsx";
 import { useEffect, useState } from "react";
 import { Button } from "../components/Button";
-import { AgentPick, input, PathPick } from "../components/pickers";
+import { AgentPick, ChoicePick, input, PathPick, useAgents, type AgentChoice } from "../components/pickers";
 import { run } from "../lib/gerdr";
 import { ACK_TEXT, normalize, type Repo, type Settings, type Who } from "../lib/settings";
 import { SaveBar } from "../components/SaveBar";
@@ -211,28 +211,40 @@ function Choice<T extends string>({ value, options, onChange }: { value: T; opti
   );
 }
 
+// Permission modes each engine takes (Gerdr doesn't list them for agents): claude's, codex's
+const MODES: Record<string, AgentChoice[]> = {
+  claude: ["default", "acceptEdits", "plan", "auto"].map((id) => ({ id, name: id })),
+  codex: ["ask", "auto", "read-only"].map((id) => ({ id, name: id })),
+};
+
 function WhoFields({ who, onChange }: { who: Who; onChange: (w: Who) => void }) {
+  const agents = useAgents();
+  // The agent the menus are for: the one picked, else Gerdr's default — not known here, so claude when it's there
+  const a = agents.find((x) => x.id === who.agent) ?? (who.agent ? undefined : (agents.find((x) => x.id === "claude") ?? agents[0]));
+  const engine = a?.base ?? a?.id ?? "";
+  const modes = MODES[engine] ?? [...MODES.claude, ...MODES.codex.filter((m) => m.id !== "auto")];
   return (
     <>
       <Field label="agent">
-        <AgentPick value={who.agent} onChange={(agent) => onChange({ ...who, agent })} />
+        {/* A different agent: its own models and efforts, so the old ones (claude's names mean nothing to codex) go */}
+        <AgentPick value={who.agent} onChange={(agent) => onChange({ ...who, agent, ...(agent !== who.agent ? { model: "", effort: "", mode: "" } : {}) })} />
       </Field>
-      <Field label="模型" hint="这个 agent 模型菜单里有的值（claude：sonnet、haiku、fable 这类）。空着用 Gerdr 设置里给它定的默认；写错了，派活时会报错并列出可选的。">
-        <input className={input} value={who.model} placeholder="默认" onChange={(e) => onChange({ ...who, model: e.target.value })} />
+      <Field label="模型" hint={a?.models?.length ? "空着用 Gerdr 设置里给这个 agent 定的默认。" : "这个 agent 在这台电脑上还没跑过，Gerdr 还不知道它有哪些模型：先手写（claude：sonnet、haiku、fable 这类），跑过一次后这里就能选。"}>
+        {a?.models?.length ? (
+          <ChoicePick value={who.model} options={a.models} onChange={(model) => onChange({ ...who, model })} />
+        ) : (
+          <input className={input} value={who.model} placeholder="默认" onChange={(e) => onChange({ ...who, model: e.target.value })} />
+        )}
       </Field>
-      <Field label="思考强度" hint="low / medium / high……看 agent 和模型支持什么。空着用默认。">
-        <input className={input} value={who.effort} placeholder="默认" onChange={(e) => onChange({ ...who, effort: e.target.value })} />
+      <Field label="思考强度" hint="空着用默认。">
+        {a?.efforts?.length ? (
+          <ChoicePick value={who.effort} options={a.efforts} onChange={(effort) => onChange({ ...who, effort })} />
+        ) : (
+          <input className={input} value={who.effort} placeholder="默认" onChange={(e) => onChange({ ...who, effort: e.target.value })} />
+        )}
       </Field>
-      <Field
-        label="权限模式"
-        hint="它的会话用什么权限模式开：claude 是 default / acceptEdits / plan / auto，codex 是 ask / auto / read-only。空着用 Gerdr 设置里的默认（那个默认是全部自动批准时不算）。会话要人批准时会停下来等你：不想它停，就给 auto。"
-      >
-        <input className={input} list="gerdr-modes" value={who.mode} placeholder="默认" onChange={(e) => onChange({ ...who, mode: e.target.value })} />
-        <datalist id="gerdr-modes">
-          {["default", "acceptEdits", "plan", "auto", "ask", "read-only"].map((m) => (
-            <option key={m} value={m} />
-          ))}
-        </datalist>
+      <Field label="权限模式" hint="它的会话用什么权限模式开。空着用 Gerdr 设置里的默认（那个默认是全部自动批准时不算）。会话要人批准时会停下来等你：不想它停，就选 auto。">
+        <ChoicePick value={who.mode} options={modes} onChange={(mode) => onChange({ ...who, mode })} />
       </Field>
     </>
   );
