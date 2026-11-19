@@ -167,7 +167,7 @@ function IgnoreButton({ id, board, onDone }: { id: string; board: string; onDone
         setBusy(true);
         run("tasks.ignore", { id }, { project: board }).then(onDone, () => setBusy(false));
       }}
-      className="absolute top-2.5 right-2.5 flex size-6 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground disabled:opacity-40"
+      className="absolute top-5 right-2.5 flex size-6 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground disabled:opacity-40"
     >
       <X className="size-3.5" />
     </button>
