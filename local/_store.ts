@@ -75,6 +75,12 @@ export type Ask = {
   handedBack?: string;
   /** Why its worker took it back (cancel_human): the card in the worker's chat says so. */
   dropReason?: string;
+  /**
+   * The user ignored it (the card's ✕, tasks.ignore): usually moot and its worker never took it back. Not a wake of its
+   * own; `told` once its worker heard, at the start of its next turn (ignoredLead).
+   */
+  ignored?: boolean;
+  told?: boolean;
   /** When the user asked its worker to bring it up to date (tasks.refreshAsk): the drawer says so until it changes. */
   refreshing?: number;
   createdAt: number;
@@ -484,4 +490,15 @@ export function newTask(s: Store, p: Partial<Task> & { title: string }): Task {
 /** What redraft changes on a card, to tell afterwards whether the secretary changed anything. */
 export function draftOf(t: Task) {
   return JSON.stringify([t.title, t.prompt, t.repo, t.agent, t.model, t.status]);
+}
+
+/**
+ * What the user ignored of t's asks (tasks.ignore) and its worker hasn't heard yet, as the line its next message starts
+ * with; marks them told. Call inside an update. "" when there's nothing.
+ */
+export function ignoredLead(t: Task): string {
+  const asks = (t.asks ?? []).filter((a) => a.ignored && !a.told);
+  if (!asks.length) return "";
+  for (const a of asks) a.told = true;
+  return `[任务面板] 用户忽略了你问的${asks.map((a) => `「${a.title}」（${a.id}）`).join("、")}：多半已经过时了。别等它，也别原样再问；还需要的话按现在的情况重新 ask_human。`;
 }

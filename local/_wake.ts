@@ -8,7 +8,7 @@
 // A session it handed work to reports to the worker through Gerdr itself, not here: its wait ends when the session
 // does (_waits.ts syncSessions).
 
-import { activity, find, update, type Task } from "./_store";
+import { activity, find, ignoredLead, update, type Task } from "./_store";
 import { endWaits, open, type Wait } from "./_waits";
 
 export type Wake = {
@@ -45,8 +45,11 @@ export function cutLine(text: string, n: number) {
 
 /** Wakes task `id`'s worker (a task not sent out yet only gets the record). Returns the task as written. */
 export async function wake(ctx: Ctx, id: string, m: Wake): Promise<Task> {
+  let lead = "";
   const t = update(ctx, (s) => {
     const x = find(s, id);
+    // What the user ignored since it last heard from the board: said first (a worker without a session hears it later)
+    if (x.session) lead = ignoredLead(x);
     if (m.followup) x.followups = [...(x.followups ?? []), m.followup];
     const ended = m.ends ? endWaits(x, m.ends, m.how) : [];
     // What it waited on outside came (an approval, a reply, a job finished): the feed had "在等 X" and, until
@@ -64,6 +67,6 @@ export async function wake(ctx: Ctx, id: string, m: Wake): Promise<Task> {
   });
   const fold = m.fold === false ? undefined : m.fold || `[任务面板] ${cutLine(m.how, 80)}`;
   // fold false: shown whole (Gerdr folds a message from code by default)
-  if (t.session) await ctx.sessions.send(t.session, m.text, { now: true, attachments: m.files, ...(m.fold === false ? { show: true } : { fold }) } as any);
+  if (t.session) await ctx.sessions.send(t.session, lead ? `${lead}\n\n${m.text}` : m.text, { now: true, attachments: m.files, ...(m.fold === false ? { show: true } : { fold }) } as any);
   return t;
 }

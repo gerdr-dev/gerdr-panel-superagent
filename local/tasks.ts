@@ -3,12 +3,12 @@ import { tellBadge } from "./_badge";
 import { DATA, skillFile } from "./_user";
 import { workflow } from "./_config";
 import { forWorker } from "./memory";
-import { activity, blockersDone, going, draftOf, find, findAsk, load, members, newTask, note, reqOf, update, type Ask, type Question, type Store, type Task } from "./_store";
+import { activity, blockersDone, going, draftOf, find, findAsk, ignoredLead, load, members, newTask, note, reqOf, update, type Ask, type Question, type Store, type Task } from "./_store";
 import { applyBlock } from "./_apply";
 import { endQuestions, endWaits, isOutside, open, question, syncAgents, syncSessions, wakeText, type Wait } from "./_waits";
 import { cutLine, wake } from "./_wake";
 import { askState, cardStates } from "./_cardstate";
-import { isSecAsk, secStatus } from "./_secask";
+import { closeSec, isSecAsk, secretaryIgnored, secStatus } from "./_secask";
 import { allAgents, mentionsIn } from "./_agents";
 import { archived as archivedGroups, archivedCount, archiveOld, latest, revive, unarchive as bringBack } from "./_archive";
 import { isMain, mains, rerouteTask, routeTask, sweep, toMain } from "./_main";
@@ -109,9 +109,12 @@ export async function list(input: unknown, ctx: Ctx) {
   const nudge: { session: string; id: string; out: string[]; reply?: boolean }[] = [];
   // Answers to questions the secretary passed on (tasks.message): into its chat, where the user asked
   const answered: { id: string; asked: string; text: string }[] = [];
+  // What the user ignored, for a worker whose turn started without the board (the user typed in its chat)
+  const ignored: { session: string; text: string }[] = [];
   const s = update(ctx, (s) => {
     nudge.length = 0; // update retries this function on a write race: decide afresh each time
     answered.length = 0;
+    ignored.length = 0;
     for (const t of s.tasks) {
       const sess = t.session && live[t.session];
       // What the user typed in its chat (Gerdr's personSaid): the feed shows it, or the lines after it make no sense
@@ -133,6 +136,8 @@ export async function list(input: unknown, ctx: Ctx) {
         const turn = sess.turnStartedAt ?? 0;
         for (const w of endWaits(t, (w) => w.kind === "user" && !w.item && w.since < turn, "在对话里回复了")) note(t, `问：${w.what}\n（在对话里回复了）`);
         endWaits(t, (w) => isOutside(w) && w.since < turn, "接着做了");
+        const lead = ignoredLead(t);
+        if (lead) ignored.push({ session: sess.id, text: lead });
       }
       // Stopped by the user (or Gerdr restarting): theirs, not a worker that went quiet. No "it stopped without
       // reporting" for them to answer, and no reminder — a reminder would start it again against their stop
@@ -178,6 +183,9 @@ export async function list(input: unknown, ctx: Ctx) {
     }
     return s;
   });
+  // Into the turn it is in: now, so it hears it before it acts on the question (the board's own messages carry it first)
+  for (const n of ignored) await ctx.sessions.send(n.session, n.text, { now: true, fold: "[任务面板] 用户忽略了你问的问题" } as any).catch(() => {});
+  await secretaryIgnored(ctx);
   for (const n of nudge) {
     const fold = n.reply ? "[任务面板] 提醒：用户在等你回话" : "[任务面板] 提醒：派出去的活要用 wait_for 等着";
     await ctx.sessions
@@ -694,8 +702,10 @@ function workerOf(ctx: Ctx, t: Task, input: { agent?: string; model?: string; ef
 async function tell(ctx: Ctx, t: Task, text: string) {
   if (!t.session) throw new Error(`${t.id} 没有在跑的 agent 会话：先派出去（start）`);
   // Right away even mid-step: a worker running something long in the background still takes the message (DESIGN.md)
-  // The user's words passed on: shown whole in the worker's chat (code's messages fold by default)
-  await ctx.sessions.send(t.session, text, { now: true, show: true } as any);
+  // The user's words passed on: shown whole in the worker's chat (code's messages fold by default). What the user
+  // ignored since it last heard goes first
+  const lead = update(ctx, (s) => ignoredLead(find(s, t.id)));
+  await ctx.sessions.send(t.session, lead ? `${lead}\n\n${text}` : text, { now: true, show: true } as any);
 }
 
 /** The user accepts the result: done, and the worker is parked (its context kept, a later send wakes it). */
@@ -1430,6 +1440,33 @@ export async function skipQuestion(input: { id: string; q: string }, ctx: Ctx) {
   });
   if (finished) await deliver(ctx, t, h);
   return { ok: true };
+}
+
+/**
+ * The ✕ on a question card (2026-11-19): the user ignores it — usually it went moot and the agent that asked never took
+ * it back. { id: a5, a5#2 (one question of several) or sN (the secretary's) }. Nobody is woken for it: the agent hears
+ * at the start of its next turn (ignoredLead; the secretary's: _main.ts secIgnoredLead). One question of several while
+ * others are open or answered: set aside as 不用答了, and once the rest are answered they go to the worker saying so
+ * (skipQuestion); the last one open makes the whole ask ignored.
+ */
+export async function ignore(input: { id: string }, ctx: Ctx) {
+  const id = String(input?.id ?? "");
+  if (isSecAsk(id)) return closeSec({ id }, ctx);
+  const [aid, qid] = id.split("#");
+  if (qid) {
+    const h = findAsk(load(ctx).store, aid).a;
+    const left = (h.questions ?? []).filter((q) => !q.dropped && q.answer == null && q.id !== qid);
+    const answered = (h.questions ?? []).some((q) => !q.dropped && q.answer != null);
+    if (left.length || answered) return skipQuestion({ id: aid, q: qid }, ctx);
+  }
+  update(ctx, (s) => {
+    const { t, a: h } = findAsk(s, aid);
+    if (h.status !== "open") throw new Error(`「${h.title}」已经不在等你了`);
+    for (const q of h.questions ?? []) if (!q.dropped && q.answer == null) Object.assign(q, { dropped: "你忽略了", skipped: true });
+    Object.assign(h, { status: "dropped", dropReason: "你忽略了", ignored: true, told: false, doneAt: Date.now(), updatedAt: Date.now() });
+    activity(s, t, { kind: "user", by: t.id, of: h.id, text: `你忽略了「${h.title}」` });
+  });
+  return { ignored: id };
 }
 
 /**

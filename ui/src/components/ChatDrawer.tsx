@@ -1,4 +1,4 @@
-import { ArrowDownRight, ArrowLeft, FolderOpen, GitBranch, Globe, MessageSquare, MoreHorizontal, X } from "lucide-react";
+import { ArrowDownRight, ArrowLeft, FolderOpen, GitBranch, MessageSquare, MoreHorizontal, X } from "lucide-react";
 import { EditableTitle } from "./EditableTitle";
 import clsx from "clsx";
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
@@ -33,13 +33,6 @@ export type ChatItem = {
   onDismiss?: () => unknown;
   dismissTitle?: string;
 };
-
-// The conversation's browser (Gerdr's, from 2026-11-19): the pages its agent opened with `gerdr browser open`. The
-// agent isn't in a Code pane, so no Browser pane comes up beside it; without this the user was asked to sign in "in
-// the Browser pane" and found none. An older Gerdr has neither: no tab.
-const SessionBrowser = (core as any).SessionBrowser as ((p: { session: string }) => ReactNode) | undefined;
-const noPages = (_: string | undefined) => ({ pages: [] as unknown[], opened: undefined as number | undefined });
-const useSessionBrowser = ((core as any).useSessionBrowser ?? noPages) as typeof noPages;
 
 export function ChatDrawer({
   session,
@@ -97,24 +90,16 @@ export function ChatDrawer({
   useEffect(() => setFull(false), [label]);
   // 对话 / 文件. The folder view is Gerdr's (ArtifactsFolder, from 2026-11-12): an older Gerdr has none and no tab
   const Folder = (core as any).ArtifactsFolder as ((p: { dir: string }) => ReactNode) | undefined;
-  const browser = useSessionBrowser(session);
-  // The tabs: 对话 (with a conversation), 文件 (a task's folder), 浏览器 (pages its agent opened), then the page's views
+  // The tabs: 对话 (with a conversation), 文件 (a task's folder), then the page's views. The pages a worker opens
+  // (gerdr browser open) are Gerdr's: a browser column at the panel's right, not a tab here
   const tabList: { id: string; label: string; icon: ComponentType<{ className?: string }> }[] = [
     ...(session ? [{ id: "chat", label: "对话", icon: MessageSquare }] : []),
     ...(task && Folder ? [{ id: "files", label: "文件", icon: FolderOpen }] : []),
-    ...(session && SessionBrowser && browser.pages.length ? [{ id: "browser", label: "浏览器", icon: Globe }] : []),
     ...(views ?? []).map((v) => ({ id: v.id, label: v.label, icon: v.icon ?? MessageSquare })),
   ];
   const [own, setOwn] = useState("");
   const tab = view ?? (tabList.some((x) => x.id === own) ? own : (tabList[0]?.id ?? "chat"));
   const setTab = (id: string) => (onView ? onView(id) : setOwn(id));
-  // the agent just opened a page: show it (it's usually asking the user to do something there)
-  const seenOpen = useRef(browser.opened);
-  useEffect(() => {
-    if (browser.opened === seenOpen.current) return;
-    seenOpen.current = browser.opened;
-    if (browser.opened) setTab("browser");
-  }, [browser.opened]); // eslint-disable-line react-hooks/exhaustive-deps
   const [dir, setDir] = useState<string | null>(null);
   useEffect(() => {
     setOwn("");
@@ -254,11 +239,6 @@ export function ChatDrawer({
           </div>
         )}
         {(views ?? []).map((v) => v.id === tab && <div key={v.id} className="min-h-0 flex-1">{v.render()}</div>)}
-        {tab === "browser" && session && SessionBrowser && (
-          <div className="min-h-0 flex-1">
-            <SessionBrowser session={session} />
-          </div>
-        )}
         {tab === "files" && Folder && (
           <div className="min-h-0 flex-1">
             {dir ? <Folder dir={dir} /> : <div className="p-6 text-center text-[13px] text-muted-foreground">{dir === "" ? "这个任务还没有文件夹" : "…"}</div>}

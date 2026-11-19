@@ -402,7 +402,7 @@ function talkText(ctx: Ctx) {
       `[用户] 是用户在面板助手那里说、转给你的；[你问的 sN] 是用户在卡片上答了你的问题。` +
       `用户能看到它们，所以派活、分拣这种不用说话的，回复只写一句结论（「派给了 t12」「没接：道谢」），别把过程再讲一遍。\n` +
       `- **要用户回答、拍板、确认或亲手做一步的，用 ask_human 问**（带 options 就是让他选；只要他做完说一声，handBack 写 {"kind":"none"}）：` +
-      `问题会作为卡片出现在这段对话里，左上角「秘书」按钮亮着计数，直到他答了或关掉。只写在回复的文字里他会漏看。` +
+      `问题会作为卡片出现在这段对话里，左上角「秘书」按钮亮着计数，直到他答了或忽略（卡片右上角的 ✕；忽略了你下一轮开头会知道）。只写在回复的文字里他会漏看。` +
       `回复里一句话说为什么问，别把问题再写一遍；问完这一轮就结束，别等。他没点卡片、直接在对话里回了你，就用 cancel_human 撤掉那张卡（reason 写「在对话里答了」）；` +
       `问题变了用 ask_human 带 replaces。替 worker 转问题不用另问：worker 的问题本来就在任务面板上等他，告诉他是哪个任务就行。\n` +
       `- **任务面板是用户自己盯的，你是辅助**：任务的状态变化不会发给你，你也不去盯、不去推进任务。用户问起、或者定时任务（[检查]、[简报]）交给你时，才去看任务面板。` +
@@ -487,13 +487,8 @@ export function mains(ctx: Ctx): string[] {
  */
 export async function toMain(ctx: Ctx, blocks: string[], why: Why = "route", attachments?: string[], fold?: string | false): Promise<string> {
   void why;
-  // Questions of its own the user closed without answering since: said first, so it neither waits on them nor asks again
-  const closed = updateState(ctx, (x) => {
-    const c = (x.asks ?? []).filter((a) => a.closedByUser && !a.told);
-    for (const a of c) a.told = true;
-    return c;
-  });
-  const lead = closed.length ? `[任务面板] 用户关掉了你问的${closed.map((a) => `「${a.title}」（${a.id}）`).join("、")}，没答：别等它，也别原样再问。` : "";
+  // Questions of its own the user ignored since: said first, so it neither waits on them nor asks again
+  const lead = secIgnoredLead(ctx);
   const body = [lead, ...blocks].filter(Boolean).join("\n\n");
   const { id, changed, hash: h } = await ensureMain(ctx, body, attachments, fold);
   if (id.fresh) return id.id;
@@ -502,6 +497,16 @@ export async function toMain(ctx: Ctx, blocks: string[], why: Why = "route", att
   await ctx.sessions.send(id.id, body, { ...(attachments?.length ? { attachments } : {}), ...(fold ? { fold } : fold === false ? { show: true } : {}) } as any);
   if (changed) updateState(ctx, (x) => void (x.brief = h));
   return id.id;
+}
+
+/** The secretary's questions the user ignored (the card's ✕) it hasn't heard of, as a line; marks them told. "" if none. */
+export function secIgnoredLead(ctx: Ctx): string {
+  const closed = updateState(ctx, (x) => {
+    const c = (x.asks ?? []).filter((a) => a.closedByUser && !a.told);
+    for (const a of c) a.told = true;
+    return c;
+  });
+  return closed.length ? `[任务面板] 用户忽略了你问的${closed.map((a) => `「${a.title}」（${a.id}）`).join("、")}：多半已经过时了。别等它，也别原样再问；还需要的话按现在的情况重新 ask_human。` : "";
 }
 
 const abs = (ctx: Ctx, p: string) => `${ctx.workspace.dir}/${p}`;

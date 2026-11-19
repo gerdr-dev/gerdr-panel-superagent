@@ -3,7 +3,7 @@
 // ended, nothing marked it, and the user missed it (2026-11-19: "我会漏看"). Same card as a worker's ask (cards.tsx
 // TaskStep, ref sN); the 秘书 button counts the open ones; the user answers on the card or closes one unanswered.
 
-import { state, toMain, updateState, type SecAsk } from "./_main";
+import { secIgnoredLead, state, toMain, updateState, type SecAsk } from "./_main";
 
 const SHOWN = "这个问题已经作为卡片显示在你的对话里，用户能直接在卡片上答，左上角「秘书」按钮也会亮着计数：回复里不要再把问题、选项写一遍，一句话说为什么要问就够了。";
 
@@ -60,7 +60,7 @@ export function secAsk(input: any, ctx: Ctx) {
   return {
     id: a.id,
     title: a.title,
-    note: `${SHOWN} 用户的回答会作为 [你问的 ${a.id}] 发进这段对话（可能过很久）；他也可能关掉不答，那时下一条消息开头会告诉你。不用等它，这一轮照常结束。`,
+    note: `${SHOWN} 用户的回答会作为 [你问的 ${a.id}] 发进这段对话（可能过很久）；他也可能忽略它，那时你下一轮开头会知道。不用等它，这一轮照常结束。`,
     gerdrCard: {
       type: "task-step",
       ref: a.id,
@@ -90,7 +90,7 @@ export function secCancel(input: { id: string; reason: string }, ctx: Ctx) {
 /** Where one stands, the shape cards.tsx TaskStep reads (as _cardstate.ts askState). */
 export function secAskState(a: SecAsk | undefined) {
   if (!a) return { status: "missing" };
-  return { status: a.status === "open" ? "todo" : a.status, title: a.title, handedBack: a.answer, kind: a.kind, reason: a.closedByUser ? "你关掉了" : a.reason };
+  return { status: a.status === "open" ? "todo" : a.status, title: a.title, handedBack: a.answer, kind: a.kind, reason: a.closedByUser ? "你忽略了" : a.reason };
 }
 
 export function secStatus(id: string, ctx: Ctx) {
@@ -114,7 +114,7 @@ export async function answerSec(input: { id: string; value?: string }, ctx: Ctx)
   const a = updateState(ctx, (x) => {
     const a = findSec(x.asks, String(input?.id ?? ""));
     if (a.status === "done") throw new Error(`已经答了：${a.answer ?? "做完了"}`);
-    if (a.status === "dropped") throw new Error(`「${a.title}」已经${a.closedByUser ? "关掉" : "撤回"}了`);
+    if (a.status === "dropped") throw new Error(`「${a.title}」已经${a.closedByUser ? "忽略" : "撤回"}了`);
     if (a.kind !== "none" && !value) throw new Error(a.kind === "choice" ? "选一个，或者写下你的决定" : `写下${a.label || "你的回答"}`);
     Object.assign(a, { status: "done", answer: value || undefined, doneAt: Date.now() });
     return a;
@@ -124,7 +124,7 @@ export async function answerSec(input: { id: string; value?: string }, ctx: Ctx)
   return { ask: a.id, answer: a.answer };
 }
 
-/** The user closed it without answering: { id }. The secretary hears it with its next message, not now. */
+/** The user ignored it (the ✕ on its card or its row): { id }. The secretary hears at the start of its next turn, not now. */
 export function closeSec(input: { id: string }, ctx: Ctx) {
   const a = updateState(ctx, (x) => {
     const a = findSec(x.asks, String(input?.id ?? ""));
@@ -133,4 +133,16 @@ export function closeSec(input: { id: string }, ctx: Ctx) {
     return a;
   });
   return { closed: a.id };
+}
+
+/**
+ * The secretary's turn started without the board (the user typed in its chat) while it hasn't heard of questions the
+ * user ignored: said into that turn now. Called with every session event (tasks.list).
+ */
+export async function secretaryIgnored(ctx: Ctx) {
+  const s = state(ctx);
+  if (!s.main || !(s.asks ?? []).some((a) => a.closedByUser && !a.told)) return;
+  if (ctx.sessions.get(s.main)?.status !== "running") return;
+  const lead = secIgnoredLead(ctx);
+  if (lead) await ctx.sessions.send(s.main, lead, { now: true, fold: "[任务面板] 用户忽略了你问的问题" } as any).catch(() => {});
 }
