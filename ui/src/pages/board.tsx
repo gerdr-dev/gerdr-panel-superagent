@@ -824,6 +824,8 @@ function MiniCard({
   // Another task it waits for (what it asks the user is spelled out above: steps)
   const blockers = (t.blockedBy ?? []).filter((b) => byId[b] && byId[b].status !== "done" && byId[b].status !== "dropped");
   const live = liveText(t);
+  // Its turn over and already read (opened here or in Code): no green dot, as Code's tabs do
+  const unread = useUnread(t.session);
   // What it asked that runs out soonest (a sign-in link), and roughly how long its steps take the user
   const expires = Math.min(...asks.map((a) => a.expiresAt ?? Infinity));
   const minutes = asks.reduce((n, a) => n + (a.minutes ?? 0), 0);
@@ -851,7 +853,7 @@ function MiniCard({
             The dot says the state (在跑 / 停下 / 等你…), so only the time follows it; the words stay in the tooltip */}
         {live && open && (
           <span title={live} className={clsx("inline-flex min-w-0 items-center gap-1", liveTone(t) !== "text-ok" && liveTone(t))}>
-            <span className={clsx("inline-block size-1.5 shrink-0 rounded-full", liveDot(t))} />
+            {liveDot(t, unread) && <span className={clsx("inline-block size-1.5 shrink-0 rounded-full", liveDot(t, unread))} />}
             <span className="truncate">{live.includes(" · ") ? live.slice(live.lastIndexOf(" · ") + 3) : live}</span>
           </span>
         )}
@@ -1149,16 +1151,19 @@ function liveTone(t: Task) {
 }
 
 /** The dot beside its live text, coloured as Code mode's session dots (AgentIcon StatusDot): running yellow, waiting
- *  on the user / errored red, still busy in the background grey, its turn over green. */
-function liveDot(t: Task) {
+ *  on the user / errored red, still busy in the background grey, its turn over green while unread — none once read. */
+function liveDot(t: Task, unread: boolean) {
   const l = t.live;
   if (!l) return notDispatched(t) ? "bg-warn" : "bg-muted-foreground/40";
   if (l.status === "running") return "bg-warn animate-pulse";
   if (l.status === "waiting") return "bg-bad animate-pulse";
   if (l.status === "error") return "bg-bad";
   if (t.helpers?.length || (t.waits ?? []).some((w) => w.kind === "agent") || (going(t) && outside(t).length)) return "bg-muted-foreground";
-  return "bg-ok";
+  return unread ? "bg-ok" : "";
 }
+
+/** Gerdr's unread mark of a conversation (core useUnread); an older Gerdr has none: always unread, the dot as before. */
+const useUnread = ((core as any).useUnread ?? ((_: string | undefined) => true)) as (id: string | undefined) => boolean;
 
 /** Sent out and not finished (进行中 or 待验收): its waits count in either, as in local/_store.ts going. */
 const going = (t: Task) => t.status === "running" || t.status === "review";
