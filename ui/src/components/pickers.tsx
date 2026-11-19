@@ -3,6 +3,7 @@ import clsx from "clsx";
 import { useEffect, useState } from "react";
 import { Button } from "./Button";
 import { run } from "../lib/gerdr";
+import { Select } from "./ui/select";
 
 // Controls the 设置 page shares: a folder (typed, or browsed from the user's projects down) and an agent / role.
 
@@ -58,7 +59,17 @@ export function PathPick({ value, onChange, placeholder }: { value: string; onCh
 }
 
 export type AgentChoice = { id: string; name: string; description?: string };
-export type AgentOption = { id: string; name: string; base?: string; models?: AgentChoice[]; efforts?: AgentChoice[] };
+export type AgentOption = {
+  id: string;
+  name: string;
+  base?: string;
+  models?: AgentChoice[];
+  efforts?: AgentChoice[];
+  /** The agent an empty agent field starts (Gerdr's default agent). */
+  default?: boolean;
+  /** Gerdr's defaults for it: what an empty model / effort / mode field gives (local/settings.ts agents). */
+  defaults?: { model?: string; effort?: string; mode?: string };
+};
 
 let agentList: Promise<AgentOption[]> | null = null;
 
@@ -74,36 +85,37 @@ export function useAgents() {
 
 export function AgentPick({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const list = useAgents();
+  const def = list.find((a) => a.default);
   return (
-    <select className={input} value={value} onChange={(e) => onChange(e.target.value)}>
-      <option value="">Gerdr 的默认 agent</option>
-      {value && !list.some((a) => a.id === value) && <option value={value}>{value}</option>}
-      {list.map((a) => (
-        <option key={a.id} value={a.id}>
-          {a.name} ({a.id})
-        </option>
-      ))}
-    </select>
+    <Select
+      value={value}
+      onChange={onChange}
+      options={[
+        { value: "", label: def ? `默认（${def.name}）` : "Gerdr 的默认 agent" },
+        ...(value && !list.some((a) => a.id === value) ? [{ value, label: value }] : []),
+        ...list.map((a) => ({ value: a.id, label: a.name, hint: a.id })),
+      ]}
+    />
   );
 }
 
 /**
- * One of a list, or "" for the default. A value that isn't in the list (typed before this was a menu, or the agent's
- * list changed) stays as an option of its own rather than being dropped.
+ * One of an agent's choices, or "" for the default — shown as 默认（what that is） when `def` names it. A value that
+ * isn't in the list (typed before this was a menu, or the agent's list changed) stays as an option of its own rather
+ * than being dropped.
  */
-export function ChoicePick({ value, options, onChange, empty = "默认" }: { value: string; options: AgentChoice[]; onChange: (v: string) => void; empty?: string }) {
+export function ChoicePick({ value, options, onChange, def }: { value: string; options: AgentChoice[]; onChange: (v: string) => void; def?: string }) {
+  // An agent's own "default" entry (claude's efforts list one with id "") is the 默认 option already
+  const real = options.filter((o) => o.id);
   return (
-    <select className={input} value={value} onChange={(e) => onChange(e.target.value)}>
-      <option value="">{empty}</option>
-      {value && !options.some((o) => o.id === value) && <option value={value}>{value}</option>}
-      {/* An agent's own "default" entry (claude's efforts list one with id "") is the first option already */}
-      {options
-        .filter((o) => o.id)
-        .map((o) => (
-          <option key={o.id} value={o.id} title={o.description}>
-            {o.name === o.id ? o.id : `${o.name} (${o.id})`}
-          </option>
-        ))}
-    </select>
+    <Select
+      value={value}
+      onChange={onChange}
+      options={[
+        { value: "", label: def ? `默认（${def}）` : "默认" },
+        ...(value && !real.some((o) => o.id === value) ? [{ value, label: value }] : []),
+        ...real.map((o) => ({ value: o.id, label: o.name, hint: o.name === o.id ? undefined : o.id })),
+      ]}
+    />
   );
 }

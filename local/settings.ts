@@ -61,8 +61,38 @@ export function browse(input: { path?: string }, ctx: Ctx) {
   return { path, home: ctx.dirs.home(), recent, entries };
 }
 
-/** The agents and roles set up in Gerdr. */
+/**
+ * The agents and roles set up in Gerdr, for 设置's menus: what each takes as model / effort, and what an empty field
+ * means — Gerdr's own defaults (Settings → its default agent, and per agent its model / effort / permission mode), so
+ * the menu says 默认（Opus 5.5） rather than a bare 默认. `default`: the agent an empty agent field starts.
+ */
 export async function agents(input: unknown, ctx: Ctx) {
-  // With what each takes as model / effort, for 设置's menus
-  return (await allAgents(ctx)).map((a) => ({ id: a.id, name: a.name, base: a.base, models: a.models, efforts: a.efforts }));
+  const conf = await gerdrDefaults(ctx);
+  return (await allAgents(ctx)).map((a) => ({
+    id: a.id,
+    name: a.name,
+    base: a.base,
+    models: a.models,
+    efforts: a.efforts,
+    default: a.id === conf.agent || undefined,
+    defaults: { model: conf.config[a.id]?.model, effort: conf.config[a.id]?.effort, mode: conf.modes[a.id] },
+  }));
+}
+
+/** Gerdr's defaults for new sessions (its config.json, through `gerdr config`); none known when that fails. */
+async function gerdrDefaults(ctx: Ctx) {
+  const get = async (key: string) => {
+    const r = await ctx.exec("gerdr", ["config", "get", key], { timeout: 10_000 }).catch(() => null);
+    try {
+      return r?.code === 0 ? JSON.parse(r.stdout) : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const [agent, config, modes] = await Promise.all([get("defaultAgent"), get("defaultConfig"), get("defaultModes")]);
+  return {
+    agent: typeof agent === "string" ? agent : "",
+    config: (config ?? {}) as Record<string, { model?: string; effort?: string }>,
+    modes: (modes ?? {}) as Record<string, string>,
+  };
 }
