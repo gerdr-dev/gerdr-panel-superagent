@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowUp, Ban, Bot, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Search, Send, Settings, Undo2, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, Ban, Bot, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, Copy, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Search, Send, Settings, Undo2, X } from "lucide-react";
 import { EditableTitle } from "../components/EditableTitle";
 import clsx from "clsx";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -49,6 +49,7 @@ const STATUS: Record<Col, string> = { todo: "todo", active: "running", you: "run
 
 /** Moves a task where the user dropped it or picked in its menu; refused moves (back to 待办 once sent out) say why. */
 const toastError = (core as unknown as { toast?: { error?: (m: string) => unknown } }).toast?.error;
+const toastOk = (core as unknown as { toast?: (m: string) => unknown }).toast;
 function moveTo(act: Act, id: string, c: Col) {
   return act("setStatus", { id, status: STATUS[c] }).catch((e: any) => toastError?.(String(e?.message ?? e)));
 }
@@ -73,6 +74,51 @@ function moveActions(t: Task): ChatAction[] {
 
 /** 放弃 in a task's menu. */
 const DROP: ChatAction = { id: "drop", label: "放弃", kind: "danger", confirm: "确定放弃？", icon: <Ban className="size-3.5" /> };
+const COPY: ChatAction = { id: "copy", label: "复制 id", icon: <Copy className="size-3.5" /> };
+const RESTORE: ChatAction = { id: "restore", label: "恢复这个任务", icon: <Undo2 className="size-3.5" /> };
+
+/**
+ * A task's ⋯ menu: the same rows on its card, its drawer and its worker's chat (2026-11-19: the card had none, and the
+ * user wanted the card's to be the drawer's). runTaskAction does each row the same way everywhere.
+ */
+function taskMenu(t: Task): ChatAction[] {
+  if (t.status === "dropped") return [COPY, RESTORE];
+  return [COPY, ...moveActions(t), ...(t.status === "done" ? [] : [DROP])];
+}
+
+/** Does a row of taskMenu (or the chat's 通过); true when it went through. */
+function runTaskAction(act: Act, t: Task, id: string): Promise<boolean> {
+  if (id === "copy")
+    return navigator.clipboard.writeText(t.id).then(
+      () => (toastOk?.(`已复制 ${t.id}`), true),
+      () => (toastError?.("复制失败"), false),
+    );
+  if (id.startsWith("move:")) return moveTo(act, t.id, id.slice(5) as Col).then(() => true);
+  return act(id, { id: t.id }).then(
+    () => true,
+    (e: any) => (toastError?.(String(e?.message ?? e)), false),
+  );
+}
+
+/** Rows after which an open drawer closes: the task is over, its summary isn't worth flipping to. */
+const closes = (id: string) => id === "accept" || id === "drop";
+
+/** taskMenu as a ⋯ button, with its own confirm step. onDone: after a row went through. */
+function TaskMenu({ t, act, onDone }: { t: Task; act: Act; onDone?: (id: string) => void }) {
+  const [armed, setArmed] = useState("");
+  return (
+    <Menu
+      actions={taskMenu(t)}
+      armed={armed}
+      onPick={(a) => {
+        if (a.confirm && armed !== a.id) return setArmed(a.id);
+        setArmed("");
+        void runTaskAction(act, t, a.id).then((ok) => ok && onDone?.(a.id));
+      }}
+      onClose={() => setArmed("")}
+    />
+  );
+}
 
 /** Most important first: what waits on the user, then results to judge, then what's going on. */
 const PHONE_ORDER: Col[] = ["active", "review", "todo", "done"];
@@ -274,12 +320,7 @@ export default function BoardPage() {
     const t = sel;
     if (!t) return;
     // Done with it either way: close the chat rather than flip to the finished task's summary
-    if (action === "accept" || action === "drop") void act(action, { id: t.id }).then(() => setOpen(""));
-    if (action === "restore") void act("restore", { id: t.id });
-    if (action.startsWith("move:")) {
-      const c = action.slice(5) as Col;
-      void moveTo(act, t.id, c).then(() => c === "done" && setOpen(""));
-    }
+    void runTaskAction(act, t, action).then((ok) => ok && closes(action) && setOpen(""));
   };
 
   // Dragging a card to another column: the user moving it (moveTo), the only way besides its menu and buttons.
@@ -375,6 +416,8 @@ export default function BoardPage() {
               onOpen={() => (setPeek(null), setOpen(t.id))}
               ghost={dragging?.id === t.id}
               onGrab={!phone && movable(t) ? (e) => beginDrag(t, e) : undefined}
+              act={act}
+              onActed={(id) => closes(id) && t.id === open && setOpen("")}
             />
           )) : <p className="py-6 text-center text-[12px] text-muted-foreground">{words.length ? "没有匹配的" : "无任务"}</p>}
           {all.length > shown.length && (
@@ -661,10 +704,9 @@ function chatPanel(t: Task, byId: Record<string, Task>): { label: string; action
 
 /** The line and buttons on a worker's conversation, by where its task stands. */
 function chatPanelFor(t: Task, byId: Record<string, Task>): { label: string; actions: ChatAction[]; items?: ChatItem[] } {
-  const drop = DROP;
   // Over: what it came to, above the conversation it came out of
-  if (t.status === "done") return { label: `${t.id} · ${day(t.doneAt ?? t.updatedAt)} 完成${t.summary ? `：${t.summary}` : ""}`, actions: moveActions(t) };
-  if (t.status === "dropped") return { label: `${t.id} · 已放弃${t.summary ? `：${t.summary}` : ""}`, actions: [{ id: "restore", label: "恢复这个任务", kind: "primary" }] };
+  if (t.status === "done") return { label: `${t.id} · ${day(t.doneAt ?? t.updatedAt)} 完成${t.summary ? `：${t.summary}` : ""}`, actions: taskMenu(t) };
+  if (t.status === "dropped") return { label: `${t.id} · 已放弃${t.summary ? `：${t.summary}` : ""}`, actions: [COPY, { ...RESTORE, kind: "primary" }] };
   const c = colOf(t);
   // Steps only the user can do that hold this task up: shown here, where they are, with a way to go and do them
   const steps = userSteps(t);
@@ -673,11 +715,11 @@ function chatPanelFor(t: Task, byId: Record<string, Task>): { label: string; act
       // A short line, then one row per thing (Gerdr draws them with a yellow edge and a jump icon): the run-on text and
       // a row of buttons left nothing readable on a phone. Each row jumps to its card in this chat.
       label: `在等你处理 ${steps.length} 件`,
-      actions: [...moveActions(t), drop],
+      actions: taskMenu(t),
       items: steps,
     };
   if (c === "review") {
-    return { label: `${t.id} · 待验收：没问题就通过；要改直接在下面说，它会接着改`, actions: [...moveActions(t), drop, { id: "accept", label: "通过", kind: "primary" }] };
+    return { label: `${t.id} · 待验收：没问题就通过；要改直接在下面说，它会接着改`, actions: [...taskMenu(t), { id: "accept", label: "通过", kind: "primary" }] };
   }
   if (c === "you")
     return {
@@ -695,17 +737,36 @@ function chatPanelFor(t: Task, byId: Record<string, Task>): { label: string; act
                 ? `${t.stopWhy ?? "停下了"}${t.said ? `。它最后说：「${t.said}」` : ""}`
                 : "它在等你，见最后一条回复"
       }`,
-      actions: [...moveActions(t), drop],
+      actions: taskMenu(t),
     };
   // In progress: what it waits on, if anything, and what will wake it — the same words as the 在等 list
   const w = (t.waits ?? []).find((x) => !x.user);
   // Stopped with nothing going on: said here, but it stays in 进行中 until the user moves it
   const halt = t.stopped ? ` · ${t.stopWhy ?? "停下了"}` : "";
-  return { label: `${t.id} · 进行中${w ? ` · 在等：${w.what}（${w.wake ?? ""}）` : halt}`, actions: [...moveActions(t), drop] };
+  return { label: `${t.id} · 进行中${w ? ` · 在等：${w.what}（${w.wake ?? ""}）` : halt}`, actions: taskMenu(t) };
 }
 
 /** A task as a small card in its column: what it is, where, and how it's doing. Click for everything else. */
-function MiniCard({ t, byId, active, onOpen, onGrab, ghost }: { t: Task; byId: Record<string, Task>; active: boolean; onOpen: () => void; onGrab?: (e: React.PointerEvent<HTMLElement>) => void; ghost?: boolean }) {
+function MiniCard({
+  t,
+  byId,
+  active,
+  onOpen,
+  onGrab,
+  ghost,
+  act,
+  onActed,
+}: {
+  t: Task;
+  byId: Record<string, Task>;
+  active: boolean;
+  onOpen: () => void;
+  onGrab?: (e: React.PointerEvent<HTMLElement>) => void;
+  ghost?: boolean;
+  /** Draws the task's ⋯ menu in the top-right corner (not on the dragged copy); onActed after a row went through. */
+  act?: Act;
+  onActed?: (id: string) => void;
+}) {
   const open = t.status !== "done" && t.status !== "dropped";
   const steps = open ? userSteps(t) : [];
   const asks = open ? openAsks(t) : [];
@@ -716,6 +777,9 @@ function MiniCard({ t, byId, active, onOpen, onGrab, ghost }: { t: Task; byId: R
   const expires = Math.min(...asks.map((a) => a.expiresAt ?? Infinity));
   const minutes = asks.reduce((n, a) => n + (a.minutes ?? 0), 0);
   return (
+    // The ⋯ menu sits beside the card's button, not in it (a button can't hold one); data-task-card on the wrapper
+    // too, so using the menu while a drawer is open doesn't count as a click on the board that closes it
+    <div data-task-card="" className="group relative">
     <button
       data-task-card=""
       onClick={onOpen}
@@ -727,7 +791,7 @@ function MiniCard({ t, byId, active, onOpen, onGrab, ghost }: { t: Task; byId: R
         // A card waiting on the user stays yellow when hovered or open: only brighter, never blue.
         waitsOnUser(t) ? clsx("bg-warn/[0.04]", active ? "border-warn/80" : "border-warn/25 hover:border-warn/55") : clsx("hover:border-ring/50", active ? "border-ring" : notDispatched(t) && "border-warn/60"),
       )}>
-      <div className="flex min-w-0 items-center gap-1.5 overflow-hidden text-[11px] text-muted-foreground">
+      <div className={clsx("flex min-w-0 items-center gap-1.5 overflow-hidden text-[11px] text-muted-foreground", act && "pr-6")}>
         <Bot className="size-3 shrink-0" />
         {/* Never squeezed: the live line beside it truncates instead of wrapping the id onto two lines */}
         <span className="shrink-0 font-mono whitespace-nowrap">{t.id}</span>
@@ -826,13 +890,19 @@ function MiniCard({ t, byId, active, onOpen, onGrab, ghost }: { t: Task; byId: R
         </div>
       )}
     </button>
+    {act && (
+      // Shown on hover / when open with a mouse; always on a touch screen (no hover there)
+      <div className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 has-[[aria-expanded=true]]:opacity-100 [@media(hover:none)]:opacity-100">
+        <TaskMenu t={t} act={act} onDone={onActed} />
+      </div>
+    )}
+    </div>
   );
 }
 
 /** Everything about one task and what you can do with it, in a panel on the right (full screen on a phone). */
 function Drawer({ t, byId, act, onClose, onGo }: { t: Task; byId: Record<string, Task>; act: Act; onClose: () => void; onGo: (id: string) => void }) {
   const done = t.status === "done" || t.status === "dropped";
-  const [armed, setArmed] = useState("");
   return (
     // Not modal, like the chat drawer: another task's card stays clickable and switches the drawer to it; a click on
     // the board elsewhere closes it
@@ -855,19 +925,7 @@ function Drawer({ t, byId, act, onClose, onGo }: { t: Task; byId: Record<string,
               <span className="shrink-0">· {(waitsOnUser(t) ? "等你" : COLS.find((c) => c.id === boardCol(t))?.title)}</span>
               <EditableTitle value={t.title} onSave={(title) => renameTask(act, t, title)} className="text-[13px] font-medium text-foreground" />
               {toggle}
-              {!done && (
-                <Menu
-                  actions={[...moveActions(t), DROP]}
-                  armed={armed}
-                  onPick={(a) => {
-                    if (a.confirm && armed !== a.id) return setArmed(a.id);
-                    setArmed("");
-                    if (a.id.startsWith("move:")) void moveTo(act, t.id, a.id.slice(5) as Col);
-                    else void act(a.id, { id: t.id });
-                  }}
-                  onClose={() => setArmed("")}
-                />
-              )}
+              <TaskMenu t={t} act={act} onDone={(id) => closes(id) && onClose()} />
               <Button variant="ghost" size="icon" aria-label="关闭" onClick={onClose}>
                 <X className="size-4" />
               </Button>
