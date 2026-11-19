@@ -5,6 +5,7 @@
 import { archived, list } from "./tasks";
 import { midLines } from "./memory";
 import { askText, compactMain, ensureMain, state, toMain, updateState } from "./_main";
+import { answerSec, closeSec, secAsks } from "./_secask";
 
 const cut = (s: string, n: number) => {
   const t = s.replace(/\s+/g, " ").trim();
@@ -30,6 +31,21 @@ export async function say(input: { text: string; files?: { path: string; name?: 
   if (!text && !files.length) throw new Error("说点什么");
   const id = await toMain(ctx, [`[用户] ${text}`], "user", files.map((f) => f.path), false);
   return { main: id };
+}
+
+/** The secretary's own questions (_secask.ts): the open ones, oldest first, and every card's state. */
+export function asks(_input: unknown, ctx: Ctx) {
+  return secAsks(ctx);
+}
+
+/** Answers one of the secretary's questions (its card): { id: s3, value }. The answer goes to the secretary. */
+export async function answer(input: { id: string; value?: string }, ctx: Ctx) {
+  return answerSec(input, ctx);
+}
+
+/** Closes one of the secretary's questions without answering: { id: s3 }. */
+export function closeAsk(input: { id: string }, ctx: Ctx) {
+  return closeSec(input, ctx);
 }
 
 /**

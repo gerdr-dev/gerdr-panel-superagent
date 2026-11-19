@@ -130,6 +130,34 @@ type State = {
    * old outside messages aren't part of its conversation.
    */
   since?: number;
+  /** What the secretary asked the user with ask_human (_secask.ts): s1, s2…, open, answered and closed. */
+  asks?: SecAsk[];
+  nextAsk?: number;
+};
+
+/**
+ * A question the secretary put to the user (ask_human from its own conversation, _secask.ts). Its own, not an ask on a
+ * task: the secretary has no task. Open ones light the 秘书 button with their count; the user answers one on its card
+ * or closes it without an answer (told to the secretary with its next message, not as a turn of its own).
+ */
+export type SecAsk = {
+  id: string;
+  title: string;
+  steps?: string;
+  /** choice: options; value: a free answer; none: just 做完了. */
+  kind: "choice" | "value" | "none";
+  options?: string[];
+  multi?: boolean;
+  label?: string;
+  status: "open" | "done" | "dropped";
+  answer?: string;
+  /** Why it was dropped: the secretary's reason (cancel_human, replaces) or the user closing it. */
+  reason?: string;
+  /** Closed by the user, and whether the secretary has been told yet (the start of its next message). */
+  closedByUser?: boolean;
+  told?: boolean;
+  at: number;
+  doneAt?: number;
 };
 
 function load(ctx: Ctx): { s: State; etag?: string; text?: string } {
@@ -371,8 +399,12 @@ function talkText(ctx: Ctx) {
       `调了哪些命令他也看得见（折起来的一行），所以结论写在回复的正文里。\n` +
       `- 别的消息也会出现在这段对话里，开头标着是什么：[任务 tN] / [消息 cN] / [重新安排 tN] / [重排 tN] 是要派的活（见下面）；` +
       `[检查] 是定时检查发现了卡住的任务；[简报] 是到了写简报的时间；[tN 的回答] 是你转给 worker 的问题它答了；[任务面板] 是任务面板的提醒；` +
-      `[用户] 是用户在面板助手那里说、转给你的。` +
+      `[用户] 是用户在面板助手那里说、转给你的；[你问的 sN] 是用户在卡片上答了你的问题。` +
       `用户能看到它们，所以派活、分拣这种不用说话的，回复只写一句结论（「派给了 t12」「没接：道谢」），别把过程再讲一遍。\n` +
+      `- **要用户回答、拍板、确认或亲手做一步的，用 ask_human 问**（带 options 就是让他选；只要他做完说一声，handBack 写 {"kind":"none"}）：` +
+      `问题会作为卡片出现在这段对话里，左上角「秘书」按钮亮着计数，直到他答了或关掉。只写在回复的文字里他会漏看。` +
+      `回复里一句话说为什么问，别把问题再写一遍；问完这一轮就结束，别等。他没点卡片、直接在对话里回了你，就用 cancel_human 撤掉那张卡（reason 写「在对话里答了」）；` +
+      `问题变了用 ask_human 带 replaces。替 worker 转问题不用另问：worker 的问题本来就在任务面板上等他，告诉他是哪个任务就行。\n` +
       `- **任务面板是用户自己盯的，你是辅助**：任务的状态变化不会发给你，你也不去盯、不去推进任务。用户问起、或者定时任务（[检查]、[简报]）交给你时，才去看任务面板。` +
       `用户交代的才做：他让你催、让你转告，你再用下面的命令去做。\n` +
       `- 用户问到的、你要说的，先查事实再说：\`gerdr panel run secretary.status\` 给出等他的事（带问题的 id 和选项）、在做的、待验收的、最近完成的。` +
@@ -455,7 +487,14 @@ export function mains(ctx: Ctx): string[] {
  */
 export async function toMain(ctx: Ctx, blocks: string[], why: Why = "route", attachments?: string[], fold?: string | false): Promise<string> {
   void why;
-  const body = blocks.join("\n\n");
+  // Questions of its own the user closed without answering since: said first, so it neither waits on them nor asks again
+  const closed = updateState(ctx, (x) => {
+    const c = (x.asks ?? []).filter((a) => a.closedByUser && !a.told);
+    for (const a of c) a.told = true;
+    return c;
+  });
+  const lead = closed.length ? `[任务面板] 用户关掉了你问的${closed.map((a) => `「${a.title}」（${a.id}）`).join("、")}，没答：别等它，也别原样再问。` : "";
+  const body = [lead, ...blocks].filter(Boolean).join("\n\n");
   const { id, changed, hash: h } = await ensureMain(ctx, body, attachments, fold);
   if (id.fresh) return id.id;
   // The rules changed: a line of its own, folded, so it doesn't sit on top of what the user wrote

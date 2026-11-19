@@ -8,6 +8,7 @@ import { applyBlock } from "./_apply";
 import { endQuestions, endWaits, isOutside, open, question, syncAgents, syncSessions, wakeText, type Wait } from "./_waits";
 import { cutLine, wake } from "./_wake";
 import { askState, cardStates } from "./_cardstate";
+import { isSecAsk, secStatus } from "./_secask";
 import { allAgents, mentionsIn } from "./_agents";
 import { archived as archivedGroups, archivedCount, archiveOld, latest, revive, unarchive as bringBack } from "./_archive";
 import { isMain, mains, rerouteTask, routeTask, sweep, toMain } from "./_main";
@@ -1325,6 +1326,8 @@ async function closeRouters(ctx: Ctx, live: Record<string, any>) {
  * a5, a5#2 for one question of several, or a human task's old id (t206) for a card drawn before 2026-11-19 }.
  */
 export function status(input: { id: string }, ctx: Ctx) {
+  // One of the secretary's own questions (sN, _secask.ts): drawn by the same card
+  if (isSecAsk(String(input?.id ?? ""))) return secStatus(String(input.id), ctx);
   let found;
   try {
     found = findAsk(load(ctx).store, String(input?.id ?? ""));

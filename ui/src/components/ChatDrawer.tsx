@@ -25,7 +25,14 @@ export type ChatView = { id: string; label: string; icon?: ComponentType<{ class
 /** One thing waiting on the user: a line; jump scrolls the chat to the card with that ref. */
 /** A row under the drawer's line: jump scrolls the chat to that card; onClick, when set, does something else instead
  *  (what the chat's card can't do: a secret to store, an expired link to redo). */
-export type ChatItem = { text: string; jump?: string; onClick?: () => void };
+export type ChatItem = {
+  text: string;
+  jump?: string;
+  onClick?: () => void;
+  /** A ✕ at the row's end: lets it go without doing it (the secretary's questions, closed unanswered). */
+  onDismiss?: () => unknown;
+  dismissTitle?: string;
+};
 
 // The conversation's browser (Gerdr's, from 2026-11-19): the pages its agent opened with `gerdr browser open`. The
 // agent isn't in a Code pane, so no Browser pane comes up beside it; without this the user was asked to sign in "in
@@ -226,15 +233,17 @@ export function ChatDrawer({
               </div>
             )}
             {items?.map((it, n) => (
-              <button
-                key={n}
-                title={it.text}
-                onClick={() => (it.onClick ? it.onClick() : it.jump && go(it.jump))}
-                className="flex w-full items-center gap-2 rounded-md border-l-2 border-l-warn bg-warn/5 py-1.5 pr-1.5 pl-2 text-left text-[12px] hover:bg-warn/10"
-              >
-                <span className="min-w-0 flex-1 truncate">{it.text}</span>
-                <ArrowDownRight className="size-3.5 shrink-0 text-warn" />
-              </button>
+              <div key={it.jump ?? n} className="flex items-center rounded-md border-l-2 border-l-warn bg-warn/5 text-[12px] hover:bg-warn/10">
+                <button
+                  title={it.text}
+                  onClick={() => (it.onClick ? it.onClick() : it.jump && go(it.jump))}
+                  className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pr-1.5 pl-2 text-left"
+                >
+                  <span className="min-w-0 flex-1 truncate">{it.text}</span>
+                  <ArrowDownRight className="size-3.5 shrink-0 text-warn" />
+                </button>
+                {it.onDismiss && <DismissButton title={it.dismissTitle ?? "关掉"} onDismiss={it.onDismiss} />}
+              </div>
             ))}
           </div>
         )}
@@ -257,6 +266,25 @@ export function ChatDrawer({
         )}
       </SheetContent>
     </Sheet>
+  );
+}
+
+/** A row's ✕: greyed while it goes (the row leaves once the page reloads the list). */
+function DismissButton({ title, onDismiss }: { title: string; onDismiss: () => unknown }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      title={title}
+      aria-label={title}
+      disabled={busy}
+      onClick={() => {
+        setBusy(true);
+        Promise.resolve(onDismiss()).catch(() => setBusy(false));
+      }}
+      className="mr-1 flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
+    >
+      <X className="size-3.5" />
+    </button>
   );
 }
 

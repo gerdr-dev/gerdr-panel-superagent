@@ -109,7 +109,8 @@ export function TaskStep({ card }: CardProps) {
   useEffect(() => {
     if (changing !== false && st?.handedBack !== changing) setChanging(false);
   }, [st?.handedBack]);
-  const changeable = st?.status === "done" && (st.kind === "choice" || st.kind === "value") && !!card.choose && !!board;
+  // The secretary's own questions (sN, answered through secretary.answer) aren't changed here: it already acted on the answer
+  const changeable = st?.status === "done" && (st.kind === "choice" || st.kind === "value") && !!card.choose && !!board && card.choose.fn !== "secretary.answer";
   if (changing && changeable) {
     // A question of several is changed the way it's answered; an older single ask through tasks.reanswer
     const choose = { ...card.choose!, fn: card.choose!.fn === "tasks.answerQuestion" ? card.choose!.fn : "tasks.reanswer", project: board! };
@@ -133,7 +134,7 @@ export function TaskStep({ card }: CardProps) {
         done={{
           value: done ? st.handedBack : undefined,
           dropped: !done,
-          note: done ? "已处理" : st.reason ? `已撤回：${st.reason}` : "已撤回",
+          note: done ? "已处理" : st.reason === "你关掉了" ? "你关掉了，没答" : st.reason ? `已撤回：${st.reason}` : "已撤回",
           action: changeable && (
             <button className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground" title="答错了？改成别的，worker 会收到新旧两个答案" onClick={() => setChanging(st.handedBack ?? "")}>
               <Pencil className="size-3" />

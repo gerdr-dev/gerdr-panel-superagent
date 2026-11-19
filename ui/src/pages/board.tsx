@@ -16,6 +16,7 @@ import { phoneMenu, usePhoneMenu } from "../lib/phoneMenu";
 import { useSearchItems } from "../lib/search";
 import { ago, day, findAsk, openAsks, since, type Ask, type Task, useTasks, waitedSince } from "../lib/tasks";
 import { project, run } from "../lib/gerdr";
+import { fileCardStates } from "../lib/cardstates";
 import * as core from "@gerdr/core";
 import { onShowSession } from "@gerdr/core";
 import { isSubmitEnter } from "../lib/utils";
@@ -312,6 +313,8 @@ export default function BoardPage() {
   // A conversation opened from a task's drawer (a member's avatar in a requirement) is a second layer over that drawer,
   // which stays open underneath: the user goes back and forth between the two often, and closing the chat (its way
   // back, Esc) just slides it off the drawer again instead of swapping one drawer for another
+  // The secretary's open questions (MainButton reads them): listed over its chat when that is what the drawer shows
+  const [sec, setSec] = useState<{ main?: string; open: SecAsk[] }>({ open: [] });
   const openRef = useRef(open);
   openRef.current = open;
   openChat = (session: string, task?: string) => setPeek({ session, task, from: openRef.current || undefined });
@@ -472,7 +475,7 @@ export default function BoardPage() {
         {/* Left: the secretary's conversation (a drawer) and where outside messages went; right: settings, a new task.
             Until 2026-11-16 a 秘书 / 任务面板 switch sat here too, a second way into the same conversation */}
         <div className="flex shrink-0 items-center gap-1 max-md:gap-0">
-          <MainButton onOpen={(id) => (setOpen(""), setPeek({ session: id }))} />
+          <MainButton onOpen={(id) => (setOpen(""), setPeek({ session: id }))} onAsks={setSec} />
           <Button variant="ghost" size="sm" className={clsx(phoneMenu && "max-md:hidden")} title="外面来的每条消息去了哪：交给了哪个任务、为什么没接" onClick={() => setSettings("log")}>
             <Inbox className="size-4" />
             <span className="max-md:hidden">去向</span>
@@ -577,6 +580,7 @@ export default function BoardPage() {
                 }
               : undefined
           }
+          items={sec.main && peek.session === sec.main && !peek.sub ? secItems(sec.open) : undefined}
           back={peek.from && byId[peek.from] ? { label: `回到 ${peek.from} ${byId[peek.from].title}`, onBack: () => (setPeek(null), setOpen(peek.from!)) } : undefined}
           onClose={() => setPeek(null)}
         />
@@ -652,17 +656,26 @@ function Alerts({ onLog }: { onLog: () => void }) {
  * to be judged and dispatched. A button, not a column: a healthy state takes no space; it shows what it's doing
  * (deciding, asking the user) and opens its chat, to see how it decided or to tell it something.
  */
-function MainButton({ onOpen }: { onOpen: (id: string) => void }) {
+function MainButton({ onOpen, onAsks }: { onOpen: (id: string) => void; onAsks: (a: { main?: string; open: SecAsk[] }) => void }) {
   const [main, setMain] = useState<{ id: string; status: string; waiting?: string } | null>(null);
-  // Which session is the main one only changes with the log (pushed); its state is followed live
+  const [asks, setAsks] = useState<SecAsk[]>([]);
+  // Which session is the main one only changes with the log (pushed); its state is followed live. Its own questions
+  // (local/_secask.ts) come with it: counted here, listed over its chat, their cards' states filed for cards.tsx
   useRefresh(
-    () => run<{ main: { id: string; status: string; waiting?: string } | null }>("superagent.log", { limit: 1 }).then((r) => setMain(r.main), () => {}),
+    () =>
+      run<{ main: { id: string; status: string; waiting?: string } | null; asks?: { project: string; open: SecAsk[]; cards: Record<string, unknown> } }>("superagent.log", { limit: 1 }).then((r) => {
+        setMain(r.main);
+        setAsks(r.asks?.open ?? []);
+        onAsks({ main: r.main?.id, open: r.asks?.open ?? [] });
+        if (r.asks) fileCardStates(r.asks.project, [{ cards: r.asks.cards }]);
+      }, () => {}),
     [usePanelChange("user/data")],
     { poll: 10_000 },
   );
   const m = useLiveMain(main);
   const status = m && m.status !== "gone" ? m.status : "";
-  const label = status === "running" ? "在判断" : status === "waiting" ? "等你回答" : status === "error" ? "出错了" : "";
+  // Its questions first: a session waiting (approval) or failed is rarer, and the count says how many things wait
+  const label = asks.length ? `${asks.length} 个问题` : status === "running" ? "在判断" : status === "waiting" ? "等你回答" : status === "error" ? "出错了" : "";
   // Always there: the board is the only page now, so this is the way to the secretary. None yet (or it was let go):
   // opening it starts one (secretary.open), as the 秘书 page used to on load
   const open = () => (m && status ? onOpen(m.id) : run<{ main: string }>("secretary.open", {}).then((r) => onOpen(r.main), () => {}));
@@ -670,10 +683,30 @@ function MainButton({ onOpen }: { onOpen: (id: string) => void }) {
     <Button variant="ghost" size="sm" title={`和秘书说话${label ? `（${label}）` : ""}：交给它的事、它怎么判断外面来的消息、派给了谁，都在这段对话里`} onClick={open}>
       <MessageSquare className="size-4" />
       <span className="max-md:hidden">秘书</span>
-      {label && <span className={clsx("size-1.5 rounded-full", status === "running" ? "bg-ok" : "bg-warn")} />}
-      {label && <span className="text-[11px] text-muted-foreground max-md:hidden">{label}</span>}
+      {asks.length > 0 ? (
+        // A count in the board's 等你 amber, shown on phones too: the questions are what the user mustn't miss
+        <span className="rounded-full bg-warn px-1.5 text-[11px] leading-4 font-medium text-background tabular-nums">{asks.length}</span>
+      ) : (
+        <>
+          {label && <span className={clsx("size-1.5 rounded-full", status === "running" ? "bg-ok" : "bg-warn")} />}
+          {label && <span className="text-[11px] text-muted-foreground max-md:hidden">{label}</span>}
+        </>
+      )}
     </Button>
   );
+}
+
+/** One of the secretary's own open questions (local/_secask.ts). */
+type SecAsk = { id: string; title: string; kind: string; at: number };
+
+/** The secretary's open questions as rows over its chat: each jumps to its card, ✕ closes it without an answer. */
+function secItems(open: SecAsk[]): ChatItem[] {
+  return open.map((a) => ({
+    text: `${a.kind === "none" ? "要你做" : "待你答"}：${a.title}`,
+    jump: a.id,
+    onDismiss: () => run("secretary.closeAsk", { id: a.id }),
+    dismissTitle: "关掉，不答（秘书下次会知道）",
+  }));
 }
 
 /** The main session as superagent.log last said, with its status / waiting as Gerdr pushes them now. */

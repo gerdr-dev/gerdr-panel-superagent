@@ -10,6 +10,7 @@ import { workflow } from "./_config";
 import { hold } from "./_outbox";
 import { eventCard } from "./_cards";
 import { endWaits, isOutside, open, question } from "./_waits";
+import { secAsk, secCancel } from "./_secask";
 import { GENERAL, MEMORY, nameOf } from "./_memory";
 import { skillFile } from "./_user";
 import { replyOrigin } from "./assign";
@@ -56,7 +57,7 @@ export const tools = {
   // its reply instead
   ask_human: {
     description:
-      "Put something on the user's task panel that needs them: a step only they can do (give steps), or a decision (give options). It shows in this chat as a card with everything you put in it (the title, steps / options, what to hand back), answerable right there, and on their task panel: don't write the question or the steps again in your reply — a line on why you're asking is enough. Their answer / 'done' comes to you as a message, maybe days later. Decisions and values asked while earlier ones are unanswered go in one item: you get all the answers together once every one is answered. cancel_human takes one back. When and how to ask: the my-workflow skill, references/human.md and task.md.",
+      "Put something on the user's task panel that needs them: a step only they can do (give steps), or a decision (give options). It shows in this chat as a card with everything you put in it (the title, steps / options, what to hand back), answerable right there, and on their task panel: don't write the question or the steps again in your reply — a line on why you're asking is enough. Their answer / 'done' comes to you as a message, maybe days later. Decisions and values asked while earlier ones are unanswered go in one item: you get all the answers together once every one is answered. cancel_human takes one back. When and how to ask: the my-workflow skill, references/human.md and task.md. The secretary uses it too, for anything it asks the user (a decision, a confirmation, a value, a step): its question shows as a card in its own chat and lights the 秘书 button until answered or closed.",
     input: STEP,
   },
   cancel_human: {
@@ -172,6 +173,8 @@ export async function closeSessions(ctx: Ctx, ids: string[]) {
 const SHOWN = "这一项已经作为卡片显示在这个对话里，内容和你写的一样，用户能直接在卡片上答：回复里不要再把问题、步骤写一遍，一句话说为什么要问就够了。";
 
 export function ask_human(input: any, ctx: Ctx) {
+  // The secretary has no task: its questions are its own (_secask.ts), counted on the 秘书 button
+  if (isMain(ctx, ctx.caller.session)) return secAsk(input, ctx);
   return update(ctx, (s) => {
     const t = mine(s, ctx);
     // What this one replaces goes first: a question changed since is asked anew, not left beside the old one
@@ -239,6 +242,7 @@ export function ask_human(input: any, ctx: Ctx) {
 }
 
 export function cancel_human(input: { id: string; reason: string }, ctx: Ctx) {
+  if (isMain(ctx, ctx.caller.session)) return secCancel(input, ctx);
   return update(ctx, (s) => takeBack(s, mine(s, ctx), String(input.id), input.reason));
 }
 

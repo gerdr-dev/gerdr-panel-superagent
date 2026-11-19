@@ -5,6 +5,7 @@ import { ackOrigin, add, dispatch, drop, edit, lastWords, say, start } from "./t
 import { activity, find, load, memberName, members, note, update, type Task } from "./_store";
 import { evaluate, findItem, followUp, mainId, state, updateState, type Item } from "./_main";
 import { workflow } from "./_config";
+import { secAsks } from "./_secask";
 
 /** task: on a reroute, an existing worker of the card kept for this part (it is told, not restarted). */
 type Part = { repo: string; agent?: string; model?: string; effort?: string; worktree?: boolean; title?: string; prompt?: string; task?: string };
@@ -313,6 +314,8 @@ export function log(input: { limit?: number }, ctx: Ctx) {
   const m = s.main ? ctx.sessions.get(s.main) : null;
   return {
     main: s.main ? { id: s.main, status: m?.status ?? "gone", waiting: m?.waiting, handled: s.handled } : null,
+    // Its own questions to the user (_secask.ts): the 秘书 button counts the open ones, their cards read the states
+    asks: secAsks(ctx),
     items: s.items
       .slice(-(input?.limit ?? 200))
       .reverse()
