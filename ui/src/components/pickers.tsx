@@ -96,11 +96,14 @@ export function ChoicePick({ value, options, onChange, empty = "默认" }: { val
     <select className={input} value={value} onChange={(e) => onChange(e.target.value)}>
       <option value="">{empty}</option>
       {value && !options.some((o) => o.id === value) && <option value={value}>{value}</option>}
-      {options.map((o) => (
-        <option key={o.id} value={o.id} title={o.description}>
-          {o.name === o.id ? o.id : `${o.name} (${o.id})`}
-        </option>
-      ))}
+      {/* An agent's own "default" entry (claude's efforts list one with id "") is the first option already */}
+      {options
+        .filter((o) => o.id)
+        .map((o) => (
+          <option key={o.id} value={o.id} title={o.description}>
+            {o.name === o.id ? o.id : `${o.name} (${o.id})`}
+          </option>
+        ))}
     </select>
   );
 }
