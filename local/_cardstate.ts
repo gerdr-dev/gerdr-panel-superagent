@@ -44,12 +44,21 @@ export function waitsState(t: Task, ws: Wait[]) {
  * id too, t206 on cards from before asks), wait:<task>:<since> (one wait_for's waits share their since: _waits.ts waitOn).
  */
 export function cardStates(t: Task): Record<string, unknown> {
+  // Sent with every board poll, so without what the card already has: the words unless the user changed them, the
+  // titles (cards.tsx draws its own). With them the states were a third of the whole list (2026-11-19)
   const out: Record<string, unknown> = {};
-  for (const o of t.outbox ?? []) out[`out:${t.id}~${o.id}`] = outgoingState(o);
+  for (const o of t.outbox ?? []) {
+    const { text, ...st } = outgoingState(o) as { text?: string };
+    out[`out:${t.id}~${o.id}`] = o.edited ? { ...st, text } : st;
+  }
+  const step = (a: Ask, q?: string) => {
+    const { title, ...st } = askState(a, q) as { title?: string };
+    return st;
+  };
   for (const a of t.asks ?? []) {
     for (const id of a.was ? [a.id, a.was] : [a.id]) {
-      out[`step:${id}`] = askState(a);
-      for (const q of a.questions ?? []) out[`step:${id}#${q.id}`] = askState(a, q.id);
+      out[`step:${id}`] = step(a);
+      for (const q of a.questions ?? []) out[`step:${id}#${q.id}`] = step(a, q.id);
     }
   }
   const groups = new Map<number, Wait[]>();
