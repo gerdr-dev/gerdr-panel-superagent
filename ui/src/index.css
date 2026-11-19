@@ -153,6 +153,12 @@
   mask-repeat: no-repeat;
   animation: shimmer 1.6s linear infinite;
 }
+/* For text that must stay readable while it sweeps (a running worker's newest line on a board card): the dim parts at
+   75% instead of 45% — at 45% that muted line was too faint to read (2026-11-19). */
+.shimmer.shimmer-light {
+  -webkit-mask-image: linear-gradient(90deg, rgb(0 0 0 / 0.75) calc(50% - 16px), #000 50%, rgb(0 0 0 / 0.75) calc(50% + 16px));
+  mask-image: linear-gradient(90deg, rgb(0 0 0 / 0.75) calc(50% - 16px), #000 50%, rgb(0 0 0 / 0.75) calc(50% + 16px));
+}
 @keyframes shimmer {
   from {
     -webkit-mask-position: 100% center;
@@ -164,7 +170,8 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .shimmer {
+  .shimmer,
+  .shimmer.shimmer-light {
     animation: none;
     -webkit-mask-image: none;
     mask-image: none;

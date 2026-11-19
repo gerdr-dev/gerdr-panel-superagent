@@ -844,7 +844,7 @@ function MiniCard({
       )}
       {/* Its worker's newest paragraph, live (falls back to the old summary): shimmers like 思考中 while it runs */}
       {!t.question && (t.latest || t.summary || (t.stopped && t.said)) && (
-        <p className={clsx("line-clamp-2 text-[12px] text-muted-foreground", t.live?.status === "running" && "shimmer")}>{t.latest || t.summary || t.said}</p>
+        <p className={clsx("line-clamp-2 text-[12px]", t.live?.status === "running" ? "shimmer shimmer-light text-foreground/85" : "text-muted-foreground")}>{t.latest || t.summary || t.said}</p>
       )}
       {/* What it waits on outside, drawn like 待你答 above in the chat's wait colour (brand, cards.tsx TaskWait): it was
           muted text that read like the worker's own line (2026-11-19) */}
