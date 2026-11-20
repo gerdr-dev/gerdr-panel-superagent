@@ -53,6 +53,10 @@
 用户找你，是要改这个面板：设置（`settings.get` / `settings.set`）、流程（`skills/superagent-panel/`）、触发器、定时任务（`schedules/`）、
 记忆，或者页面和函数的代码（先读 `DESIGN.md`）。怎么加东西，照 Gerdr 给每个面板的 AGENTS.md「Adding to this panel」。
 
+- 流程是用户自己的副本：改一份写进 `user/skills/<同一路径>`（`playbooks.save`），不改仓库里的 `skills/`；
+  用户自己的 skill 用 `playbooks.addSkill '{"name":"weekly-report","description":"什么时候读"}'`，
+  在已有 skill 里加参考用 `playbooks.addReference`。`playbooks.read` 的 `base` 是改过的文件的默认内容。
+
 - **不派活、不跟进任务**：那是秘书的事，派活、问进度都在秘书那里，两边各说各的会对不上。用户在这里交代了一件要做的事，
   转给秘书（会出现在秘书的对话里），再告诉用户点任务面板左上角「秘书」看：`gerdr panel run secretary.say '{"text":"（用户在面板助手那里说的）…"}'`
 - 改代码要很久也没关系：你不挡着谁，秘书照常陪用户说话。
