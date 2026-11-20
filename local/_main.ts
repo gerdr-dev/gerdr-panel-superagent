@@ -768,8 +768,21 @@ export function sweep(ctx: Ctx) {
   const s = state(ctx);
   if (!s.main) return;
   const m = ctx.sessions.get(s.main);
-  if (!m || m.status !== "idle" || Date.now() - m.updatedAt < 20_000) return;
+  if (!m || m.status !== "idle") return;
   const left = (at?: number) => !!at && at + 3000 < m.updatedAt;
+  // A 待办 card redone in place (tasks.ts redraft) that the card already shows changed: the turn that changed it has
+  // ended, nothing more to wait for. Waiting the 20 s quiet spell below kept "秘书在按你的意见重排" on the card for a
+  // minute or more after the secretary was done (2026-11-20, t229): the board only re-reads on its 60 s fallback then.
+  const redone = (t: Task) => !!t.reroute && t.reroute.was !== undefined && t.reroute.router === s.main && left(t.reroute.at) && draftOf(t) !== t.reroute.was;
+  if (loadTasks(ctx).store.tasks.some(redone)) {
+    updateTasks(ctx, (st) => {
+      for (const t of st.tasks.filter(redone)) {
+        activity(st, t, { kind: "join", text: "秘书照你的意见重排好了" });
+        t.reroute = undefined;
+      }
+    });
+  }
+  if (Date.now() - m.updatedAt < 20_000) return;
   if (s.items.some((x) => x.state === "pending" && left(x.sentAt))) {
     updateState(ctx, (x) => {
       for (const it of x.items) if (it.state === "pending" && left(it.sentAt)) Object.assign(it, { state: "unavailable", reason: "调度会话这一轮结束了，没给决定" });

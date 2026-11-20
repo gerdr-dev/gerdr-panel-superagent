@@ -185,6 +185,10 @@ export function useTasks() {
       if (t.status === "done" || t.status === "dropped") continue;
       taskIds.add(t.id);
       for (const id of [t.session, ...(t.sessions ?? []), ...(t.helpers ?? []).map((h) => h.id)]) if (id) ids.add(id);
+      // The secretary while it routes or redoes a card: its turn ending is what settles the card (_main.ts sweep).
+      // Unwatched, the board noticed only on its 60 s fallback and the card kept saying it was being redone.
+      if (t.reroute?.router) ids.add(t.reroute.router);
+      if (t.routing && t.router) ids.add(t.router);
     }
     return { ids, taskIds };
   }, [tasks]);
