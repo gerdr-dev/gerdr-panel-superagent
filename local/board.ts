@@ -72,7 +72,7 @@ export const tools = {
   },
   reply_message: {
     description:
-      "Say something to the people in a chat your task follows (a Slack DM or thread it came from): an answer to them, a question, the result. This is the only way to write to them: never send it with slackctl, an API or any other tool. event: the message id you answer (given with each message passed to you); left out, the message the task came from. The user's settings decide whether it goes at once or waits as a card for them to send or not; either way you get no word back on it: don't wait for it, don't ask about it, carry on. Not for a task someone asked of the user through another panel (my_task shows requestedBy): that's reply_requester.",
+      "Say something to the people in a chat your task follows (a Slack DM or thread it came from): an answer to them, a question, the result. This is the only way to write to them: never send it with another command-line tool or an API. event: the message id you answer (given with each message passed to you); left out, the message the task came from. The user's settings decide whether it goes at once or waits as a card for them to send or not; either way you get no word back on it: don't wait for it, don't ask about it, carry on. Not for a task someone asked of the user through another panel (my_task shows requestedBy): that's reply_requester.",
     input: {
       type: "object",
       properties: {
@@ -140,7 +140,7 @@ export function instructions(input: unknown, ctx: Ctx) {
     `${ctx.fs.root}/${MEMORY}/${t.repo ? nameOf(t.repo) : "…"}.md and ${GENERAL}.md there — add to them with remember ` +
     `(when: ${skillFile(ctx, "my-workflow/references/memory.md")}).` +
     (t.origin?.reply && !t.assigned
-      ? ` It came from a chat (${t.origin.source}): to write to the people there, use reply_message, never slackctl or another ` +
+      ? ` It came from a chat (${t.origin.source}): to write to the people there, use reply_message, never another ` +
         `tool. ${workflow(ctx).replies === "review" ? "The user looks at each one and sends it or not; you are not told which, so carry on without waiting." : ""}`
       : "") +
     (t.assigned

@@ -14,7 +14,7 @@ export const tools = {
     input: {
       type: "object",
       properties: {
-        text: { type: "string", description: "The fact in one sentence, as the user would say it (billing-service 发布要在 maersk 发审批，找张三批). Empty with replaces: forget that line" },
+        text: { type: "string", description: "The fact in one sentence, as the user would say it (billing-service 发布要在发布平台发审批，找张三批). Empty with replaces: forget that line" },
         repo: { type: "string", description: "Absolute path of the repository it is about, or \"general\" when it holds for all of them. Left out: your task's repository" },
         replaces: { type: "string", description: "A few words of the line it corrects (the user changed their mind): that line is replaced rather than a second, contradicting one added" },
       },

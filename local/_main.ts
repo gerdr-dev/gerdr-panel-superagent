@@ -659,7 +659,7 @@ function taskBlock(t: Task, agents: { id: string; name: string }[]) {
     .join("\n");
 }
 
-/** One outside message as the fold line of the chat: "[消息 c21] slack-me · 林刚：好，等我看个线上问题". */
+/** One outside message as the fold line of the chat: "[消息 c21] slack-me · 张三：好，等我看个线上问题". */
 function eventLine(it: Item) {
   const e = it.event;
   return `[消息 ${it.id}] ${e.source}${who(e) ? ` · ${who(e)}` : ""}：${cut(e.text || e.title || "", 40)}`;
