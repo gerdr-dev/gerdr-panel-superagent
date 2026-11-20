@@ -10,7 +10,7 @@ import { eventCard } from "./_cards";
 export const tools = {
   remember: {
     description:
-      "Write down something the user's later tasks must know about a repository (or about all of them), in the user's own memory for this board: whether it ships through an MR or straight to the target branch, who merges, who approves a release and where, a pitfall they told you about. Every later worker in that repository starts with it. Only what the user said or confirmed, never your own guess. When to remember and how to word it: the my-workflow skill, references/memory.md.",
+      "Write down something the user's later tasks must know about a repository (or about all of them), in the user's own memory for this board: whether it ships through an MR or straight to the target branch, who merges, who approves a release and where, a pitfall they told you about. Every later worker in that repository starts with it. Only what the user said or confirmed, never your own guess. When to remember and how to word it: the superagent-panel skill, references/memory.md.",
     input: {
       type: "object",
       properties: {
@@ -23,7 +23,7 @@ export const tools = {
   },
   note: {
     description:
-      "Write down, change or delete a line of the user's mid-term memory: what is going on right now and who it involves, for any agent of this board to look up later (memory.mid) when a message or a person needs connecting to work. E.g. who a task is waiting on and for what, a colleague the user asked something on a task's behalf, what someone is working on with the user lately, news on something under way. Your own observations count (unlike remember); delete the line once it's settled. When to write one and how to word it: the my-workflow skill, references/mid-memory.md.",
+      "Write down, change or delete a line of the user's mid-term memory: what is going on right now and who it involves, for any agent of this board to look up later (memory.mid) when a message or a person needs connecting to work. E.g. who a task is waiting on and for what, a colleague the user asked something on a task's behalf, what someone is working on with the user lately, news on something under way. Your own observations count (unlike remember); delete the line once it's settled. When to write one and how to word it: the superagent-panel skill, references/mid-memory.md.",
     input: {
       type: "object",
       properties: {
@@ -251,7 +251,7 @@ export function forWorker(ctx: Ctx, repo: string) {
   if (!own && !all) return "";
   return (
     `\nThe user's memory for this board — what earlier tasks learned from them; follow it like their rules, and correct it ` +
-    `with the remember tool when they say otherwise (when: their my-workflow skill, ${skillFile(ctx, "my-workflow/references/memory.md")}):\n` +
+    `with the remember tool when they say otherwise (when: their superagent-panel skill, ${skillFile(ctx, "superagent-panel/references/memory.md")}):\n` +
     (own ? `\n### ${name}\n${own}\n` : "") +
     (all ? `\n### 所有仓库\n${all}\n` : "")
   );

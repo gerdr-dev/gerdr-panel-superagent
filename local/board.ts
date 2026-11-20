@@ -57,7 +57,7 @@ export const tools = {
   // its reply instead
   ask_human: {
     description:
-      "Put something on the user's task panel that needs them: a step only they can do (give steps), or a decision (give options). It shows in this chat as a card with everything you put in it (the title, steps / options, what to hand back), answerable right there, and on their task panel: don't write the question or the steps again in your reply — a line on why you're asking is enough. Their answer / 'done' comes to you as a message, maybe days later. Decisions and values asked while earlier ones are unanswered go in one item: you get all the answers together once every one is answered. cancel_human takes one back. The user may also ignore it (an ✕ on the card, usually because it went moot): you're told at the start of your next turn, and nothing waits on it any more. When and how to ask: the my-workflow skill, references/human.md and task.md. The secretary uses it too, for anything it asks the user (a decision, a confirmation, a value, a step): its question shows as a card in its own chat and lights the 秘书 button until answered or closed.",
+      "Put something on the user's task panel that needs them: a step only they can do (give steps), or a decision (give options). It shows in this chat as a card with everything you put in it (the title, steps / options, what to hand back), answerable right there, and on their task panel: don't write the question or the steps again in your reply — a line on why you're asking is enough. Their answer / 'done' comes to you as a message, maybe days later. Decisions and values asked while earlier ones are unanswered go in one item: you get all the answers together once every one is answered. cancel_human takes one back. The user may also ignore it (an ✕ on the card, usually because it went moot): you're told at the start of your next turn, and nothing waits on it any more. When and how to ask: the superagent-panel skill, references/human.md and task.md. The secretary uses it too, for anything it asks the user (a decision, a confirmation, a value, a step): its question shows as a card in its own chat and lights the 秘书 button until answered or closed.",
     input: STEP,
   },
   cancel_human: {
@@ -133,12 +133,12 @@ export function instructions(input: unknown, ctx: Ctx) {
     `this chat: the user reads it here, so say things in your replies as you normally would, results in full. There is ` +
     `nothing to report: when your turn ends and you wait on nothing, the task goes before the user with what you said. ` +
     `Waiting on someone or something: wait_for; something only the user can decide or do: ask_human. How to work on it ` +
-    `is their my-workflow skill, ${skillFile(ctx, "my-workflow/references/task.md")}: read it before you stop. my_task shows the task as the panel sees it. ` +
+    `is their superagent-panel skill, ${skillFile(ctx, "superagent-panel/references/task.md")}: read it before you stop. my_task shows the task as the panel sees it. ` +
     `Your questions and steps for the user have ids (a5, a5#1) for your tools only: the panel doesn't show them, so to ` +
     `the user name the question itself ("套餐商品配置那个问题"), never "卡片 a5" or "a5#1". ` +
     `What the user's memory says about this repository and all of them came in your first message; the files are ` +
     `${ctx.fs.root}/${MEMORY}/${t.repo ? nameOf(t.repo) : "…"}.md and ${GENERAL}.md there — add to them with remember ` +
-    `(when: ${skillFile(ctx, "my-workflow/references/memory.md")}).` +
+    `(when: ${skillFile(ctx, "superagent-panel/references/memory.md")}).` +
     (t.origin?.reply && !t.assigned
       ? ` It came from a chat (${t.origin.source}): to write to the people there, use reply_message, never another ` +
         `tool. ${workflow(ctx).replies === "review" ? "The user looks at each one and sends it or not; you are not told which, so carry on without waiting." : ""}`

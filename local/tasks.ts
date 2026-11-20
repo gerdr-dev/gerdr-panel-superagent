@@ -36,7 +36,7 @@ function workerProtocol(ctx: Ctx, id: string) {
 ---
 This is task ${id} on the user's Superagent task panel: opening it there opens this chat. Nothing to report: say it
 in your replies, conclusion first. How to work on it (waiting on others, asking them, sessions you start) is their
-my-workflow skill: read ${skillFile(ctx, "my-workflow/references/task.md")} first.
+superagent-panel skill: read ${skillFile(ctx, "superagent-panel/references/task.md")} first.
 `;
 }
 

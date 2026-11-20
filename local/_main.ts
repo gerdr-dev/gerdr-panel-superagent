@@ -338,7 +338,7 @@ async function brief(ctx: Ctx): Promise<string> {
     `你是用户的秘书（Superagent）。用户只跟你一个人说话：什么事都交给你，问进度、要日报也找你。你不亲手做事，把活派给 worker，` +
       `跟着它们，替用户记着每一件事，该他知道、该他拍板的时候告诉他。要派的活也都先到你这里：用户交给你的、任务面板上建的任务，和外面来的消息（私信、@、告警……）。`,
     talkText(ctx),
-    // How it judges is the user's prose (流程 → my-workflow/references/dispatch.md), theirs to read and change; only the
+    // How it judges is the user's prose (流程 → superagent-panel/references/dispatch.md), theirs to read and change; only the
     // command and the facts below are the code's
     textOf(ctx, DISPATCH) || `判断规则（用户的 dispatch.md）不见了：只分派，不自己动手、不等待；拿不准就问用户。`,
     `## 外面来的消息 [消息 cN]：一条命令给出这一批的决定\n` +
@@ -379,12 +379,12 @@ async function brief(ctx: Ctx): Promise<string> {
 }
 
 /** The skill files the brief carries whole (the router doesn't read skills: DESIGN.md, 「派活要快」). */
-const SECRETARY = "my-workflow/references/secretary.md";
-const ROUTING = "my-workflow/references/routing.md";
-const DISPATCH = "my-workflow/references/dispatch.md";
-const COMPACT = "my-workflow/references/compact.md";
-const PROACTIVE = "my-workflow/references/proactive.md";
-const MIDMEM = "my-workflow/references/mid-memory.md";
+const SECRETARY = "superagent-panel/references/secretary.md";
+const ROUTING = "superagent-panel/references/routing.md";
+const DISPATCH = "superagent-panel/references/dispatch.md";
+const COMPACT = "superagent-panel/references/compact.md";
+const PROACTIVE = "superagent-panel/references/proactive.md";
+const MIDMEM = "superagent-panel/references/mid-memory.md";
 
 /**
  * How it talks with the user: the mechanism (what each kind of message is, how its reply reaches the user, the

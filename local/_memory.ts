@@ -1,6 +1,6 @@
 // The user's memory: facts about their projects that the agents learn while working (this repository goes without an
 // MR, that one's release is approved by someone) and that every later task should start with. Not a skill: the skill
-// (my-workflow) is how the user works in general, in their words; memory is what holds for one repository, collected
+// (superagent-panel) is how the user works in general, in their words; memory is what holds for one repository, collected
 // along the way. When to write one is the skill's (references/memory.md), the files are here.
 //
 // One markdown file per repository, named after its folder, plus one for what holds everywhere: user/memory/, this

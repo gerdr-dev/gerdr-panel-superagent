@@ -47,7 +47,7 @@ export const tools = {
       "{type: time, minutes}: the timeout, required: woken after that long if nothing else came; " +
       "Every wait needs a time item as its timeout (how long it should take): whoever you wait on may never answer — stuck, offline, forgot; a wait without one is refused. Handed work to a session you started (gerdr session new, here or on another computer)? You are the one who waits for it, the same way: its report wakes you first; past the timeout, go and see where it's stuck. " +
       "Waiting on a person to do something you can see (approve, merge, deploy)? Give both a message and a check. " +
-      "Your card stays in progress meanwhile, showing `what`. When the last thing you waited on came and you got something done with it (it went live, a check passed), say that result in your reply first. Then end your turn; when woken and still waiting, call it again (it replaces the last one). When to use: the my-workflow skill, references/task.md.",
+      "Your card stays in progress meanwhile, showing `what`. When the last thing you waited on came and you got something done with it (it went live, a check passed), say that result in your reply first. Then end your turn; when woken and still waiting, call it again (it replaces the last one). When to use: the superagent-panel skill, references/task.md.",
     input: {
       type: "object",
       properties: {

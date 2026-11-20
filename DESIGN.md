@@ -192,7 +192,7 @@ worker 拿到一组 面板工具（`local/board.ts`，经 Gerdr 的 `gerdr panel
 
 ## 交付和等待：一份「在等」，MR 不是特殊流程
 
-用户的规则在 `skills/my-workflow/references/deliver.md`：有的仓库开 MR，有的可以直推。
+用户的规则在 `skills/superagent-panel/references/deliver.md`：有的仓库开 MR，有的可以直推。
 所以不能拿「有没有 MR」来判断做没做完。worker 汇报的是现在怎样：
 
 - `review`：做完了，或者有结论了，等用户看。
@@ -624,7 +624,7 @@ t123（PortAI 计费税率，portai 仓库）要在新后台 portai-console 加�
   变基、合并、合并之后的事都归 worker（照 `mr.md`）。
   **被否掉的做法：MR 的来源自己 `sessions.send` 给 worker。** 另一条路：看不到记录，worker 也交不回。
 - **主动工作**（dsh 的 inferred + observe）：触发器里把一个来源设成「不是找我的」（频道闲聊、告警），它的事件只按
-  `skills/my-workflow/references/proactive.md` 里用户自己写的规则接，接的时候写明是哪条规则，worker 只做那条允许的，
+  `skills/superagent-panel/references/proactive.md` 里用户自己写的规则接，接的时候写明是哪条规则，worker 只做那条允许的，
   也不在原对话里说「收到」（没人在等）。模式在「设置 → 主动工作」：关 / 只记录（默认）/ 照做。只记录时，决定记成
   「本来会接」，连同它会怎么派；「去向」里点「照做」就照那样建任务。新规则先只记录、看着对了再放开，dsh 的建议。
   `triggers/mr.json` 也标成「不是找我的」：没人跟的 MR 上的动静，没有规则就不接。
@@ -642,7 +642,7 @@ t123（PortAI 计费税率，portai 仓库）要在新后台 portai-console 加�
 - **只有代码照着做的值**是「设置」（`user/settings.json`，结构和默认值在 `ui/src/lib/settings.ts`）：调度会话和 worker
   用哪个 agent / 模型、仓库列表、GitLab 地址、主动工作的模式。
   有类型、能校验；为什么这么选写在页面上每一项的说明里。只存和默认不同的那些，以后改了默认值，没选过的人能拿到。
-- **agent 拿来判断的**是「流程」，用户自己的话（`skills/my-workflow/`）：怎么交付、review 意见怎么处理、怎么挑仓库、
+- **agent 拿来判断的**是「流程」，用户自己的话（`skills/superagent-panel/`）：怎么交付、review 意见怎么处理、怎么挑仓库、
   主动工作的规则、要用户亲手做的事怎么交给他。
 - **两边都要的**放在设置里，只有一份，代码把它写进给 agent 的消息：调度会话的第一条消息里有仓库（带说明）和 worker 的默认模型。
   agent 不读设置文件。
@@ -770,7 +770,7 @@ agent 复盘也要整条链。所以：
 ## 让 agent 怎么做事，写在「流程」里，不写死在代码里
 
 worker 在看板上怎么做（每次停下要汇报、自己开的会话来问问题先自己答、给用户看的东西怎么嵌）在
-`skills/my-workflow/references/task.md`；调度会话怎么判断（接 / 并进 / 停 / 不接）在 `dispatch.md`。
+`skills/superagent-panel/references/task.md`；调度会话怎么判断（接 / 并进 / 停 / 不接）在 `dispatch.md`。
 交接说明和工具说明只讲机制（参数、命令格式），再指向这两份；调度会话的说明从 `dispatch.md` 原样读进去（用户改过就用改过的，
 改了以后下一条消息会带上新规则）。用户的话：这些「应该可以观测，而不是我们写死的」——在「流程」页看得到、改得了，
 改了只在自己这里（`user/skills/`），随时能恢复默认。
@@ -830,6 +830,6 @@ worker 在看板上怎么做（每次停下要汇报、自己开的会话来问�
 | `ui/src/components/SettingsSheet.tsx`、`ui/src/settings/` | 「去向」「设置」「流程」「触发器」「定时任务」（不是单独的页面：两页右上角都能打开） |
 | `ui/src/components/ChatDrawer.tsx` | worker 对话的抽屉（`SessionChat`） |
 | `ui/src/cards.tsx` | 对话里的 `task-step` 卡片 |
-| `skills/my-workflow/` | 用户本人的做事方式（给所有 agent 看） |
+| `skills/superagent-panel/` | 用户本人的做事方式（给所有 agent 看） |
 | `local/_memory.ts`、`local/memory.ts`、`ui/src/settings/Memory.tsx` | 记忆：文件读写、`remember` / `note` 工具、给 agent 的那段、中期记忆的列表（`memory.mid`）、「记忆」页 |
 | `schedules/` | 定时任务 |

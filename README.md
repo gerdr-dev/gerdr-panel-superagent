@@ -19,7 +19,7 @@
 - 主动工作：不是找你的事（频道闲聊、告警）只按你在「流程 → proactive」里写的规则接；「设置 → 主动工作」默认只记录它本来会怎么做，看对了再放开。
 - 要你处理的在任务面板上突出：「等你」一列有东西就高亮，派不出去的卡片描黄边；Superagent 自己需要你看的（它在问你、没判断成的消息、主动工作记下的）在任务面板上方一行一条，正常时不占地方。
 - 任务面板右上角的齿轮：「设置」是代码照着做的值（谁派活、谁干活、仓库列表、MR 合不合、主动工作开不开），默认都是手动的，按需改；
-  「流程」是你用自己的话写的做事方式（`skills/my-workflow/`：怎么交付、review 意见怎么处理、怎么挑仓库），agent 读它。
+  「流程」是你用自己的话写的做事方式（`skills/superagent-panel/`：怎么交付、review 意见怎么处理、怎么挑仓库），agent 读它。
   「记忆」是每个仓库的具体情况（走不走 MR、谁来合、发布找谁批）：worker 从你说的话里记下来，以后派到这个仓库的 worker 一开始就带着；错了直接改。
 
 **安装**：Gerdr 设置 → 面板 → 从 GitHub 安装面板，填 `https://github.com/gerdr-dev/gerdr-panel-superagent`。
@@ -39,7 +39,7 @@
 这个面板只有一页：任务面板（`ui/src/pages/board.tsx`；`index.tsx` 就是它）。左上角「秘书」打开秘书的对话（会话、系统提示词和压缩在 `local/_main.ts`，
 简报这些调的函数在 `local/secretary.ts`），「去向」看外面来的每条消息去了哪。任务面板上的任务都是派给 agent 的（worker 要用户做的步骤、要他定的事挂在它自己的任务上，不另成任务），按「待办 / 进行中 / 待验收 / 已完成」排（等你的在进行中里排最前、标黄），
 数据在 `user/data/reqs/`（每部分一个文件，`local/_parts.ts`；完成很久的移到 `user/data/archive/`，`local/_archive.ts`），读写都走 `local/_store.ts`。任务面板右上角的齿轮是任务面板设置：「设置」（`ui/src/settings/Settings.tsx`，`user/settings.json`）、「流程」（`ui/src/settings/Flow.tsx`，
-编辑 `skills/my-workflow/`）和「定时任务」（`ui/src/settings/Schedules.tsx`，`schedules/`）。
+编辑 `skills/superagent-panel/`）和「定时任务」（`ui/src/settings/Schedules.tsx`，`schedules/`）。
 
 ## 两个 agent：你是哪一个
 
@@ -50,7 +50,7 @@
 
 ## 面板助手做什么
 
-用户找你，是要改这个面板：设置（`settings.get` / `settings.set`）、流程（`skills/my-workflow/`）、触发器、定时任务（`schedules/`）、
+用户找你，是要改这个面板：设置（`settings.get` / `settings.set`）、流程（`skills/superagent-panel/`）、触发器、定时任务（`schedules/`）、
 记忆，或者页面和函数的代码（先读 `DESIGN.md`）。怎么加东西，照 Gerdr 给每个面板的 AGENTS.md「Adding to this panel」。
 
 - **不派活、不跟进任务**：那是秘书的事，派活、问进度都在秘书那里，两边各说各的会对不上。用户在这里交代了一件要做的事，
@@ -79,7 +79,7 @@
   `ask_human` 挂在它的任务上（编号 `aN`，任务列表里写着）；用户在对话里说做完了 / 选了哪个，你替他调 `tasks.complete` /
   `tasks.answerQuestion`。密码 / token 永远不要让用户在对话里贴。
 - 任务面板派出去的 worker 不给你发「Gerdr 回报」：用户在任务面板上看它们，要你去看的由定时检查（[检查]）交给你。
-- 用户的工作方式是 `skills/my-workflow/` 这个 skill（「流程」页编辑）：你和你派出去的 worker 都有它，要用时自己读对应的参考
+- 用户的工作方式是 `skills/superagent-panel/` 这个 skill（「流程」页编辑）：你和你派出去的 worker 都有它，要用时自己读对应的参考
   （怎么交付、MR 上的新情况怎么处理……）。用户说「以后都这样」「改一下规则」：是做事方式就改这个 skill；是代码照着做的值
   （模型、仓库、主动工作的模式）就改设置：`gerdr panel run settings.set '{"proactive":"on"}'`
   （只给要改的那部分；`settings.get` 看现在的）；是某个仓库的情况（「这个仓库以后直接推」「发布找 xx 批」）就用 `remember`
@@ -87,7 +87,7 @@
   worker 交结果分三种：`done`（做完、不用用户看）、`delivering`（开了 MR 在等合并）、`review`（要用户判断结论）。
   worker `wait_for` 等着的 MR 交给 GitLab MR 插件盯（要装它，glab 登录过那个 GitLab）：等的时候面板写一个带 `until` 的 trigger，
   MR 的状态满足条件（新意见、流水线跑完、能合了、合并了……）就叫醒那个 worker，晚一点等也不会错过；怎么处理照它的 `mr.md`。
-- 回复怎么写、什么时候打扰用户、简报怎么写：用户的 `skills/my-workflow/references/secretary.md`。
+- 回复怎么写、什么时候打扰用户、简报怎么写：用户的 `skills/superagent-panel/references/secretary.md`。
 - 用户在对话里说「通过 / 打回 / 那个问题选 A」，就替他调 `tasks.accept` / `tasks.reject {"id","feedback"}` /
   `tasks.answer {"id","answer"}`；worker 请他做的一步做完了、或替他定了 worker 问的事，是 `tasks.complete {"id":"aN","value"}`，
   几个问题里的一个是 `tasks.answerQuestion {"id":"aN","q","value"}`，说不用了是 `tasks.dropAsk {"id":"aN","reason"}`。改任务内容用 `tasks.edit`。

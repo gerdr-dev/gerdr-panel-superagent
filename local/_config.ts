@@ -49,7 +49,7 @@ export function diff(s: Settings): any {
 const VAR = /\{\{([^:{}]+):([^;{}]*)(?:;[^{}]*)?\}\}/g;
 
 /**
- * These values used to be {{name: value ; type}} variables in skills/my-workflow (repos.md, models.md, deliver.md,
+ * These values used to be {{name: value ; type}} variables in skills/superagent-panel (repos.md, models.md, deliver.md,
  * mr.md, proactive.md). The first read without a settings file takes them from this person's skill files and writes
  * user/settings.json. Their copies of repos.md / models.md (nothing but these values) go to the Trash; in their other
  * copies each {{…}} becomes its plain value, since nothing reads the syntax any more.
@@ -99,7 +99,7 @@ function migrate(ctx: Ctx) {
 
 // ---- once: the MR settings into this person's skill ----
 
-const MR = "skills/my-workflow/references/mr.md";
+const MR = "skills/superagent-panel/references/mr.md";
 
 /**
  * How MRs are merged and rebased used to be settings (user/settings.json mr), when the MR watcher did it. The worker

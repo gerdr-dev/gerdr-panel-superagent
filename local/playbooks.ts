@@ -1,11 +1,11 @@
 // The 流程 page: the user's skills (skills/<name>/SKILL.md + references/*.md), prose in their own words that the
 // agents read as a skill. Nothing here interprets it; values the code acts on are settings (local/settings.ts).
 
-import { effective, mine, overlay } from "./_user";
+import { effective, migrate, mine, overlay } from "./_user";
 
 export const DIR = "skills";
 
-// Paths inside skills/: a skill's SKILL.md or one of its references (my-workflow/references/mr.md). No "..".
+// Paths inside skills/: a skill's SKILL.md or one of its references (superagent-panel/references/mr.md). No "..".
 const PATH = /^[\w\u4e00-\u9fff-]+(\/[\w\u4e00-\u9fff.-]+)*\.md$/;
 const ok = (p: string) => PATH.test(p) && !p.split("/").includes("..");
 
@@ -15,6 +15,7 @@ const ok = (p: string) => PATH.test(p) && !p.split("/").includes("..");
  * (reset brings the default back); `own`: a file only they have.
  */
 export function list(input: unknown, ctx: Ctx) {
+  migrate(ctx);
   return overlay(ctx, DIR)
     .filter((f) => f.rel.endsWith(".md"))
     .map((f) => {

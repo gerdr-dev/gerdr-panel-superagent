@@ -19,7 +19,7 @@ export function effective(ctx: Ctx, rel: string): string | null {
 }
 
 /**
- * The absolute path of a skill's file as it counts for this person (`my-workflow/references/task.md`), for a message
+ * The absolute path of a skill's file as it counts for this person (`superagent-panel/references/task.md`), for a message
  * to an agent: "the skill, references/x.md" sends it searching the disk for the file, a path it can just read.
  */
 export function skillFile(ctx: Ctx, rel: string): string {
@@ -42,11 +42,27 @@ export function overlay(ctx: Ctx, dir: string): { rel: string; path: string; min
   return [...out.values()];
 }
 
+const OLD_SKILL = `${USER}/skills/my-workflow`;
+const NEW_SKILL = `${USER}/skills/superagent-panel`;
+
 /**
  * Before user/: tasks and the log were in data/, triggers turned on in triggers/inbox-*.json. Moved once, the first
  * time anything reads them; nothing to do afterwards.
  */
 export function migrate(ctx: Ctx) {
+  // The workflow skill was called my-workflow until 2026-11-20: a person's own copies of its files move to the new name
+  // (one kept already under the new name wins), else Gerdr would merge them in as a second skill missing its SKILL.md
+  if (ctx.fs.stat(OLD_SKILL)) {
+    for (const f of ctx.fs.list(OLD_SKILL)) {
+      if (f.dir) continue;
+      const to = `${NEW_SKILL}/${f.path.slice(OLD_SKILL.length + 1)}`;
+      if (!ctx.fs.stat(to)) {
+        ctx.fs.mkdir(to.slice(0, to.lastIndexOf("/")));
+        ctx.fs.move(f.path, to);
+      }
+    }
+    ctx.fs.trash(OLD_SKILL);
+  }
   if (ctx.fs.stat("data")) {
     for (const f of ctx.fs.list("data")) {
       if (f.dir) continue;
