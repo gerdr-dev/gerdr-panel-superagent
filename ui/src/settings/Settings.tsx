@@ -259,7 +259,9 @@ function Repos({ repos, onChange }: { repos: Repo[]; onChange: (r: Repo[]) => vo
   const [add, setAdd] = useState("");
   const at = (i: number, r: Partial<Repo>) => onChange(repos.map((x, j) => (j === i ? { ...x, ...r } : x)));
   const push = () => {
-    const p = add.trim();
+    // A completed folder ends in / (PathPick fills "…/gerdr/" to list what's inside): stored without it, so the
+    // same repository isn't added twice and its name shows
+    const p = add.trim().replace(/(.)\/+$/, "$1");
     if (p && !repos.some((r) => r.path === p)) onChange([...repos, { path: p }]);
     setAdd("");
   };
@@ -284,7 +286,7 @@ function Repos({ repos, onChange }: { repos: Repo[]; onChange: (r: Repo[]) => vo
       ))}
       <div className="flex items-start gap-1.5">
         <div className="min-w-0 flex-1">
-          <PathPick value={add} onChange={setAdd} placeholder="加一个仓库的绝对路径" />
+          <PathPick value={add} onChange={setAdd} onEnter={push} placeholder="加一个仓库的绝对路径，或输入名字找最近用过的项目" />
         </div>
         <Button variant="outline" disabled={!add.trim()} onClick={push}>
           <Plus className="size-3.5" />
