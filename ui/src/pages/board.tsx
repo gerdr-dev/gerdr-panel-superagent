@@ -851,9 +851,8 @@ function MiniCard({
         <span className="shrink-0 font-mono whitespace-nowrap">{t.id}</span>
         {/* Its worker's state in the id line, with the dot Code mode's tabs use, so a glance down a column reads it.
             The dot says the state (在跑 / 停下 / 等你…), so only the time follows it; the words stay in the tooltip */}
-        {/* A finished task still shows its worker's dot while the conversation is alive (someone talks to it after
-            it's done: running, or a new reply not read yet); a closed conversation shows nothing there */}
-        {live && (open || (t.live && liveDot(t, unread))) && (
+        {/* Whatever column it's in: a done task's worker can still be talked to, and its dot should say so */}
+        {live && (
           <span title={live} className={clsx("inline-flex min-w-0 items-center gap-1", liveTone(t) !== "text-ok" && liveTone(t))}>
             {liveDot(t, unread) && <span className={clsx("inline-block size-1.5 shrink-0 rounded-full", liveDot(t, unread))} />}
             <span className="truncate">{live.includes(" · ") ? live.slice(live.lastIndexOf(" · ") + 3) : live}</span>
