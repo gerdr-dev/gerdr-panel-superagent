@@ -34,14 +34,26 @@ function keep(key: string, v: unknown) {
     localStorage.setItem(KEPT, JSON.stringify(all));
   } catch {}
 }
-function known<T>(project: string, key: string): T | undefined {
-  const b = cardState<T>(project, key);
-  if (b !== undefined) return b;
+function known<T>(project: string, key: string, final: (v: T) => boolean): T | undefined {
   const k = `${project}\n${key}`;
-  if (seen.has(k)) return seen.get(k) as T;
-  const v = kept()[k] as T | undefined;
-  if (v !== undefined) seen.set(k, v);
-  return v;
+  let mine = seen.get(k) as T | undefined;
+  if (mine === undefined) {
+    mine = kept()[k] as T | undefined;
+    if (mine !== undefined) seen.set(k, mine);
+  }
+  return newer(mine, cardState<T>(project, key), final);
+}
+
+/**
+ * Which of two answers about one card to draw: `next`, unless `cur` is final and `next` isn't. A final state can't
+ * change any more, so a pending one arriving after it is stale: the board's tasks.list sent before the user clicked
+ * 不发, answered after the card's own outbox.status. Drawing it flipped the card back to 待发送 until the board's next
+ * poll (2026-11-20).
+ */
+function newer<T>(cur: T | undefined, next: T | undefined, final: (v: T) => boolean): T | undefined {
+  if (next === undefined) return cur;
+  if (cur !== undefined && final(cur) && !final(next)) return cur;
+  return next;
 }
 
 /**
@@ -51,7 +63,10 @@ function known<T>(project: string, key: string): T | undefined {
  */
 function useCardStatus<T>(project: string | undefined, key: string | null, ask: () => Promise<T>, final: (v: T) => boolean, every: number): [T | undefined, () => Promise<void>] {
   const p = project && key ? project : "";
-  const [st, setSt] = useState<T | undefined>(() => (p ? known<T>(p, key!) : undefined));
+  const [st, setSt] = useState<T | undefined>(() => (p ? known<T>(p, key!, final) : undefined));
+  const finalRef = useRef(final);
+  finalRef.current = final;
+  const settle = (v: T | undefined) => setSt((cur) => newer(cur, v, finalRef.current));
   const askRef = useRef(ask);
   askRef.current = ask;
   const alive = useRef(true);
@@ -60,9 +75,9 @@ function useCardStatus<T>(project: string | undefined, key: string | null, ask: 
     return askRef.current().then(
       (v) => {
         const k = `${p}\n${key}`;
-        seen.set(k, v);
-        if (final(v)) keep(k, v);
-        if (alive.current) setSt(v);
+        seen.set(k, newer(seen.get(k) as T | undefined, v, finalRef.current));
+        if (finalRef.current(v)) keep(k, v);
+        if (alive.current) settle(v);
       },
       () => {},
     );
@@ -70,14 +85,14 @@ function useCardStatus<T>(project: string | undefined, key: string | null, ask: 
   useEffect(() => {
     alive.current = true;
     if (!p) return;
-    setSt(known<T>(p, key!));
+    setSt(known<T>(p, key!, finalRef.current));
     // The board answered for it (its poll runs every few seconds while it's loaded): nothing to ask
     const byBoard = () => boardFresh(p, every * 2) && cardState(p, key!) !== undefined;
     if (!byBoard()) void get();
     const timer = setInterval(() => !byBoard() && get(), every);
     const off = onCardStates(() => {
       const v = cardState<T>(p, key!);
-      if (v !== undefined && alive.current) setSt(v);
+      if (v !== undefined && alive.current) settle(v);
     });
     return () => {
       alive.current = false;
