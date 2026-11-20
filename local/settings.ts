@@ -48,17 +48,72 @@ export function set(input: Partial<Record<keyof Settings, any>>, ctx: Ctx) {
   return next;
 }
 
-/** For a repository: { path? } → the folders in it, plus the user's recent projects to start from. */
-export function browse(input: { path?: string }, ctx: Ctx) {
-  const recent = ctx.dirs
+/** The user's projects, most recently used first (gerdr's own panel folders left out). */
+const recentProjects = (ctx: Ctx) =>
+  ctx.dirs
     .recent()
     .map((d) => d.path)
-    .filter((p) => !p.includes("/.gerdr/"))
-    .slice(0, 12);
+    .filter((p) => !p.includes("/.gerdr/"));
+
+const parentOf = (p: string) => p.replace(/\/[^/]*\/?$/, "") || "/";
+
+// Half-typed text reaches these on every keystroke (~someone, a folder that can't be read): nothing, not an error
+const statOf = (ctx: Ctx, p: string) => {
+  try {
+    return ctx.dirs.stat(p);
+  } catch {
+    return null;
+  }
+};
+const listOf = (ctx: Ctx, p: string) => {
+  try {
+    return ctx.dirs.list(p);
+  } catch {
+    return [];
+  }
+};
+
+/**
+ * For a repository: { path? } → the folders in it, plus the user's recent projects to start from. A path that isn't a
+ * folder (half typed, a file, gone) opens at the nearest folder above it, so the browser starts where the field points.
+ */
+export function browse(input: { path?: string }, ctx: Ctx) {
+  let path = input?.path?.trim() || ctx.dirs.home();
   // ~ expanded (dirs.stat does it)
-  const path = ctx.dirs.stat(input.path || ctx.dirs.home())?.path ?? ctx.dirs.home();
-  const entries = ctx.dirs.list(path).map((d) => ({ name: d.name, path: d.path }));
-  return { path, home: ctx.dirs.home(), recent, entries };
+  let st = statOf(ctx, path);
+  for (let i = 0; (!st || !st.dir) && path !== "/" && i < 64; i++) st = statOf(ctx, (path = parentOf(path)));
+  path = st?.dir ? st.path : ctx.dirs.home();
+  const entries = listOf(ctx, path).map((d) => ({ name: d.name, path: d.path, git: d.git }));
+  return { path, home: ctx.dirs.home(), recent: recentProjects(ctx).slice(0, 12), entries };
+}
+
+/**
+ * The folder field as it's typed: { text } → { home, items: up to 12 folders it could mean }. A path (starting with / or ~)
+ * lists the folders next to its last part whose names start with it, then those containing it, case-insensitive:
+ * ~/GolandProjects/ger → gerdr, gerdr-addon… A bare name looks among the recent projects (name, then full path).
+ */
+export function complete(input: { text?: string }, ctx: Ctx) {
+  const text = input?.text?.trim() ?? "";
+  const home = ctx.dirs.home();
+  if (!text) return { home, items: [] };
+  const rank = <T>(all: T[], key: (x: T) => string, q: string) => {
+    const s = q.toLowerCase();
+    const starts = all.filter((x) => key(x).toLowerCase().startsWith(s));
+    return [...starts, ...all.filter((x) => !starts.includes(x) && key(x).toLowerCase().includes(s))];
+  };
+  if (text.startsWith("/") || text.startsWith("~")) {
+    const cut = text.lastIndexOf("/");
+    // "~" alone: what's in the home folder; "/a/b/c" → the folders of /a/b/ starting with c
+    const [dir, part] = cut < 0 ? [text, ""] : [text.slice(0, cut + 1), text.slice(cut + 1)];
+    const st = statOf(ctx, dir);
+    if (!st?.dir) return { home, items: [] };
+    const items = rank(listOf(ctx, st.path), (d) => d.name, part).slice(0, 12);
+    return { home, items: items.map((d) => ({ name: d.name, path: d.path, git: d.git })) };
+  }
+  const name = (p: string) => p.replace(/\/+$/, "").split("/").pop() ?? p;
+  const all = recentProjects(ctx);
+  const hits = [...new Set([...rank(all, name, text), ...rank(all, (p) => p, text)])].slice(0, 12);
+  return { home, items: hits.map((p) => ({ name: name(p), path: p, git: !!statOf(ctx, p)?.git })) };
 }
 
 /**
