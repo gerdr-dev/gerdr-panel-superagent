@@ -16,14 +16,17 @@ const ok = (p: string) => PATH.test(p) && !p.split("/").includes("..");
  */
 export function list(input: unknown, ctx: Ctx) {
   migrate(ctx);
-  return overlay(ctx, DIR)
+  // A skill the panel doesn't ship (all its files are this person's) is listed after the panel's
+  const all = overlay(ctx, DIR);
+  const ownSkill = (skill: string) => !all.some((f) => f.shared && f.rel.split("/")[0] === skill);
+  return all
     .filter((f) => f.rel.endsWith(".md"))
     .map((f) => {
       const name = f.rel;
       const [skill, ...rest] = name.split("/");
       return { name, skill, index: rest.join("/") === "SKILL.md", changed: f.mine && f.shared, own: f.mine && !f.shared };
     })
-    .sort((a, b) => a.skill.localeCompare(b.skill) || Number(b.index) - Number(a.index) || a.name.localeCompare(b.name));
+    .sort((a, b) => Number(ownSkill(a.skill)) - Number(ownSkill(b.skill)) || a.skill.localeCompare(b.skill) || Number(b.index) - Number(a.index) || a.name.localeCompare(b.name));
 }
 
 /** { name } → its text and etag (pass the etag back to save, so two editors don't overwrite each other). */
@@ -32,7 +35,9 @@ export function read(input: { name: string }, ctx: Ctx) {
   const p = effective(ctx, `${DIR}/${input.name}`);
   const st = p && ctx.fs.stat(p);
   if (!p || !st) throw new Error(`没有 ${DIR}/${input.name}`);
-  return { name: input.name, text: ctx.fs.read(p), etag: st.etag, changed: p.startsWith("user/") && !!ctx.fs.stat(`${DIR}/${input.name}`) };
+  const changed = p.startsWith("user/") && !!ctx.fs.stat(`${DIR}/${input.name}`);
+  // base: the panel's default of a file they changed, for the page to show what is theirs (a diff)
+  return { name: input.name, text: ctx.fs.read(p), etag: st.etag, changed, base: changed ? ctx.fs.read(`${DIR}/${input.name}`) : undefined };
 }
 
 /**
@@ -81,6 +86,22 @@ export function addReference(input: { skill: string; name: string; when: string 
   const text = ctx.fs.read(index).replace(/\n*$/, "\n");
   ctx.fs.write(index, `${text}| [references/${name}.md](references/${name}.md) | ${input.when.trim() || "（什么时候看）"} |\n`, { etag: st.etag });
   return { name: `${input.skill}/references/${name}.md` };
+}
+
+/**
+ * A skill of this person's own: { name, description } → user/skills/<name>/SKILL.md. Gerdr gives it to the panel's
+ * agent and every session the panel starts, beside the panel's skill; the description decides when they read it.
+ */
+export function addSkill(input: { name: string; description: string }, ctx: Ctx) {
+  migrate(ctx);
+  const name = String(input?.name ?? "").trim();
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new Error("skill 的名字只能有小写字母、数字和 -（比如 weekly-report）");
+  if (overlay(ctx, DIR).some((f) => f.rel.split("/")[0] === name)) throw new Error(`已经有 ${name} 了`);
+  const description = String(input?.description ?? "").trim().replace(/\s*\n\s*/g, " ") || "（写清楚什么时候该读这个 skill）";
+  const index = mine(`${DIR}/${name}/SKILL.md`);
+  ctx.fs.mkdir(index.slice(0, index.lastIndexOf("/")));
+  ctx.fs.write(index, `---\nname: ${name}\ndescription: ${description}\n---\n\n# ${name}\n\n`);
+  return { name: `${name}/SKILL.md` };
 }
 
 /** A skill file's text as this person has it ("" when there's none): for code that puts it in a message whole. */
