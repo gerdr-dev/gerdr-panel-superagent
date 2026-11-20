@@ -872,6 +872,9 @@ function MiniCard({
           {x.text}
         </p>
       ))}
+      {/* What it waits on outside, drawn like 待你答 above in the chat's wait colour (brand, cards.tsx TaskWait): grouped
+          with the action bars above the worker's latest line so both structured blockers stay together (2026-11-20) */}
+      {!t.question && going(t) && outside(t)[0] && <p className="line-clamp-2 border-l-2 border-brand pl-2 text-[12px] text-brand">等：{outside(t)[0].what}</p>}
       {/* Where it stands in its worker's words (the first paragraph of its last reply): the one line a card has for it.
           A worker that stopped with nothing going on is no alarm (only the user moves the card): its live line says
           停下; an unusual stop (the user's, an error, a turn cut short) is said here, quietly */}
@@ -882,9 +885,6 @@ function MiniCard({
       {!t.question && (t.latest || t.summary || (t.stopped && t.said)) && (
         <p className={clsx("line-clamp-2 text-[12px]", t.live?.status === "running" ? "shimmer shimmer-light text-foreground/85" : "text-muted-foreground")}>{t.latest || t.summary || t.said}</p>
       )}
-      {/* What it waits on outside, drawn like 待你答 above in the chat's wait colour (brand, cards.tsx TaskWait): it was
-          muted text that read like the worker's own line (2026-11-19) */}
-      {!t.question && going(t) && outside(t)[0] && <p className="line-clamp-2 border-l-2 border-brand pl-2 text-[12px] text-brand">等：{outside(t)[0].what}</p>}
       {!t.question &&
         t.helpers
           ?.filter((k) => k.status === "waiting")
