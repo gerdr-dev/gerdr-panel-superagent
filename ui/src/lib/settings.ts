@@ -55,6 +55,13 @@ export type Settings = {
    */
   compactTokens: number;
   /**
+   * Workers' conversations compacted by tasks.compactWorkers (schedules/worker-compact.json, every 10 minutes): one
+   * whose context is at least `percent`% of its window and that has said nothing for `idleMinutes` (its prompt cache
+   * is cold by then, so the compaction costs about what its next message would). Tasks that ended are left alone.
+   * percent 0 = never. The user asked for it on 2026-11-23 (">60% and quiet 30 min").
+   */
+  workerCompact: { percent: number; idleMinutes: number };
+  /**
    * A requirement whose tasks all ended (done / dropped) more than this many days ago is archived: moved out of
    * user/data/reqs/, so the board stops reading it every run. Comes back when asked for (local/_archive.ts). 0 = never.
    */
@@ -79,6 +86,7 @@ export const DEFAULTS: Settings = {
   ackText: ACK_TEXT,
   replies: "review",
   compactTokens: 80_000,
+  workerCompact: { percent: 60, idleMinutes: 30 },
   archiveDays: 14,
   undoSeconds: 3,
 };
@@ -110,6 +118,10 @@ export function normalize(raw: any): Settings {
     ackText: str(r.ackText, "") || d.ackText,
     replies: oneOf(r.replies, ["review", "auto"] as const, d.replies),
     compactTokens: Number.isFinite(Number(r.compactTokens)) && Number(r.compactTokens) >= 0 && r.compactTokens !== "" && r.compactTokens != null ? Math.round(Number(r.compactTokens)) : d.compactTokens,
+    workerCompact: {
+      percent: Math.min(100, count(r.workerCompact?.percent, d.workerCompact.percent)),
+      idleMinutes: count(r.workerCompact?.idleMinutes, d.workerCompact.idleMinutes),
+    },
     archiveDays: count(r.archiveDays, d.archiveDays),
     undoSeconds: Math.min(30, count(r.undoSeconds, d.undoSeconds)),
   };

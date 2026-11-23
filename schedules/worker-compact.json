@@ -1,0 +1,1 @@
+{ "fn": "tasks.compactWorkers", "every": "10m", "name": "压缩 worker 的对话：上下文超过设置里的比例、又闲了一阵的，把早先的内容压成摘要" }

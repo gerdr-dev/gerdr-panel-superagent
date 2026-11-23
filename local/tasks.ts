@@ -12,6 +12,7 @@ import { closeSec, isSecAsk, secretaryIgnored, secStatus } from "./_secask";
 import { allAgents, mentionsIn } from "./_agents";
 import { archived as archivedGroups, archivedCount, archiveOld, latest, revive, unarchive as bringBack } from "./_archive";
 import { isMain, mains, rerouteTask, routeTask, sweep, toMain } from "./_main";
+import { textOf } from "./playbooks";
 
 export type { Task };
 
@@ -120,6 +121,9 @@ export async function list(input: unknown, ctx: Ctx) {
       // What the user typed in its chat (Gerdr's personSaid): the feed shows it, or the lines after it make no sense
       // (t52: "等扶摇审批" with nothing saying the user asked for 扶摇)
       const ps = (sess as any)?.personSaid as { text: string; at: number } | undefined;
+      // A turn after the /compact compactWorkers sent: its upkeep turn is over (upkeep)
+      if (t.compactAt && ((sess?.status === "running" && (sess.turnStartedAt ?? 0) >= t.compactAt + UPKEEP_START) || (ps?.at ?? 0) >= t.compactAt + UPKEEP_START))
+        t.compactAt = undefined;
       if (ps?.at && ps.at > (t.heard ?? t.createdAt) && ps.text.trim()) {
         t.heard = ps.at;
         // A slash command (/compact) is upkeep of the conversation, nothing the feed needs
@@ -129,7 +133,7 @@ export async function list(input: unknown, ctx: Ctx) {
       syncSessions(t, kids[t.id] ?? []);
       syncAgents(t, t.session, (sess?.tasks ?? []) as any[]);
       // A turn started with a slash command (/compact) is no answer to anything and no going on with the work
-      if (sess?.status === "running" && !command(sess)) {
+      if (sess?.status === "running" && !upkeep(t, sess)) {
         // The worker is at it again — the user answered in its chat, something woke it, or it carried on. What it asked
         // the user before this turn, and what it waited on outside, are no longer the state of things; it asks or
         // waits again if it must. The task's status stays where the user put it (DESIGN.md「状态只由用户改」).
@@ -172,7 +176,7 @@ export async function list(input: unknown, ctx: Ctx) {
         if (out.length && (t.nudges ?? 0) < 1) {
           t.nudges = (t.nudges ?? 0) + 1;
           nudge.push({ session: sess.id, id: t.id, out: out.map((w) => w.what.replace(/^它派出的/, "")) });
-        } else if (!command(sess)) {
+        } else if (!upkeep(t, sess)) {
           // The card's line follows what it said last; the column doesn't (DESIGN.md「状态只由用户改」). A turn the user
           // started with a command (/compact) said nothing about the work.
           const said = firstWords(String(sess.reply ?? ""));
@@ -416,6 +420,66 @@ function busyBehind(sess: any) {
 function command(sess: any) {
   const ps = sess?.personSaid as { text: string; at: number } | undefined;
   return !!sess?.byPerson && !!ps && /^\/\S/.test(ps.text.trim()) && ps.at >= (sess.turnStartedAt ?? 0);
+}
+
+/** How long after compactWorkers sends /compact its turn may start: a turn starting later is someone else's. */
+const UPKEEP_START = 30_000;
+
+/**
+ * Its worker's current (or last) turn is upkeep of the conversation: a slash command the user typed (command), or
+ * the /compact compactWorkers sent (t.compactAt, cleared in list() once a later turn starts). Such a turn answers
+ * nothing and says nothing about the work: waits stay open, the card's line stays.
+ */
+function upkeep(t: Task, sess: any) {
+  if (command(sess)) return true;
+  if (!t.compactAt) return false;
+  if (sess?.status !== "running") return true;
+  const turn = sess.turnStartedAt ?? 0;
+  return turn >= t.compactAt - 2000 && turn < t.compactAt + UPKEEP_START;
+}
+
+const WORKER_COMPACT = "superagent-panel/references/worker-compact.md";
+
+/**
+ * Compacts workers' conversations (schedules/worker-compact.json; 设置 → 干活 → 自动压缩 workerCompact): the worker of
+ * a task not ended, idle, quiet for idleMinutes, whose context holds percent% of its window or more. Quiet that long,
+ * its prompt cache is cold, so the compaction costs about what its next message would, and the next one is smaller.
+ * What the summary keeps is the user's prose (流程 → worker-compact.md). { dry?: true — only say which would be }
+ */
+export async function compactWorkers(input: { dry?: boolean } | null, ctx: Ctx) {
+  const { percent, idleMinutes } = workflow(ctx).workerCompact;
+  if (!percent) return "设置里关掉了 worker 自动压缩";
+  const { store } = load(ctx);
+  const picked: { id: string; session: string; line: string }[] = [];
+  for (const t of store.tasks) {
+    if (!t.session || t.status === "done" || t.status === "dropped") continue;
+    const sess = ctx.sessions.get(t.session);
+    const c = sess?.context;
+    if (!sess || sess.status !== "idle" || !c?.window) continue;
+    if (Date.now() - sess.updatedAt < idleMinutes * 60_000) continue;
+    const used = Math.round((c.tokens / c.window) * 100);
+    if (used < percent) continue;
+    picked.push({ id: t.id, session: sess.id, line: `${t.id}「${t.title}」上下文 ${used}%（${c.tokens}/${c.window}）` });
+  }
+  if (!picked.length) return `没有要压缩的 worker（上下文 ≥ ${percent}%、闲了 ${idleMinutes} 分钟以上）`;
+  if (input?.dry) return picked.map((p) => p.line);
+  const how = textOf(ctx, WORKER_COMPACT).replace(/^#.*\n+/, "").trim();
+  const done: string[] = [];
+  for (const p of picked) {
+    // Marked first: the turn starts as soon as it's sent, and list() runs on that event
+    update(ctx, (s) => {
+      const t = s.tasks.find((x) => x.id === p.id);
+      if (t) t.compactAt = Date.now();
+      return s;
+    });
+    try {
+      await ctx.sessions.send(p.session, `/compact ${how}`.trim());
+      done.push(p.line);
+    } catch (e: any) {
+      done.push(`${p.line}：没压成，${e?.message ?? e}`);
+    }
+  }
+  return `压缩了：\n${done.join("\n")}`;
 }
 
 /** Its worker isn't running and the task waits on nothing. */

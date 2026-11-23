@@ -237,6 +237,11 @@ export type Task = {
   notes?: { at: number; text: string }[];
   /** The session `updatedAt` whose reply was last applied, so a reply is applied once. */
   synced?: number;
+  /**
+   * When tasks.compactWorkers sent its worker `/compact` (ms): that turn is upkeep, like a slash command the user
+   * types (tasks.ts upkeep). Cleared once a later turn starts.
+   */
+  compactAt?: number;
   createdAt: number;
   updatedAt: number;
   doneAt?: number;

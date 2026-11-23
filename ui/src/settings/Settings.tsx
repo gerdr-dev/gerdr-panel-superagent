@@ -107,6 +107,34 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
             note="派出去真正改代码的会话。任务上单独指定了 agent / 模型的，以任务为准；任务换成别的 agent 时，这里的模型不套用（claude 的模型名对 codex 没意义），用那个 agent 自己的默认。"
           >
             <WhoFields who={s.worker} onChange={(v) => put("worker", v)} />
+            <Field
+              label="自动压缩：上下文占比（%）"
+              hint={
+                s.workerCompact.percent > 0
+                  ? `没结束的任务，worker 上下文到了窗口的 ${s.workerCompact.percent}%、又 ${s.workerCompact.idleMinutes} 分钟没动静时，把早先的内容压缩成摘要（定时任务「压缩 worker 的对话」决定多久看一次，摘要留什么在流程 → worker-compact.md）`
+                  : "不自动压缩 worker 的对话"
+              }
+            >
+              <input
+                className={input}
+                type="number"
+                min={0}
+                max={100}
+                step={5}
+                value={s.workerCompact.percent}
+                onChange={(e) => put("workerCompact", { ...s.workerCompact, percent: Math.min(100, Math.max(0, Math.round(Number(e.target.value) || 0))) })}
+              />
+            </Field>
+            <Field label="自动压缩：闲了多久（分钟）" hint="worker 最后一次动静之后过了这么久才压缩：正在等它下一步的对话不打断，提示缓存也已经凉了">
+              <input
+                className={input}
+                type="number"
+                min={0}
+                step={5}
+                value={s.workerCompact.idleMinutes}
+                onChange={(e) => put("workerCompact", { ...s.workerCompact, idleMinutes: Math.max(0, Math.round(Number(e.target.value) || 0)) })}
+              />
+            </Field>
           </Section>
 
           <Section
