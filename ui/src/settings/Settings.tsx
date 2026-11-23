@@ -116,6 +116,12 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
             <Repos repos={s.repos} onChange={(v) => put("repos", v)} />
           </Section>
 
+          <Section title="问题卡片" note="worker 问你的问题，在对话里点一个选项后，先等几秒再交给它：点错了可以在这几秒里撤回。交出去之后它就照着做了，只能「改答案」。">
+            <Field label="撤回时间（秒）" hint={s.undoSeconds > 0 ? `点完 ${s.undoSeconds} 秒后提交` : "点了立刻提交，不能撤回"}>
+              <input className={input} type="number" min={0} max={30} step={1} value={s.undoSeconds} onChange={(e) => put("undoSeconds", Math.min(30, Math.max(0, Math.round(Number(e.target.value) || 0))))} />
+            </Field>
+          </Section>
+
           <Section title="归档" note="完成（或放弃）很久的任务移出任务面板的数据，任务面板和秘书每次就不用再读它们；什么都不删。「已完成」列底下能搜到、打开一个就放回来，它的 worker 又干起活来也会自己回来。">
             <Field label="完成多少天后归档" hint={s.archiveDays > 0 ? `一个需求里所有任务都结束超过 ${s.archiveDays} 天，而且没有还在进行的任务提到它` : "不归档"}>
               <input className={input} type="number" min={0} step={1} value={s.archiveDays} onChange={(e) => put("archiveDays", Math.max(0, Math.round(Number(e.target.value) || 0)))} />

@@ -59,6 +59,11 @@ export type Settings = {
    * user/data/reqs/, so the board stops reading it every run. Comes back when asked for (local/_archive.ts). 0 = never.
    */
   archiveDays: number;
+  /**
+   * A question card's answer, picked in the chat, waits this many seconds (with an undo) before it's sent to the
+   * worker: once sent, it acts on it. 0 = sent at once. Gerdr's own default is 3 (it was 6, which felt slow).
+   */
+  undoSeconds: number;
 };
 
 export const ACK_TEXT = "收到，建了任务 {id}「{title}」，有结果会在这里说。";
@@ -75,6 +80,7 @@ export const DEFAULTS: Settings = {
   replies: "review",
   compactTokens: 80_000,
   archiveDays: 14,
+  undoSeconds: 3,
 };
 
 const str = (v: unknown, d: string) => (typeof v === "string" ? v.trim() : d);
@@ -105,5 +111,6 @@ export function normalize(raw: any): Settings {
     replies: oneOf(r.replies, ["review", "auto"] as const, d.replies),
     compactTokens: Number.isFinite(Number(r.compactTokens)) && Number(r.compactTokens) >= 0 && r.compactTokens !== "" && r.compactTokens != null ? Math.round(Number(r.compactTokens)) : d.compactTokens,
     archiveDays: count(r.archiveDays, d.archiveDays),
+    undoSeconds: Math.min(30, count(r.undoSeconds, d.undoSeconds)),
   };
 }

@@ -103,6 +103,38 @@ function useCardStatus<T>(project: string | undefined, key: string | null, ask: 
   return [st, get];
 }
 
+// 设置 → 问题卡片 → 撤回时间, per board. Asked once a minute at most: settings.get is a run on the panel's backend, and
+// a chat can hold dozens of cards. Until the answer comes the card uses Gerdr's own default (undefined).
+const undoAsked = new Map<string, { at: number; ms?: number; wait?: Promise<number | undefined> }>();
+function useUndoMs(board: string | undefined): number | undefined {
+  const [ms, setMs] = useState(() => (board ? undoAsked.get(board)?.ms : undefined));
+  useEffect(() => {
+    if (!board) return;
+    let e = undoAsked.get(board);
+    if (!e || (!e.wait && Date.now() - e.at > 60000)) {
+      const ent: { at: number; ms?: number; wait?: Promise<number | undefined> } = { at: Date.now(), ms: e?.ms };
+      ent.wait = run<{ settings: { undoSeconds?: number } }>("settings.get", {}, { project: board }).then(
+        (r) => {
+          const sec = r.settings?.undoSeconds;
+          ent.ms = typeof sec === "number" && sec >= 0 ? sec * 1000 : undefined;
+          ent.wait = undefined;
+          return ent.ms;
+        },
+        () => ((ent.wait = undefined), ent.ms),
+      );
+      undoAsked.set(board, ent);
+      e = ent;
+    }
+    let alive = true;
+    if (e.wait) void e.wait.then((v) => alive && setMs(v));
+    else setMs(e.ms);
+    return () => {
+      alive = false;
+    };
+  }, [board]);
+  return ms;
+}
+
 /**
  * A step or decision the worker asked the user for (ask_human; an ask on its task, ref a5 or a5#2 — a human task's old
  * id, t206, on cards drawn before 2026-11-19): the built-in card while it waits, so it can be answered right there;
@@ -116,6 +148,7 @@ export function TaskStep({ card }: CardProps) {
   // one with neither isn't asked about at all rather than asked of the wrong board.
   const c = card as { project?: string; choose?: { project?: string } };
   const board = c.project ?? c.choose?.project;
+  const undoMs = useUndoMs(board);
   const [st, refresh] = useCardStatus<Step>(board, id ? `step:${id}` : null, () => run<Step>("tasks.status", { id }, { project: board }), (v) => v.status === "done" || v.status === "dropped", 30000);
   // Changing an answer already sent: the built-in card again, its pick going to tasks.reanswer (with its few seconds
   // of undo too). The card's own undo only covers the seconds before a pick is sent.
@@ -132,7 +165,7 @@ export function TaskStep({ card }: CardProps) {
     return (
       <div>
         {/* Its own ref: the first answer's pick (sent) is kept under the card's ref, and would show here as already made */}
-        <DefaultCard card={{ ...card, ref: `${id}:change:${changing}`, kicker: `改答案 · ${id} · 现在是「${changing}」`, choose }} />
+        <DefaultCard card={{ ...card, ref: `${id}:change:${changing}`, kicker: `改答案 · ${id} · 现在是「${changing}」`, choose }} undoMs={undoMs} />
         <button className="mb-1.5 text-[12px] text-muted-foreground hover:text-foreground" onClick={() => setChanging(false)}>
           不改了
         </button>
@@ -146,6 +179,7 @@ export function TaskStep({ card }: CardProps) {
     return (
       <DefaultCard
         card={card}
+        undoMs={undoMs}
         done={{
           value: done ? st.handedBack : undefined,
           dropped: !done,
@@ -164,7 +198,7 @@ export function TaskStep({ card }: CardProps) {
   // never took back. Nobody is woken; the agent hears at the start of its next turn
   return (
     <div className="relative">
-      <DefaultCard card={card} />
+      <DefaultCard card={card} undoMs={undoMs} />
       {board && st?.status === "todo" && <IgnoreButton id={id} board={board} onDone={refresh} />}
     </div>
   );
