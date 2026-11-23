@@ -161,7 +161,14 @@ export function revive(ctx: Ctx, sessions: { id: string; status: string; turnSta
   if (!groups.length) return;
   const running = new Map(sessions.filter((x) => x.status === "running" || x.status === "waiting").map((x) => [x.id, x]));
   for (const g of groups) {
-    const back = g.tasks.some((t) => t.sessions?.some((id) => (running.get(id)?.turnStartedAt ?? Infinity) > g.at));
+    // Only a session that is running (or waiting) and whose turn started after the archiving: `?? Infinity` on a
+    // session not in the map brought every archived requirement with a session back on each list (2026-11-13 → 11-23)
+    const back = g.tasks.some((t) =>
+      t.sessions?.some((id) => {
+        const x = running.get(id);
+        return !!x && (x.turnStartedAt ?? Infinity) > g.at;
+      }),
+    );
     if (back) unarchive(ctx, g.root);
   }
 }
