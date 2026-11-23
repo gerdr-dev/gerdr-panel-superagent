@@ -23,6 +23,7 @@ import { activity, draftOf, find, load as loadTasks, note, update as updateTasks
 import { cutLine, wake } from "./_wake";
 import { waitingOn } from "./_waits";
 import { draftLines, pendingFor } from "./_outbox";
+import { clues } from "./_clues";
 
 const STATE = `${DATA}/superagent.json`;
 /**
@@ -651,9 +652,12 @@ function cut(text: string, n: number) {
 }
 
 /** hint: the user sent it back to be judged again with this to say (superagent.retry); then the last decision goes too. */
-function eventBlock(it: Item, tasks: Task[], hint?: string) {
+function eventBlock(ctx: Ctx, it: Item, tasks: Task[], hint?: string) {
   const e = it.event;
   const related = tasks.filter((t) => follows(t).some((x) => x.source === e.source && x.key === e.key));
+  // The ids and links in it found in a worker's conversation (_clues.ts): the worker that wrote there itself, or that
+  // works on the thing the message names, without following this conversation
+  const hints = clues(ctx, tasks, [...(e.context ?? []).map((c) => c.text), e.text ?? "", e.title ?? ""].join("\n"), new Set(related.map((t) => t.id)));
   // Who and where only by name: the ids (user, conversation) are the board's to match, the secretary decides by item.
   // No list of recent tasks any more (2026-11-12): it hung under every message, a dozen lines under a one-line "ok";
   // the secretary looks tasks up when a message is about one (dispatch: attach / stop)
@@ -664,6 +668,7 @@ function eventBlock(it: Item, tasks: Task[], hint?: string) {
     e.files?.length ? `附件：\n${e.files.map((f) => `- ${f.name}：${f.path}`).join("\n")}` : "",
     it.handBacks?.length ? `负责它的 worker 交回了：\n${it.handBacks.map((h) => `- ${h.task}：${h.reason}`).join("\n")}` : "",
     related.length ? `这个对话里的任务：${related.map((t) => `${t.id}「${t.title}」(${t.status})`).join("、")}` : "",
+    hints.length ? `线索（这条和前面对话里的编号、链接，在这些任务的对话里出现过；是不是这件事你判断）：\n${hints.join("\n")}` : "",
     hint ? `用户让你重新判断这条${it.reason ? `（上次：${it.state}，理由：${it.reason}）` : ""}，用户的意见：${hint}\n照这个意见重新决定。` : "",
   ]
     .filter(Boolean)
@@ -698,7 +703,7 @@ export async function evaluate(ctx: Ctx, ids: string[], tasks: Task[], hint?: st
   hint = hint?.trim() || undefined;
   await toMain(
     ctx,
-    items.map((it) => eventBlock(it, tasks, hint)),
+    items.map((it) => eventBlock(ctx, it, tasks, hint)),
     "route",
     undefined,
     items.length === 1 ? eventLine(items[0]) : `${items.length} 条外面来的消息：${items.map((it) => eventLine(it)).join("；")}`,

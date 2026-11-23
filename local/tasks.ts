@@ -12,6 +12,7 @@ import { allAgents, mentionsIn } from "./_agents";
 import { archived as archivedGroups, archivedCount, archiveOld, latest, revive, unarchive as bringBack } from "./_archive";
 import { isMain, mains, rerouteTask, routeTask, sweep, toMain } from "./_main";
 import { textOf } from "./playbooks";
+import { liveTasks, said } from "./_clues";
 
 export type { Task };
 
@@ -1100,9 +1101,11 @@ export function archived(input: { q?: string; limit?: number } | null, ctx: Ctx)
 
 /**
  * Finds tasks by words, on the board and in the archive: { q: words separated by spaces — a task matches when any is in
- * its title, request, latest summary, origin (who sent it, where) or notes; limit?: 20 }. One line each, newest first,
- * for an agent connecting a message or a person to work (the secretary before letting a message go). Then tasks.list
- * {id} for the one it wants.
+ * its title, request, latest summary, origin (who sent it, where) or notes, or, for a live one (_clues.ts liveTasks),
+ * in what was said in its worker's conversation lately; limit?: 20 }. One line each, newest first, for an agent
+ * connecting a message or a person to work (the secretary before letting a message go). Then tasks.list {id} for the
+ * one it wants. The conversation counts because ids and names a worker deals with are often only there: 2026-11-23,
+ * the defect numbers t123 had fixed and told the tester about were in no title or summary.
  */
 export function search(input: { q: string; limit?: number }, ctx: Ctx) {
   const words = (input?.q ?? "").toLowerCase().split(/\s+/).filter(Boolean);
@@ -1113,9 +1116,12 @@ export function search(input: { q: string; limit?: number }, ctx: Ctx) {
   };
   const cut = (x: string, n: number) => cutLine(x.replace(/\s+/g, " "), n);
   const rows: { at: number; n: number; line: string }[] = [];
-  for (const t of load(ctx).store.tasks) {
-    const n = hit(t.id, t.title, t.prompt, t.summary, t.repo, t.origin?.title, ...(t.notes ?? []).map((x) => x.text));
-    if (n) rows.push({ at: t.updatedAt ?? t.createdAt, n, line: `- ${t.id}「${t.title}」(${t.status})${t.origin?.title ? ` 来自 ${cut(t.origin.title, 40)}` : ""}${t.summary ? `：${cut(t.summary, 120)}` : ""}` });
+  const tasks = load(ctx).store.tasks;
+  const live = new Set(liveTasks(tasks).map((t) => t.id));
+  for (const t of tasks) {
+    const own = hit(t.id, t.title, t.prompt, t.summary, t.repo, t.origin?.title, ...(t.notes ?? []).map((x) => x.text));
+    const n = live.has(t.id) ? hit(t.id, t.title, t.prompt, t.summary, t.repo, t.origin?.title, ...(t.notes ?? []).map((x) => x.text), said(ctx, t)) : own;
+    if (n) rows.push({ at: t.updatedAt ?? t.createdAt, n, line: `- ${t.id}「${t.title}」(${t.status})${t.origin?.title ? ` 来自 ${cut(t.origin.title, 40)}` : ""}${t.summary ? `：${cut(t.summary, 120)}` : ""}${n > own ? "（词在它的对话里）" : ""}` });
   }
   for (const g of archived({ limit: 1000 }, ctx).groups)
     for (const t of g.tasks as any[]) {
