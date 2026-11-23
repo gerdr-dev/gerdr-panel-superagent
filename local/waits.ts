@@ -44,7 +44,7 @@ export const tools = {
     description:
       "End your turn waiting on someone or something outside, instead of only saying you'll wait (once your turn ends nothing wakes you otherwise). " +
       "wake: what wakes you, a list — whichever comes first wakes you, and ends this wait. Each item is one of: " +
-      "{type: message, conversation}: news where a person will answer — the Slack channel / DM id you wrote to (D09…, C0…), a Slack message link, or an MR URL (its reviews, pipelines, merge come too); " +
+      "{type: message, conversation}: news where a person will answer — a Slack DM id (D09…), a Slack message link or the event id you got (slack-me:C0…:<ts>, for a thread in a channel), a small channel's id (C0…, only when the slack-me add-on takes small channels in full), or an MR URL (its reviews, pipelines, merge come too); " +
       "{type: check, command, every?, cwd?}: a command that tells whether what you wait for has happened (a publish approved, a job finished, a page live) — the board runs it every `every` minutes, exit 0 = it has (you're woken with its output), any other exit = not yet; exit 0 as soon as things leave the step you wait in, not only on the end you hope for ([ \"$s\" != pending_approval ], not [ \"$s\" = success ]) — rejected, stuck halfway or failed must wake you too; waiting on a person (approve, merge), check that act itself, don't assume what should follow it happens by itself; print one line saying where things stand, it shows on your card; " +
       "{type: time, minutes}: the timeout, required: woken after that long if nothing else came; " +
       "Every wait needs a time item as its timeout (how long it should take): whoever you wait on may never answer — stuck, offline, forgot; a wait without one is refused. Handed work to a session you started (gerdr session new, here or on another computer)? You are the one who waits for it, the same way: its report wakes you first; past the timeout, go and see where it's stuck. " +
@@ -68,7 +68,7 @@ export const tools = {
             type: "object",
             properties: {
               type: { type: "string", enum: ["message", "check", "time"] },
-              conversation: { type: "string", description: "message: a Slack channel / DM id, a Slack message link, or an MR URL" },
+              conversation: { type: "string", description: "message: a Slack DM id, a Slack message link or event id (slack-me:C0…:<ts>), a small channel's id, or an MR URL" },
               until: {
                 type: "string",
                 description:
@@ -99,10 +99,24 @@ function resolve(ctx: Ctx, conv: string): { source: string; key: string; where: 
   // An MR: its events come from the GitLab add-on as gitlab, <host>/group/repo!34 — review, pipeline, merge…
   const asMr = mrConversation(c);
   if (asMr) return asMr;
-  const keys = new Set<string>([c]);
-  const slack = /\/archives\/([A-Z0-9]+)/.exec(c);
-  if (slack) keys.add(slack[1]);
   const since = Date.now() - 30 * DAY;
+  // Slack (slack-me) keys a DM, group DM or small channel by its id and its threads as <channel>/<thread ts>; a channel
+  // you're only @-mentioned in, by thread alone (<channel>/<ts of the first message>). So a bare C… id matches only a
+  // small channel's top level: 2026-11-23 a worker gave one for the thread it was @-mentioned in and was told the
+  // channel didn't exist. A message link or the event's id names the thread itself.
+  const keys: string[] = [c];
+  const link = /\/archives\/([A-Z0-9]+)\/p(\d{10})(\d{6})/.exec(c);
+  const evId = /^[\w-]+:([A-Z0-9]+):(\d+\.\d+)$/.exec(c);
+  if (link) {
+    const thread = /[?&]thread_ts=(\d+\.\d+)/.exec(c)?.[1];
+    const ts = `${link[2]}.${link[3]}`;
+    if (thread) keys.push(`${link[1]}/${thread}`);
+    keys.push(`${link[1]}/${ts}`, link[1]);
+  } else if (evId) {
+    const hit = ctx.events.list({ key: `${evId[1]}*`, since, limit: 1000 }).find((e) => e.id === c);
+    if (hit?.key) keys.push(hit.key);
+    keys.push(`${evId[1]}/${evId[2]}`, evId[1]);
+  } else if (/\/archives\/([A-Z0-9]+)/.test(c)) keys.push(/\/archives\/([A-Z0-9]+)/.exec(c)![1]);
   for (const key of keys) {
     const seen = ctx.events.list({ key, since, limit: 1 });
     if (seen.length) {
@@ -113,6 +127,13 @@ function resolve(ctx: Ctx, conv: string): { source: string; key: string; where: 
       return { source: e.source, key, where: who ? `${kind} · ${who}` : `${kind} · ${key}` };
     }
   }
+  const chan = /^[CG][A-Z0-9]+$/.test(c) ? c : "";
+  if (chan && ctx.events.list({ key: `${chan}/*`, since, limit: 1 }).length)
+    throw new Error(
+      `「${c}」这个频道只有 @ 你的消息会进来，按线程算对话，单给频道 id 对不上：` +
+        `给那条消息的事件 id（slack-me:${c}:<ts>）或消息链接。注意同事在这里不 @ 你的回话叫不醒你；` +
+        `要等他回话，换成私信，或者让用户在 slack-me 插件设置里打开「小频道全收」（几个人的频道每句话都进来）`,
+    );
   throw new Error(
     `没找到「${c}」这个对话：最近 30 天没有它的消息进来（可能这个来源的插件没开，或者写的不是频道 / 私信 id）。` +
       `只等状态变化的（job、发布）用 recheck 定时回来看；要人回话的，换成对方会回复的那个对话的 id 或链接`,
