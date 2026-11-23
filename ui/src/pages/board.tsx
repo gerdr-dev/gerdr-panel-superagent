@@ -1,7 +1,7 @@
 import { AlertTriangle, ArrowUp, Ban, Bot, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, Copy, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Plus, Search, Send, Settings, Undo2, X } from "lucide-react";
 import { EditableTitle } from "../components/EditableTitle";
 import clsx from "clsx";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type KeyboardEvent as ReactKeyEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "../components/Button";
 import { Dialog, DialogContent, DialogTitle } from "../components/ui/dialog";
 import { Sheet, SheetContent, SheetTitle } from "../components/ui/sheet";
@@ -1252,6 +1252,15 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
   // The steps (派出去 / 让秘书重排 / 通过 / 打回) pinned under the scrolling card, like a chat's composer; 放弃 and 标为完成
   // are in the title row's ⋯ (Drawer)
   const foot = (t.status === "todo" && !t.routing && t.assigned?.state !== "ask") || t.status === "review";
+  // 派出去, from the button or from Ctrl/⌘+Enter in the drawer's boxes (the note, the prompt, the reply): plain Enter
+  // stays a new line there, as they're notes you write several lines in
+  const canStart = foot && t.status === "todo" && !t.reroute && !stepBusy && (!editable || !!t.assigned || quoted || !!draft.trim());
+  const start = async () => (await save()) && go("start", "start", { id: t.id, ...(t.canReply ? { reply } : {}) });
+  const startKey = (e: ReactKeyEvent) => {
+    if (e.key !== "Enter" || !(e.ctrlKey || e.metaKey) || e.nativeEvent.isComposing || e.keyCode === 229) return;
+    e.preventDefault();
+    if (canStart) void start();
+  };
   return (
     <>
     <div className="min-h-0 flex-1 overflow-y-auto p-4">
@@ -1292,6 +1301,7 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
               value={remark}
               onChange={(e) => setRemark(e.target.value)}
               onBlur={() => void save()}
+              onKeyDown={startKey}
               placeholder="你的判断、重点、约束（比如：先只出方案，别改代码）"
               className={box}
             />
@@ -1303,6 +1313,7 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={() => void save()}
+          onKeyDown={startKey}
           placeholder="要 agent 做什么"
           className={box}
         />
@@ -1326,6 +1337,7 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
             rows={2}
             value={reply}
             onChange={(e) => setReply(e.target.value)}
+            onKeyDown={startKey}
             placeholder="派出去时发给发消息的人"
             className={box}
           />
@@ -1351,7 +1363,7 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
           // secretary about the card before it is (2026-11-16: a button opening a box mid-drawer felt odd)
           <div className="flex items-end gap-2">
             <Composer busy={busy === "reroute"} placeholder="哪里不对？跟秘书说，它来重排" onSend={(feedback) => go("reroute", "reroute", { id: t.id, feedback })} before={save} />
-            <Button className="h-9 shrink-0" disabled={stepBusy || (!quoted && !draft.trim())} onClick={async () => (await save()) && go("start", "start", { id: t.id, ...(t.canReply ? { reply } : {}) })}>
+            <Button className="h-9 shrink-0" disabled={stepBusy || (!quoted && !draft.trim())} title="Ctrl/⌘+Enter" onClick={() => void start()}>
               {busy === "start" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}派出去
             </Button>
           </div>
@@ -1364,7 +1376,7 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
           </div>
         ) : (
           <div className="flex justify-end">
-            <Button className="h-9" disabled={stepBusy} onClick={async () => (await save()) && go("start", "start", { id: t.id, ...(t.canReply ? { reply } : {}) })}>
+            <Button className="h-9" disabled={stepBusy} title="Ctrl/⌘+Enter" onClick={() => void start()}>
               {busy === "start" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}派出去
             </Button>
           </div>
