@@ -1,7 +1,7 @@
 // The 流程 page: the user's skills (skills/<name>/SKILL.md + references/*.md), prose in their own words that the
 // agents read as a skill. Nothing here interprets it; values the code acts on are settings (local/settings.ts).
 
-import { effective, migrate, mine, overlay } from "./_user";
+import { effective, mine, overlay } from "./_user";
 
 export const DIR = "skills";
 
@@ -15,7 +15,6 @@ const ok = (p: string) => PATH.test(p) && !p.split("/").includes("..");
  * (reset brings the default back); `own`: a file only they have.
  */
 export function list(input: unknown, ctx: Ctx) {
-  migrate(ctx);
   // A skill the panel doesn't ship (all its files are this person's) is listed after the panel's
   const all = overlay(ctx, DIR);
   const ownSkill = (skill: string) => !all.some((f) => f.shared && f.rel.split("/")[0] === skill);
@@ -93,7 +92,6 @@ export function addReference(input: { skill: string; name: string; when: string 
  * agent and every session the panel starts, beside the panel's skill; the description decides when they read it.
  */
 export function addSkill(input: { name: string; description: string }, ctx: Ctx) {
-  migrate(ctx);
   const name = String(input?.name ?? "").trim();
   if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new Error("skill 的名字只能有小写字母、数字和 -（比如 weekly-report）");
   if (overlay(ctx, DIR).some((f) => f.rel.split("/")[0] === name)) throw new Error(`已经有 ${name} 了`);

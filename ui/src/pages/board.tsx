@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowUp, Ban, Bot, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, Copy, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Paperclip, Plus, Search, Send, Settings, Undo2, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, Ban, Bot, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, Copy, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Plus, Search, Send, Settings, Undo2, X } from "lucide-react";
 import { EditableTitle } from "../components/EditableTitle";
 import clsx from "clsx";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -232,7 +232,7 @@ export default function BoardPage() {
     return () => window.removeEventListener("keydown", on);
   }, []);
   const words = (find ?? "").trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const textOf = (t: Task) => [t.id, t.title, t.repo, t.origin?.title, t.prompt, t.question, t.summary, t.said, ...(t.asks ?? []).map((a) => a.title)].filter(Boolean).join("\n").toLowerCase();
+  const textOf = (t: Task) => [t.id, t.title, t.repo, t.origin?.title, t.prompt, t.summary, t.said, ...(t.asks ?? []).map((a) => a.title)].filter(Boolean).join("\n").toLowerCase();
   // Every word somewhere in the card's task (what it asked the user too) or in a member inside its card
   const hit = (t: Task) => {
     if (!words.length) return true;
@@ -782,11 +782,9 @@ function chatPanelFor(t: Task, byId: Record<string, Task>): { label: string; act
             ? `出错了：${t.live.error ?? "看看最后的报错"}`
             : t.helpers?.some((k) => k.left)
               ? `它派出去的「${t.helpers.find((k) => k.left)!.title}」${t.helpers.find((k) => k.left)!.waitingKind === "ask" ? "在问，worker 没接" : "要你批准"}：${t.helpers.find((k) => k.left)!.waiting ?? "批准或回答"}。下面就是它的对话，直接在这里处理；处理完它接着跑，${t.id} 等它回报`
-            : t.question
-              ? `它问你：${t.question}`
-              : t.stopped
-                ? `${t.stopWhy ?? "停下了"}${t.said ? `。它最后说：「${t.said}」` : ""}`
-                : "它在等你，见最后一条回复"
+            : t.stopped
+              ? `${t.stopWhy ?? "停下了"}${t.said ? `。它最后说：「${t.said}」` : ""}`
+              : "它在等你，见最后一条回复"
       }`,
       actions: taskMenu(t),
     };
@@ -862,7 +860,6 @@ function MiniCard({
         {expires < Infinity ? <Expiry at={expires} className="ml-auto shrink-0" /> : minutes ? <span className="ml-auto shrink-0">约 {minutes} 分钟</span> : null}
       </div>
       <p className={clsx("line-clamp-2 text-[13px] font-medium", t.status === "dropped" && "text-muted-foreground line-through")}>{t.title}</p>
-      {t.question && waitsOnUser(t) && <p className="line-clamp-2 text-[12px] text-warn">{t.question}</p>}
       {steps.map((x) => (
         <p key={x.jump} className="line-clamp-2 border-l-2 border-warn pl-2 text-[12px] text-warn">
           {x.text}
@@ -875,19 +872,18 @@ function MiniCard({
       ))}
       {/* What it waits on outside, drawn like 待你答 above in the chat's wait colour (brand, cards.tsx TaskWait): grouped
           with the action bars above the worker's latest line so both structured blockers stay together (2026-11-20) */}
-      {!t.question && going(t) && outside(t)[0] && <p className="line-clamp-2 border-l-2 border-brand pl-2 text-[12px] text-brand">等：{outside(t)[0].what}</p>}
+      {going(t) && outside(t)[0] && <p className="line-clamp-2 border-l-2 border-brand pl-2 text-[12px] text-brand">等：{outside(t)[0].what}</p>}
       {/* Where it stands in its worker's words (the first paragraph of its last reply): the one line a card has for it.
           A worker that stopped with nothing going on is no alarm (only the user moves the card): its live line says
           停下; an unusual stop (the user's, an error, a turn cut short) is said here, quietly */}
-      {!t.question && t.stopped && t.stopWhy && t.stopWhy !== "停下了" && t.stopWhy !== "回了你的话，等你接着说" && (
+      {t.stopped && t.stopWhy && t.stopWhy !== "停下了" && t.stopWhy !== "回了你的话，等你接着说" && (
         <p className="line-clamp-1 text-[12px] text-muted-foreground">{t.stopWhy}</p>
       )}
       {/* Its worker's newest paragraph, live (falls back to the old summary): shimmers like 思考中 while it runs */}
-      {!t.question && (t.latest || t.summary || (t.stopped && t.said)) && (
+      {(t.latest || t.summary || (t.stopped && t.said)) && (
         <p className={clsx("line-clamp-2 text-[12px]", t.live?.status === "running" ? "shimmer shimmer-light text-foreground/85" : "text-muted-foreground")}>{t.latest || t.summary || t.said}</p>
       )}
-      {!t.question &&
-        t.helpers
+      {t.helpers
           ?.filter((k) => k.status === "waiting")
           .map((k) =>
             k.left ? (
@@ -1202,7 +1198,6 @@ function firstLine(text: string) {
 
 function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act: Act }) {
   const { busy, err, go } = useAction(act);
-  const [text, setText] = useState("");
   // A task not sent out yet is still the user's words: its text is an input box right away (no 编辑 to press), the way
   // it was written (新任务 asks only what to do; the title is its first line, here too). Saved when the box is left,
   // and before 派出去
@@ -1316,21 +1311,6 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
           </details>
         )
       )}
-      {t.question && (
-        <div className="space-y-2 rounded-md border border-warn/40 bg-warn/5 p-3">
-          <p className="text-[13px] whitespace-pre-wrap">{t.question}</p>
-          <div className="flex gap-2">
-            <input value={text} onChange={(e) => setText(e.target.value)} placeholder="你的决定 / 回复" className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]" />
-            <Button disabled={!text.trim() || !!busy} onClick={async () => (await go("answer", "answer", { id: t.id, answer: text })) && setText("")}>
-              {busy === "answer" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}回复
-            </Button>
-          </div>
-          {t.session && (
-            <button className="inline-flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground" onClick={() => openChat(t.session!, t.id)}>
-              <Paperclip className="size-3" />
-              要发图片、文件或者多说几句：在对话里回复
-            </button>
-          )}
         </div>
       )}
       {t.assigned?.state === "ask" && <AssignBox t={t} act={act} save={save} />}

@@ -18,11 +18,10 @@ import { workflow } from "./_config";
 import { forRouter } from "./memory";
 import { allAgents } from "./_agents";
 import { textOf } from "./playbooks";
-import { DATA, migrate } from "./_user";
+import { DATA } from "./_user";
 import { activity, draftOf, find, load as loadTasks, note, update as updateTasks, type Task } from "./_store";
 import { cutLine, wake } from "./_wake";
-import { windowText } from "./_log";
-import { isOutside, waitingOn } from "./_waits";
+import { waitingOn } from "./_waits";
 import { draftLines, pendingFor } from "./_outbox";
 
 const STATE = `${DATA}/superagent.json`;
@@ -107,19 +106,10 @@ type State = {
   stuck?: string[];
   mains: string[];
   brief?: string;
-  /** Before 2026-11-12, messages since its session started (it was replaced after 150). Unused now. */
-  handled?: number;
   /** When it was last compacted (secretary.compact): with compactTokens 0, compacted again once something was said since. */
   compactedAt?: number;
-  /** Its session reads its rules from the system file (since 2026-11-12): one from before is replaced once, fresh. */
-  system?: boolean;
   next: number;
   items: Item[];
-  /** Before 2026-11-12 (when the page drew its own log): what a turn owed the user, and when it last sent a message. Unused now. */
-  awaiting?: unknown;
-  messageAt?: number;
-  /** Before 2026-11-10's status news: what was told as needing the user. Unused now. */
-  noticed?: Record<string, string>;
   /** Each task's status as last told to the secretary (notice): task id → its key, so each change is told once. */
   states?: Record<string, string>;
   /** The secretary's agent / model / effort / mode its session started with (设置): a change starts a new one. */
@@ -162,7 +152,6 @@ export type SecAsk = {
 };
 
 function load(ctx: Ctx): { s: State; etag?: string; text?: string } {
-  migrate(ctx);
   const st = ctx.fs.stat(STATE);
   if (!st) return { s: { mains: [], next: 1, items: [] } };
   const text = ctx.fs.read(STATE);
@@ -302,8 +291,8 @@ export async function followUp(ctx: Ctx, id: string, e: Ev) {
       // How to handle it is in task.md「任务面板发给你的消息」(the worker's skill), not repeated in every message
       `[${head}]（任务 ${id}，消息 ${e.id}）\n\n${mine ? `用户本人在那里先说了：\n${mine}\n\n${by || "对方"}接着说：\n` : ""}${text}${stale}`,
     files: files.map((f) => f.path),
-    // What it waited on outside came — or something else did: it looks again either way, and waits again if it must
-    ends: isOutside,
+    // The wait_for that waited on this conversation came; any other it waits on stays open (it takes those back itself)
+    ends: (w) => w.kind === "reply" && !!e.key && w.on?.source === e.source && w.on?.key === e.key,
     on: e.key ? { source: e.source, key: e.key } : undefined,
     followup: e.id,
     also: (x) => {
@@ -526,7 +515,6 @@ const abs = (ctx: Ctx, p: string) => `${ctx.workspace.dir}/${p}`;
  * session was told (state.brief).
  */
 async function writeSystem(ctx: Ctx): Promise<{ hash: string; changed: boolean }> {
-  migrateLog(ctx);
   let b = await brief(ctx);
   if (ctx.fs.stat(HISTORY))
     b += `\n\n## 以前的聊天\n秘书页还是面板自己画的那阵子（2026-11-12 以前）你和用户说过的话，在 ${abs(ctx, HISTORY)}：用户提起那时候的事再去读。`;
@@ -548,14 +536,8 @@ export async function ensureMain(ctx: Ctx, first?: string, attachments?: string[
   // Who it runs as (agent, model, effort, mode) is fixed when a session starts: changed in 设置, the next one takes it
   const who = JSON.stringify(r);
   const idle = cur?.status === "idle" || cur?.status === "error";
-  // From before the system file (its rules were its first message): replaced once, not carried on — that chat is
-  // the old page's backstage, and what was said is in HISTORY. Only on a Gerdr that takes a system file: sessions
-  // carry `context` from the same Gerdr version on, and an older one would start the new session without its rules
-  const old = !!cur && !s.system && (cur as any).context !== undefined;
-  const replace = !!cur && (old || (idle && (cur.status === "error" || (!!s.who && s.who !== who))));
+  const replace = !!cur && idle && (cur.status === "error" || (!!s.who && s.who !== who));
   if (cur && !replace) {
-    // One started before do not disturb (or a Gerdr without it: no ctx.sessions.mute, left as it is)
-    if (!(cur as any).muted && typeof (ctx.sessions as any).mute === "function") await Promise.resolve((ctx.sessions as any).mute(cur.id, true)).catch(() => {});
     return { id: { id: cur.id, fresh: false }, changed, hash: h };
   }
   const sess = await ctx.sessions.start({
@@ -567,32 +549,20 @@ export async function ensureMain(ctx: Ctx, first?: string, attachments?: string[
     title: "Superagent 秘书",
     systemFile: abs(ctx, SYSTEM),
     // The conversation goes on in the new one: its chat above, the agent told what was said
-    continueFrom: cur && !old && cur.status !== "running" ? cur.id : undefined,
+    continueFrom: cur && cur.status !== "running" ? cur.id : undefined,
     tags: { superagent: "main" },
     workspace: "none",
     // The user reads it when they choose to (the 秘书 button): its turns ending don't notify them (2026-11-16)
     muted: true,
   } as any);
-  // A Gerdr that took the system file says so; an older one ignored it, so the rules go in front of the first message
-  const system = (sess as any).systemFile === abs(ctx, SYSTEM);
-  const lead = system ? first : [await brief(ctx), first].filter(Boolean).join("\n\n---\n\n");
+  const lead = first;
   updateState(ctx, (x) => {
-    Object.assign(x, { main: sess.id, mains: [...(x.mains ?? []), sess.id], brief: h, who, compactedAt: undefined, system });
+    Object.assign(x, { main: sess.id, mains: [...(x.mains ?? []), sess.id], brief: h, who, compactedAt: undefined });
   });
   if (lead || attachments?.length) await ctx.sessions.send(sess.id, lead || "", { ...(attachments?.length ? { attachments } : {}), ...(fold ? { fold } : fold === false ? { show: true } : {}) } as any);
   // The one it replaces finished its last turn: let it go (still readable, as every one before it)
   if (cur && cur.status !== "running") await ctx.sessions.close(cur.id).catch(() => {});
   return { id: { id: sess.id, fresh: true }, changed: false, hash: h };
-}
-
-/**
- * The page's own log (_log.ts, before 2026-11-12) to a file the secretary can read when asked about that time: the
- * new conversation starts without it, so its first message isn't a week of pasted talk. Once.
- */
-function migrateLog(ctx: Ctx) {
-  if (ctx.fs.stat(HISTORY)) return;
-  const past = windowText(ctx, Infinity);
-  if (past) ctx.fs.write(HISTORY, `# 秘书页上以前的聊天（2026-11-12 以前，面板自己存的那份）\n\n${past}\n`);
 }
 
 /**
@@ -641,7 +611,6 @@ export function askText(t: any): string {
     else if (k === "secret") lines.push(`    要用户交一个密钥（${h.handBack.label ?? h.handBack.name ?? ""}）：不能经过对话，请他在任务面板上 ${t.id} 的卡片里填`);
     else lines.push(`    要用户亲手做：${h.title}${h.steps ? `\n    ${h.steps.replace(/\n/g, "\n    ")}` : ""}\n    他说做完了 → tasks.complete ${ex({ id: h.id })}`);
   }
-  if (t.question) lines.push(`    worker 问：${t.question} → tasks.answer ${ex({ id: t.id, answer: "用户的回答" })}`);
   return lines.join("\n");
 }
 

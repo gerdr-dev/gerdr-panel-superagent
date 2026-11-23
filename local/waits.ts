@@ -17,11 +17,13 @@
 //   its own, so the worker writes it (2026-11-04: waiting on a colleague to approve a publish, only his DM reply would
 //   have woken it — not the approval itself).
 // - recheck: woken anyway after that many minutes.
-// Meanwhile the card stays in 进行中 showing what it waits on and the latest check; the worker running again (woken, or
-// the user writing to it) ends the wait — it calls wait_for again if it still waits.
+// Meanwhile the card stays in 进行中 showing what it waits on and the latest check. A wait ends when one of its own
+// items comes (that wait_for only: others stay open), the task ends, or the worker takes it back (cancel_wait, wait_for
+// replaces). The worker running again doesn't end it: until 2026-11-23 it did, and a worker woken by the user lost
+// the colleague it was waiting on; the user wants the agent to cancel, not the board to guess.
 
 import { activity, going, load, memberName, members, note, reqOf, teamOf, update, type Task } from "./_store";
-import { isOutside, mrConversation, open, waitOn, wakeItem, wakeText, type Wait, type WakeOn } from "./_waits";
+import { endGroups, isOutside, mrConversation, open, outsideGroups, waitOn, wakeItem, wakeText, type Wait, type WakeOn } from "./_waits";
 
 const sessionTitle = (w: Wait) => w.what.replace(/^它派出的「(.*?)」.*$/, "$1");
 import { cutLine, wake } from "./_wake";
@@ -47,11 +49,17 @@ export const tools = {
       "{type: time, minutes}: the timeout, required: woken after that long if nothing else came; " +
       "Every wait needs a time item as its timeout (how long it should take): whoever you wait on may never answer — stuck, offline, forgot; a wait without one is refused. Handed work to a session you started (gerdr session new, here or on another computer)? You are the one who waits for it, the same way: its report wakes you first; past the timeout, go and see where it's stuck. " +
       "Waiting on a person to do something you can see (approve, merge, deploy)? Give both a message and a check. " +
-      "Your card stays in progress meanwhile, showing `what`. When the last thing you waited on came and you got something done with it (it went live, a check passed), say that result in your reply first. Then end your turn; when woken and still waiting, call it again (it replaces the last one). When to use: the superagent-panel skill, references/task.md.",
+      "Your card stays in progress meanwhile, showing `what`. When the last thing you waited on came and you got something done with it (it went live, a check passed), say that result in your reply first. Then end your turn; when woken and still waiting, call it again. " +
+      "What you wait on stays open until one of its own items comes or you take it back — not when you're woken by something else or carry on working: when you no longer wait for it (it came another way, you changed course), cancel_wait it; waiting for the same thing in a new way, wait_for with replaces. When to use: the superagent-panel skill, references/task.md.",
     input: {
       type: "object",
       properties: {
         what: { type: "string", description: "What you wait for, for the card: 程志鹏审批香港生产发布单 publish-03d1…" },
+        replaces: {
+          type: "array",
+          items: { type: "string" },
+          description: "Waits of yours this one replaces (their ids, w3, as wait_for's result and my_task give them): taken back with this one",
+        },
         wake: {
           type: "array",
           minItems: 1,
@@ -77,6 +85,11 @@ export const tools = {
       },
       required: ["what", "wake"],
     },
+  },
+  cancel_wait: {
+    description:
+      "Take back something you waited on with wait_for (its id, w3, as wait_for's result and my_task's waits give it): it came another way, it no longer matters, or you changed course. It stops showing on your card and no longer wakes you. Nothing else ends a wait for you: being woken by something else or working on doesn't, so take back what's moot as soon as you see it.",
+    input: { type: "object", properties: { id: { type: "string" }, reason: { type: "string", description: "Why, in a few words (同事在私信里已经答了)" } }, required: ["id", "reason"] },
   },
 };
 
@@ -108,20 +121,12 @@ function resolve(ctx: Ctx, conv: string): { source: string; key: string; where: 
 
 type WakeIn = { type?: string; conversation?: string; until?: string; command?: string; every?: number; cwd?: string; minutes?: number; who?: string };
 
-/**
- * { what, wake: [{ type: message | check | time, … }] }. Workers given the tool before the list (2026-11-04) send
- * conversation / check / recheck instead: read as the same list.
- */
-export function wait_for(
-  input: { what: string; wake?: WakeIn[]; conversation?: string; check?: { command: string; every?: number; cwd?: string }; recheck?: number },
-  ctx: Ctx,
-) {
+/** { what, wake: [{ type: message | check | time, … }], replaces?: ["w3"] }. */
+export function wait_for(input: { what: string; wake?: WakeIn[]; replaces?: string[] | string }, ctx: Ctx) {
   const what = (input?.what ?? "").trim();
   if (!what) throw new Error("what 写清在等什么");
   const items: WakeIn[] = Array.isArray(input.wake) ? [...input.wake] : [];
-  if (input.conversation?.trim()) items.push({ type: "message", conversation: input.conversation });
-  if (input.check?.command) items.push({ type: "check", ...input.check });
-  if (input.recheck != null) items.push({ type: "time", minutes: input.recheck });
+  const replaces = (Array.isArray(input.replaces) ? input.replaces : input.replaces ? [input.replaces] : []).map(String);
   if (!items.length) throw new Error(`wake 至少给一项：不然没有什么会叫醒你。例：[{"type":"message","conversation":"D0…"},{"type":"time","minutes":60}]`);
   // Checked before anything is written; the conversation looked up (it may not exist)
   const parsed = items.map((x, i) => {
@@ -146,7 +151,7 @@ export function wait_for(
     }
     throw new Error(`${at}：type 是 message / check / time 之一，不是「${x.type ?? ""}」`);
   });
-  const { t, ws, stale } = update(ctx, (s) => {
+  const { t, ws, others, stale } = update(ctx, (s) => {
     const t = mine(s, ctx);
     if (!going(t)) throw new Error(`${t.id} ${t.status === "done" ? "已经完成" : t.status === "dropped" ? "已经放弃" : "还没派出去"}，不用等`);
     const now = Date.now();
@@ -166,7 +171,13 @@ export function wait_for(
           (out.length ? `你派出的${out.map((w) => `「${sessionTitle(w)}」`).join("、")}回报会先叫醒你；到了超时还没回报，你去看它卡在哪（gerdr session read）。` : "到点没等到，你去看怎么回事，再决定接着等、换做法还是 ask_human。"),
       );
     }
+    for (const id of replaces) {
+      const w = open(t).find((x) => x.id === id && isOutside(x));
+      if (!w) throw new Error(`没有在等的 ${id}（my_task 的 waits 里有你还在等的）`);
+      endGroups(t, (x) => x.since === w.since, "换成了新的等待");
+    }
     const ws = waitOn(t, what, on);
+    const others = outsideGroups(t).filter((g) => g.since !== ws[0]?.since);
     note(t, `等：${what}（${ws.map((w) => wakeText(w)).join("；")}）`);
     // Its own part is done and it waits on something it doesn't control (CI, a teammate, a colleague): a fact for the
     // requirement's feed, like a part done. The same wait again (woken, still waiting) isn't news.
@@ -174,7 +185,7 @@ export function wait_for(
     const last = (root?.activity ?? []).filter((a) => a.by === t.id).pop();
     if (root && !(last?.kind === "wait" && last.text === what)) activity(s, t, { by: t.id, kind: "wait", text: what });
     Object.assign(t, { viaTools: true, reportedAt: now, nudges: 0, updatedAt: now });
-    return { t, ws, stale: staleAsks(s, t) };
+    return { t, ws, others, stale: staleAsks(s, t) };
   });
   // A trigger of its own for each conversation it waits on. An MR's waits for its state instead (onState): written
   // here, the GitLab add-on looks at the MR within seconds, and what already happened wakes the worker at once
@@ -186,9 +197,33 @@ export function wait_for(
   return {
     id: t.id,
     gerdrCard: waitCard(ctx, t, ws),
+    waitId: ws[0]?.id,
     note: `${ws.map((w) => wakeText(w).replace("叫醒它", "叫醒你").replace("它写的", "你写的")).join("；")}。哪个先到都会叫醒你；现在结束这一轮，不用再等。`,
+    ...(others.length
+      ? { stillWaiting: others.map((g) => `${g.id}「${g.what}」`).join("、") + "：你之前的等待都还开着。已经不用等的现在 cancel_wait；这次是换个方式等同一件事，就该用 replaces" }
+      : {}),
     ...(stale ? { reminder: stale } : {}),
   };
+}
+
+/** Takes back a wait_for (any of its waits' ids: the whole wait_for goes): { id, reason }. */
+export function cancel_wait(input: { id: string; reason: string }, ctx: Ctx) {
+  const id = String(input?.id ?? "").trim();
+  const reason = String(input?.reason ?? "").trim();
+  if (!reason) throw new Error("reason 写一句为什么不等了");
+  return update(ctx, (s) => {
+    const t = mine(s, ctx);
+    const w = open(t).find((x) => x.id === id && isOutside(x));
+    if (!w) {
+      const left = outsideGroups(t);
+      throw new Error(`没有在等的 ${id}。${left.length ? `你还在等：${left.map((g) => `${g.id}「${g.what}」`).join("、")}` : "你现在什么都没在等"}`);
+    }
+    const ended = endGroups(t, (x) => x.since === w.since, `不等了：${reason}`);
+    note(t, `不等「${w.what}」了：${reason}`);
+    t.updatedAt = Date.now();
+    const left = outsideGroups(t);
+    return { ok: true, ended: ended.length, ...(left.length ? { stillWaiting: left.map((g) => `${g.id}「${g.what}」`).join("、") } : {}) };
+  });
 }
 
 /**
@@ -373,8 +408,8 @@ export async function tick(input: unknown, ctx: Ctx) {
       await wake(ctx, t.id, {
         how: "到点了，回来看",
         text: `[任务面板] 到时间了，回来看一下（任务 ${t.id}）：${w.what}。${late}`,
-        // The whole wait_for ends: it looks again and waits again if it must
-        ends: isOutside,
+        // That wait_for ends (all its items): it looks again and waits again if it must. Others stay open
+        ends: (x) => x.since === w.since && isOutside(x),
       });
       woke.push(t.id);
     } catch (err: any) {
@@ -425,7 +460,7 @@ async function runChecks(ctx: Ctx): Promise<string[]> {
             code === 0
               ? `[任务面板] 你等的「${w.what}」检查到了（任务 ${t.id}）。检查命令的输出：\n\n${tail || "（没有输出）"}`
               : `[任务面板] 你为「${w.what}」写的检查命令连着 3 次没跑成（任务 ${t.id}）：\n\n${tail}\n\n看看命令哪里不对，改好再 wait_for。`,
-          ends: isOutside,
+          ends: (x) => x.since === w.since && isOutside(x),
           also: (x) => {
             const ww = (x.waits ?? []).find((y) => y.id === w.id);
             if (ww?.check) ww.check.last = last;

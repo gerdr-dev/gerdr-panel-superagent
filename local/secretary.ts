@@ -91,7 +91,7 @@ export async function status(input: { since?: number }, ctx: Ctx) {
         you.push(`- ${head} 在等用户回答 / 做\n${ask}`);
         continue;
       }
-      const why = t.live?.status === "waiting" ? `worker 在等批准：${t.live.waiting ?? ""}` : t.live?.status === "error" ? "worker 出错了" : t.question ? `问：${t.question}` : t.stopped ? `${t.stopWhy ?? "停下了"}${t.said ? `，它最后说：${cut(t.said, 200)}` : ""}` : "在等用户";
+      const why = t.live?.status === "waiting" ? `worker 在等批准：${t.live.waiting ?? ""}` : t.live?.status === "error" ? "worker 出错了" : t.stopped ? `${t.stopWhy ?? "停下了"}${t.said ? `，它最后说：${cut(t.said, 200)}` : ""}` : "在等用户";
       you.push(`- ${head} ${why}`);
     } else if (t.column === "review") review.push(`- ${head} ${cut(t.summary ?? "", 300)}`);
     else if (t.session || t.status === "running" || t.status === "delivering") active.push(`- ${head} ${when(t.updatedAt)}更新${t.summary ? `：${cut(t.summary, 160)}` : ""}`);
@@ -177,7 +177,7 @@ export async function checkStuck(input: { hours?: number; dry?: boolean } | null
     else if (t.live?.status === "waiting" && (t.live.waitingSince ?? last) < since) stuck.push({ id: t.id, line: `${head} 的 worker ${ago(t.live.waitingSince ?? last)}起在等你批准：${t.live.waiting ?? ""}` });
     else if (t.live?.status === "running" && (t.live.turnStartedAt ?? Date.now()) < since) stuck.push({ id: t.id, line: `${head} 这一轮 ${ago(t.live.turnStartedAt)}开始，到现在还没停` });
     else if (t.column === "review" && last < since) stuck.push({ id: t.id, line: `${head} 交了结果，${ago(last)}起等你验收：${cut(t.summary ?? "", 160)}` });
-    else if (t.column === "you" && last < since) stuck.push({ id: t.id, line: `${head} ${ago(last)}起在等你：${t.question ? `问：${cut(t.question, 160)}` : t.stopped ? `${t.stopWhy ?? "停下了"}${t.said ? `，它最后说：${cut(t.said, 160)}` : ""}` : "见它的对话"}` });
+    else if (t.column === "you" && last < since) stuck.push({ id: t.id, line: `${head} ${ago(last)}起在等你：${t.stopped ? `${t.stopWhy ?? "停下了"}${t.said ? `，它最后说：${cut(t.said, 160)}` : ""}` : "见它的对话"}` });
     else if (t.column === "active" && t.live?.status !== "running" && last < since) {
       const w = (t.waits ?? []).find((x: any) => !x.user);
       stuck.push({ id: t.id, line: `${head} ${ago(last)}之后就没进展了${w ? `，在等：${w.what}` : ""}` });

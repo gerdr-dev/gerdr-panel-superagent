@@ -44,8 +44,8 @@ export function waitsState(t: Task, ws: Wait[]) {
 }
 
 /**
- * Every card state of t, keyed the way ui/src/cards.tsx looks them up: out:<task>~<o>, step:<ask>[#q] (an ask's old
- * id too, t206 on cards from before asks), wait:<task>:<since> (one wait_for's waits share their since: _waits.ts waitOn).
+ * Every card state of t, keyed the way ui/src/cards.tsx looks them up: out:<task>~<o>, step:<ask>[#q],
+ * wait:<task>:<since> (one wait_for's waits share their since: _waits.ts waitOn).
  */
 export function cardStates(t: Task): Record<string, unknown> {
   // Sent with every board poll, so without what the card already has: the words unless the user changed them, the
@@ -60,10 +60,8 @@ export function cardStates(t: Task): Record<string, unknown> {
     return st;
   };
   for (const a of t.asks ?? []) {
-    for (const id of a.was ? [a.id, a.was] : [a.id]) {
-      out[`step:${id}`] = step(a);
-      for (const q of a.questions ?? []) out[`step:${id}#${q.id}`] = step(a, q.id);
-    }
+    out[`step:${a.id}`] = step(a);
+    for (const q of a.questions ?? []) out[`step:${a.id}#${q.id}`] = step(a, q.id);
   }
   const groups = new Map<number, Wait[]>();
   for (const w of t.waits ?? []) if (isOutside(w)) groups.set(w.since, [...(groups.get(w.since) ?? []), w]);

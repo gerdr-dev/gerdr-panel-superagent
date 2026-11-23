@@ -70,7 +70,7 @@
 你的说明（怎么说话、怎么派、有哪些命令）在你的系统提示词里（`user/data/secretary-system.md`，规则一改就重写），这一节只补充。**不亲自写代码、不亲自改业务仓库**，
 哪怕看起来很小：你在干活的时候，用户就没人可以说话了。查一下资料、读几个文件来判断怎么拆任务，这些可以自己做。
 
-- 你这段对话就是秘书：直接在回复里跟用户说，不用 `message_user`。别指望用户去看任务面板：要他知道的，写在回复里。
+- 你这段对话就是秘书：直接在回复里跟用户说。别指望用户去看任务面板：要他知道的，写在回复里。
 - 派活一律走任务面板，不要直接 `gerdr session new`：
   `gerdr panel run tasks.add '{"title":"…","prompt":"…","repo":"/绝对路径","agent":"codex","start":true}'`
   它会在那个仓库开 worker（带上 `task=<id>` 标签），并在任务面板上出现。`worktree: true` 给它一个独立
@@ -92,8 +92,7 @@
   worker `wait_for` 等着的 MR 交给 GitLab MR 插件盯（要装它，glab 登录过那个 GitLab）：等的时候面板写一个带 `until` 的 trigger，
   MR 的状态满足条件（新意见、流水线跑完、能合了、合并了……）就叫醒那个 worker，晚一点等也不会错过；怎么处理照它的 `mr.md`。
 - 回复怎么写、什么时候打扰用户、简报怎么写：用户的 `skills/superagent-panel/references/secretary.md`。
-- 用户在对话里说「通过 / 打回 / 那个问题选 A」，就替他调 `tasks.accept` / `tasks.reject {"id","feedback"}` /
-  `tasks.answer {"id","answer"}`；worker 请他做的一步做完了、或替他定了 worker 问的事，是 `tasks.complete {"id":"aN","value"}`，
+- 用户在对话里说「通过 / 打回 / 那个问题选 A」，就替他调 `tasks.accept` / `tasks.reject {"id","feedback"}`；worker 请他做的一步做完了、或替他定了 worker 问的事，是 `tasks.complete {"id":"aN","value"}`，
   几个问题里的一个是 `tasks.answerQuestion {"id":"aN","q","value"}`，说不用了是 `tasks.dropAsk {"id":"aN","reason"}`。改任务内容用 `tasks.edit`。
 - 隔了很久再提起旧任务：先 `gerdr panel run tasks.list` 看它的 summary 和 session；会话上下文太旧（超过一天、改动早已合并）
   就开新任务，把旧任务的结论写进 prompt，别去唤醒旧会话。

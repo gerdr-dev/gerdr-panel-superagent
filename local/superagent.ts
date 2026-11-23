@@ -313,7 +313,7 @@ export function log(input: { limit?: number }, ctx: Ctx) {
   const s = state(ctx);
   const m = s.main ? ctx.sessions.get(s.main) : null;
   return {
-    main: s.main ? { id: s.main, status: m?.status ?? "gone", waiting: m?.waiting, handled: s.handled } : null,
+    main: s.main ? { id: s.main, status: m?.status ?? "gone", waiting: m?.waiting } : null,
     // Its own questions to the user (_secask.ts): the 秘书 button counts the open ones, their cards read the states
     asks: secAsks(ctx),
     items: s.items

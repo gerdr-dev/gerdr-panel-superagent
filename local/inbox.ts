@@ -7,7 +7,6 @@
 // trigger's `allow`), a task following its conversation, or the main session's judgement.
 
 import { load } from "./_store";
-import { migrate } from "./_user";
 import { workflow } from "./_config";
 import { compact, evaluate, followUp, record, sharers, state, subscribers } from "./_main";
 import { onAssignEvent } from "./assign";
@@ -34,7 +33,6 @@ function fileOf(on: string) {
 type Ours = { path: string; key?: string; allow?: string[]; deny?: string[]; inferred?: boolean };
 
 function ours(ctx: Ctx): Record<string, Ours> {
-  migrate(ctx);
   const out: Record<string, Ours> = {};
   if (!ctx.fs.stat(DIR)) return out;
   for (const f of ctx.fs.list(DIR)) {

@@ -12,19 +12,15 @@ import type { Activity, Store, Task } from "./_store";
 
 export const DIR = `${DATA}/reqs`;
 export const META = `${DATA}/meta.json`;
-const OLD = `${DATA}/tasks.json`;
 const KEEP_ACTIVITY = 200;
 
 export type PartFile = { id: string; tasks: Task[]; activity: Activity[] };
-export type Meta = { next: number; v: number };
+export type Meta = { next: number };
 
 /** The file of a part: its id with anything a file name shouldn't have replaced. */
 export const pathOf = (key: string) => `${DIR}/${key.replace(/[^\w.-]/g, "_")}.json`;
 
-/**
- * Which part a task is kept in: its own. Until 2026-11-19 a human step went with the agent task that asked for it;
- * those are asks on that task now (_store.ts Ask), kept inside it.
- */
+/** Which part a task is kept in: its own (what it asks of the user, its asks, is kept inside it). */
 export function partOf(_byId: Map<string, Task>, _tasks: Task[], t: Task): string {
   return t.id;
 }
@@ -42,7 +38,7 @@ export function split(s: Store): { parts: Record<string, string>; meta: string }
     return f;
   };
   for (const t of s.tasks) {
-    const { activity, bounces, ...kept } = t as Task & { bounces?: number };
+    const { activity, ...kept } = t;
     fileOf(partOf(byId, s.tasks, t)).tasks.push(kept as Task);
     for (const a of activity ?? []) {
       const by = a.by ? byId.get(a.by) : undefined;
@@ -51,12 +47,12 @@ export function split(s: Store): { parts: Record<string, string>; meta: string }
   }
   const parts: Record<string, string> = {};
   for (const [k, f] of files) parts[k] = JSON.stringify(f, null, 2) + "\n";
-  return { parts, meta: JSON.stringify({ next: s.next, v: s.v ?? 2 } satisfies Meta, null, 2) + "\n" };
+  return { parts, meta: JSON.stringify({ next: s.next } satisfies Meta, null, 2) + "\n" };
 }
 
 /** Files back into the Store: tasks side by side, each requirement's activity merged by time onto its root. */
 export function join(parts: PartFile[], meta: Meta | null, rootOf: RootOf): Store {
-  const s: Store = { next: meta?.next ?? 1, tasks: parts.flatMap((p) => p.tasks), v: meta?.v ?? 2 };
+  const s: Store = { next: meta?.next ?? 1, tasks: parts.flatMap((p) => p.tasks) };
   const byId = new Map(s.tasks.map((t) => [t.id, t]));
   const roots = new Set<Task>();
   for (const p of parts) {
@@ -74,7 +70,6 @@ export function join(parts: PartFile[], meta: Meta | null, rootOf: RootOf): Stor
 export type Loaded = { store: Store; files: Record<string, { etag: string; text: string }>; meta?: { etag: string; text: string } };
 
 export function readAll(ctx: Ctx, rootOf: RootOf): Loaded {
-  moveOld(ctx);
   const files: Loaded["files"] = {};
   const parts: PartFile[] = [];
   for (const f of ctx.fs.list(DIR)) {
@@ -114,16 +109,3 @@ export function writeChanged(ctx: Ctx, loaded: Loaded, next: { parts: Record<str
 }
 
 const emptyText = (id: string) => JSON.stringify({ id, tasks: [], activity: [] } satisfies PartFile, null, 2) + "\n";
-
-/** Once: the single tasks.json of before becomes part files; it is kept as tasks.json.bak. */
-function moveOld(ctx: Ctx) {
-  if (!ctx.fs.stat(OLD) || ctx.fs.list(DIR).some((f) => !f.dir)) return;
-  // Its activity is on root tasks, as in the Store, so it splits the same way
-  const out = split(JSON.parse(ctx.fs.read(OLD)) as Store);
-  ctx.fs.mkdir(DIR);
-  for (const [k, text] of Object.entries(out.parts)) ctx.fs.write(pathOf(k), text);
-  ctx.fs.write(META, out.meta);
-  let bak = `${OLD}.bak`;
-  for (let i = 2; ctx.fs.stat(bak); i++) bak = `${OLD}.bak${i}`;
-  ctx.fs.move(OLD, bak);
-}

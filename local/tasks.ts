@@ -4,8 +4,7 @@ import { DATA, skillFile } from "./_user";
 import { workflow } from "./_config";
 import { forWorker } from "./memory";
 import { activity, blockersDone, going, draftOf, find, findAsk, ignoredLead, load, members, newTask, note, reqOf, update, type Ask, type Question, type Store, type Task } from "./_store";
-import { applyBlock } from "./_apply";
-import { endQuestions, endWaits, isOutside, open, question, syncAgents, syncSessions, wakeText, type Wait } from "./_waits";
+import { open, syncAgents, syncSessions, wakeText } from "./_waits";
 import { cutLine, wake } from "./_wake";
 import { askState, cardStates } from "./_cardstate";
 import { closeSec, isSecAsk, secretaryIgnored, secStatus } from "./_secask";
@@ -23,13 +22,11 @@ export type { Task };
 //
 // Workers don't report (2026-11-12): the task panel follows their sessions, and a turn that ends waiting on nothing
 // puts the task before the user (待验收). What they still tell it goes through the panel tools (board.ts: wait_for,
-// ask_human, cancel_human), which Gerdr gives them over MCP. Older workers ended replies
-// with a ```gerdr-task``` JSON block; `list` still reads those.
+// cancel_wait, ask_human, cancel_human), which Gerdr gives them over MCP.
 
 // What a worker is told besides its task: short, since it shows in the chat as part of the first message. How to
 // use each tool is in the tools' own descriptions (board.ts), the user's way of working in the panel's skills — named
 // by absolute path (skillFile): "the skill, references/task.md" had the worker search the disk for it.
-// Old sessions may still end replies with a ```gerdr-task``` block: list() keeps reading those.
 // Not exported: an exported function here is one a page or an agent can call (tasks.<name>).
 function workerProtocol(ctx: Ctx, id: string) {
   return `
@@ -52,21 +49,6 @@ function writeWorkerSystem(ctx: Ctx, id: string, repo: string) {
   if (!st || ctx.fs.read(p) !== text) ctx.fs.write(p, text, st ? { etag: st.etag } : undefined);
   return p;
 }
-
-/** The last ```gerdr-task``` block in a reply, parsed; null when there's none or it isn't JSON. */
-function lastBlock(reply: string): any {
-  const re = /```gerdr-task\s*\n([\s\S]*?)```/g;
-  let m: RegExpExecArray | null;
-  let last: string | null = null;
-  while ((m = re.exec(reply))) last = m[1];
-  if (!last) return null;
-  try {
-    return JSON.parse(last);
-  } catch {
-    return null;
-  }
-}
-
 
 // ---- called by the page and the panel's agent ----
 
@@ -107,7 +89,7 @@ export async function list(input: unknown, ctx: Ctx) {
     }));
   const kids: Record<string, ReturnType<typeof kidsOf>> = {};
   for (const t of store.tasks) if (t.status !== "done" && t.status !== "dropped") kids[t.id] = kidsOf(t);
-  const nudge: { session: string; id: string; out: string[]; reply?: boolean }[] = [];
+  const nudge: { session: string; id: string; out: string[] }[] = [];
   // Answers to questions the secretary passed on (tasks.message): into its chat, where the user asked
   const answered: { id: string; asked: string; text: string }[] = [];
   // What the user ignored, for a worker whose turn started without the board (the user typed in its chat)
@@ -134,41 +116,25 @@ export async function list(input: unknown, ctx: Ctx) {
       syncAgents(t, t.session, (sess?.tasks ?? []) as any[]);
       // A turn started with a slash command (/compact) is no answer to anything and no going on with the work
       if (sess?.status === "running" && !upkeep(t, sess)) {
-        // The worker is at it again — the user answered in its chat, something woke it, or it carried on. What it asked
-        // the user before this turn, and what it waited on outside, are no longer the state of things; it asks or
-        // waits again if it must. The task's status stays where the user put it (DESIGN.md「状态只由用户改」).
-        const turn = sess.turnStartedAt ?? 0;
-        for (const w of endWaits(t, (w) => w.kind === "user" && !w.item && w.since < turn, "在对话里回复了")) note(t, `问：${w.what}\n（在对话里回复了）`);
-        endWaits(t, (w) => isOutside(w) && w.since < turn, "接着做了");
+        // The worker is at it again. What it waits on stays open: it takes back what it no longer waits for itself
+        // (cancel_wait, cancel_human), the board doesn't guess it from a new turn (2026-11-23). The task's status stays
+        // where the user put it (DESIGN.md「状态只由用户改」).
         const lead = ignoredLead(t);
         if (lead) ignored.push({ session: sess.id, text: lead });
       }
-      // Stopped by the user (or Gerdr restarting): theirs, not a worker that went quiet. No "it stopped without
-      // reporting" for them to answer, and no reminder — a reminder would start it again against their stop
+      // Stopped by the user (or Gerdr restarting): theirs, not a worker that went quiet. No reminder — it would start
+      // it again against their stop
       const cancelled = (sess as any)?.stopReason === "cancelled";
-      if (cancelled && sess.status === "idle") endWaits(t, (w) => w.kind === "user" && !w.item && w.what.startsWith(STOPPED_ASK), "你停下了它");
       if (!sess || (sess.status !== "idle" && sess.status !== "error")) continue;
       if (t.synced === sess.updatedAt) continue;
       t.synced = sess.updatedAt;
-      // The user spoke to it from the feed and its turn ended without a message back: reminded once to answer with
-      // the message tool (they read the feed, not its chat); after that it's left to the checks below
+      // A question the secretary passed on (tasks.message): whatever it answered in its reply goes to the secretary's
+      // chat as written
       if (t.asked?.relay && sess.status === "idle" && sess.updatedAt > t.asked.at + 1000) {
-        // Asked through the secretary: whatever it answered in its reply goes to the secretary's chat as written
-        if (!cancelled) answered.push({ id: t.id, asked: t.asked.relay, text: [t.asked.said, String(sess.reply ?? "").trim()].filter(Boolean).join("\n\n") });
-        t.asked = undefined;
-      } else if (t.asked && sess.status === "idle" && sess.updatedAt > t.asked.at + 1000 && !cancelled) {
-        if (!t.asked.nudged) {
-          t.asked.nudged = true;
-          nudge.push({ session: sess.id, id: t.id, out: [], reply: true });
-          t.updatedAt = Date.now();
-          continue;
-        }
+        if (!cancelled) answered.push({ id: t.id, asked: t.asked.relay, text: String(sess.reply ?? "").trim() });
         t.asked = undefined;
       }
-      const b = lastBlock(sess.reply ?? "");
-      // An older worker's gerdr-task block: its summary, question or step (no status: _apply.ts)
-      if (b) applyBlock(s, t, b);
-      else if (going(t) && sess.status === "idle" && !settled(t) && !cancelled && !busyBehind(sess) && t.assigned?.state !== "delivered") {
+      if (going(t) && sess.status === "idle" && !settled(t) && !cancelled && !busyBehind(sess) && t.assigned?.state !== "delivered") {
         // Its turn ended and it waits on nothing: what it said last becomes the card's line; the task stays in its
         // column until the user moves it. The one thing it is still reminded of: work it handed to another session
         // with nobody waiting on it (wait_for), which nothing would wake it for.
@@ -191,15 +157,10 @@ export async function list(input: unknown, ctx: Ctx) {
   for (const n of ignored) await ctx.sessions.send(n.session, n.text, { now: true, fold: "[任务面板] 用户忽略了你问的问题" } as any).catch(() => {});
   await secretaryIgnored(ctx);
   for (const n of nudge) {
-    const fold = n.reply ? "[任务面板] 提醒：用户在等你回话" : "[任务面板] 提醒：派出去的活要用 wait_for 等着";
     await ctx.sessions
-      .send(
-        n.session,
-        n.reply
-          ? `[任务面板] 用户在等你回话（任务 ${n.id}）：在回复里答他。`
-          : `[任务面板] 你把活派出去了，但没有等它（任务 ${n.id}）：${n.out.join("；")}。照 task.md「等别人」用 wait_for 等它（带超时），然后结束这一轮。`,
-        { fold } as any,
-      )
+      .send(n.session, `[任务面板] 你把活派出去了，但没有等它（任务 ${n.id}）：${n.out.join("；")}。照 task.md「等别人」用 wait_for 等它（带超时），然后结束这一轮。`, {
+        fold: "[任务面板] 提醒：派出去的活要用 wait_for 等着",
+      } as any)
       .catch(() => {});
   }
   // Workers' system files follow the user's memory (a worker restarted later reads what was learned since)
@@ -218,10 +179,10 @@ export async function list(input: unknown, ctx: Ctx) {
   const tasks = s.tasks.map((t) => {
       const sess = t.session ? live[t.session] : null;
       const halted = stopped(t, sess);
-      // What it last said, for any card that has it stopped (or asking about a stop): its last paragraph, without
-      // Gerdr's note on how the turn ended (that's stopWhy)
+      // What it last said, for a card that has it stopped: its last paragraph, without Gerdr's note on how the turn
+      // ended (that's stopWhy)
       const idle = sess && (sess.status === "idle" || sess.status === "error");
-      const said = idle && (halted || question(t)?.startsWith(STOPPED_ASK)) ? lastWords(String(sess?.reply ?? "")) : "";
+      const said = idle && halted ? lastWords(String(sess?.reply ?? "")) : "";
       const ks = kids[t.id] ?? [];
       // The card's line: the newest paragraph in its worker's conversation, read live (summary is written only by
       // task_update or when a turn ends, and workers forget the former: the card read hours behind the chat)
@@ -230,8 +191,6 @@ export async function list(input: unknown, ctx: Ctx) {
         ...t,
         // The open waits, each with what wakes it in words (the 在等 list, the card); ended ones stay in t.waits
         waits: open(t).length ? open(t).map((w) => ({ ...w, wake: wakeText(w) })) : undefined,
-        // The open question to the user, for the card (a wait too: _waits.ts question)
-        question: question(t),
         // The sessions it handed work to, for the card's chips (each is a wait as well)
         helpers: ks.length ? ks.map((k) => ({ id: k.id, title: k.title, status: k.status, waiting: k.waiting, waitingKind: k.waitingKind, left: k.user })) : undefined,
         // Where each of its chat cards stands (_cardstate.ts): the cards read them from here while the board is loaded
@@ -296,10 +255,6 @@ function teams<T extends Task & { column: string }>(s: Store, tasks: T[]) {
     return { ...t, teamColumn: col, members: members(s, byId.get(t.id)!).map((m) => m.id) };
   });
 }
-
-/** The board's own question when a worker stops without reporting (older tasks have it): told apart from a real one. */
-/** Kept to recognize the question older tasks still have open (before 2026-11-12 a worker stopping unreported got it). */
-const STOPPED_ASK = "Worker 停下了，但没在看板上汇报进展";
 
 /** Gerdr's note at the end of a reply on how the turn ended (lastReply in its workhost.go): not the worker's words. */
 const ENDING = /^(这一轮结束：|Turn ended: |出错：|Error: )/;
@@ -680,7 +635,7 @@ export async function start(
     ...(t.autoTitle ? {} : { title: t.title }),
     systemFile: `${ctx.workspace.dir}/${sys}`,
     // What it makes that isn't committed goes in the task's folder (Gerdr names it in the worker's prompt and lets its
-    // sandbox write there); an older Gerdr ignores the option and the worker uses its repository's
+    // sandbox write there)
     artifactsDir: folder({ id: t.id }, ctx)?.path,
     tags: { task: t.id },
     // Followed on the board (its drawer shows the chat), not in Code: no tab of it appears there
@@ -688,16 +643,13 @@ export async function start(
     // No reportTo: the user follows the board, not the panel's agent, and the worker updates the board itself (panel
     // tools). A report would only have the panel's agent repeat the worker's reply to nobody, a turn each time.
   } as any);
-  // A Gerdr that took the system file says it back; an older one ignored it, so the rules ride on the message as before
-  const took = (sess as any).systemFile === `${ctx.workspace.dir}/${sys}`;
-  await ctx.sessions.send(sess.id, (prompt || "看附件，照里面的做。") + remarkOf(t) + (took ? "" : workerProtocol(ctx, t.id) + forWorker(ctx, repo)), {
+  await ctx.sessions.send(sess.id, (prompt || "看附件，照里面的做。") + remarkOf(t), {
     attachments: (t.attachments ?? []).map((a) => a.path),
     show: true,
   } as any);
   const out = update(ctx, (s) => {
     const x = find(s, t.id);
     Object.assign(x, { status: "running", routing: undefined, prompt, repo, session: sess.id, sessions: [...(x.sessions ?? []), sess.id], updatedAt: Date.now() });
-    endQuestions(x, "重新派出去了");
     if (input.agent) x.agent = input.agent;
     if (input.model) x.model = input.model;
     if (input.effort) x.effort = input.effort;
@@ -834,24 +786,6 @@ export async function reject(input: { id: string; feedback: string }, ctx: Ctx) 
   });
   await tell(ctx, t, `验收没通过：${input.feedback.trim()}\n改完在回复里说改了什么。`);
   return t;
-}
-
-/** Answers the worker's question (the open question to the user on the task). { id, answer } */
-export async function answer(input: { id: string; answer: string }, ctx: Ctx) {
-  const ans = input.answer?.trim();
-  if (!ans) throw new Error("回答是空的");
-  const cur = find(load(ctx).store, input.id);
-  if (!cur.session) throw new Error(`${cur.id} 没有在跑的 agent 会话：先派出去（start）`);
-  const q = question(cur) ?? "";
-  return wake(ctx, input.id, {
-    how: `你答了：${ans}`,
-    // The user's own words: shown whole in the worker's chat
-    fold: false,
-    text: `关于你的问题，用户的决定：${ans}`,
-    ends: (w) => w.kind === "user" && !w.item,
-    also: (t) => note(t, `问：${q}\n答：${ans}`),
-    feed: `你答了：${ans}`,
-  });
 }
 
 /**

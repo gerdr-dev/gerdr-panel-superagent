@@ -1,20 +1,14 @@
 // What a task waits on — one record for every kind, so where a task stands follows from one place.
 //
-// Before (until 2026-11-04) each kind had its own field, its own wake-up path and its own rules for "is it stopped?":
-// a worker's question in t.question, a wait_for in t.waiting, an MR in t.delivery, the user's steps in t.blockedBy
-// (now t.asks), the sessions it handed work to only in Gerdr's session list. Every new kind meant touching column(), stopped(),
-// settled(), the card, the chat card and the 在等 list — and the gaps were the bugs: a worker saying "I'll wait"
-// with nothing to wake it (t29), one reporting "working" and stopping (t30), an MR wait nobody could see in the chat.
-//
-// Now a task has `waits`: each says what it waits for, whether that's the user, and what ends it. Two kinds are
-// registered by the worker's own calls (wait_for: news in a conversation — a colleague's DM, an MR — or a time; a
-// question for the user); two are kept in step with what they mirror (sync): what it asks of the user (its asks)
+// A task has `waits`: each says what it waits for, whether that's the user, and what ends it. One kind is
+// registered by the worker's own calls (wait_for: news in a conversation — a colleague's DM, an MR — a check, a time);
+// the others are kept in step with what they mirror (sync): what it asks of the user (its asks)
 // and the tasks it's blocked by, the sessions it handed work to. An MR is no kind of its own: a way of working (the worker's skill) plus a source of
 // events (the GitLab add-on, subscribed to by the wait's follow trigger, waits.ts), waited on like any conversation. The board reads only this:
 //
 //   有直接等你的（问题、批准）→ 等你（等你在任务面板上做的那一项，是那一项的卡片在等你）
 //   worker 在跑，或者还有等待 → 进行中
-//   都没有、worker 也停了     → 停下了（等你，要你看一眼）
+//   都没有、worker 也停了     → 待验收（它最后说的话在卡片上）
 //
 // Every wake-up goes one way too (_wake.ts): it ends the waits it answers, with how, and tells the worker.
 
@@ -87,25 +81,6 @@ function trim(t: Task) {
   t.waits = ws.filter((w) => !drop.has(w));
 }
 
-/**
- * Something needs the user's say on this task (a worker's question, a closed MR, a stop it didn't explain): a wait on
- * the user with no board item — answered in its chat or on the card (tasks.answer). The same question twice is one.
- */
-export function askUser(t: Task, text: string): Wait {
-  const same = open(t).find((w) => w.kind === "user" && !w.item && w.what === text);
-  return same ?? addWait(t, { kind: "user", what: text, user: true });
-}
-
-/** The open question to the user (no board item): what the card shows. */
-export function question(t: Task): string | undefined {
-  return open(t).find((w) => w.kind === "user" && !w.item)?.what;
-}
-
-/** Ends the open questions (the user answered, or the worker moved on). */
-export function endQuestions(t: Task, how: string) {
-  return endWaits(t, (w) => w.kind === "user" && !w.item, how);
-}
-
 /** The worker's own waits on outside (wait_for): news in a conversation, a check it wrote, a time, a teammate. */
 export function isOutside(w: Wait) {
   return w.kind === "reply" || w.kind === "check" || w.kind === "time" || w.kind === "teammate";
@@ -134,13 +109,40 @@ export type WakeOn =
   | { type: "teammate"; id: string; name: string };
 
 /**
- * The worker waits on outside (wait_for): whichever of `on` comes first wakes it — a wait each, all sharing `what`. The
- * task follows each conversation while it waits on it (waitingOn), not for good. Replaces what it waited on outside
- * before: this says what it waits on now. Returns the new waits.
+ * The waits one wait_for made (they share `since`): what wakes it and what ends it go together. Several can be open at
+ * once (a colleague's answer and a deploy): each ends when one of its own items comes, or when the worker takes it
+ * back (cancel_wait, or wait_for with replaces) — never because the worker ran again (2026-11-23: the user wants the
+ * agent to cancel what it no longer waits for, not the board guessing it from a new turn).
+ */
+export function groupOf(t: Task, w: Wait): Wait[] {
+  return open(t).filter((x) => isOutside(x) && x.since === w.since);
+}
+
+/** Ends the wait_for groups that contain a wait `pick` selects. */
+export function endGroups(t: Task, pick: (w: Wait) => boolean, how: string): Wait[] {
+  const since = new Set(open(t).filter((w) => isOutside(w) && pick(w)).map((w) => w.since));
+  return endWaits(t, (w) => isOutside(w) && since.has(w.since), how);
+}
+
+/** The worker's open wait_for groups, one line each with the id cancel_wait takes (its first wait's). */
+export function outsideGroups(t: Task): { id: string; what: string; since: number }[] {
+  const seen = new Set<number>();
+  const out: { id: string; what: string; since: number }[] = [];
+  for (const w of open(t)) {
+    if (!isOutside(w) || seen.has(w.since)) continue;
+    seen.add(w.since);
+    out.push({ id: w.id, what: w.what, since: w.since });
+  }
+  return out;
+}
+
+/**
+ * The worker waits on outside (wait_for): whichever of `on` comes first wakes it — a wait each, all sharing `what` and
+ * `since` (groupOf). The task follows each conversation while it waits on it (waitingOn), not for good. What it waited
+ * on before stays open unless it takes it back (wait_for replaces, cancel_wait). Returns the new waits.
  */
 export function waitOn(t: Task, what: string, on: WakeOn[]): Wait[] {
   const now = Date.now();
-  endWaits(t, isOutside, "换成了新的等待");
   return on.map((c) => {
     if (c.type === "message") {
       return addWait(t, { kind: "reply", what, since: now, on: { source: c.conv.source, key: c.conv.key }, where: c.conv.where, url: c.conv.url });

@@ -303,9 +303,6 @@ function TaskEvent({ card }: CardProps) {
 }
 
 registerCard("task-event", TaskEvent);
-// post_progress's cards from before task-event (2026-11-09): kicker and title only, drawn the same
-registerCard("task-progress", (p: CardProps) => <TaskEvent {...p} card={{ ...p.card, kind: "progress", level: "card" }} />);
-
 /** One thing that wakes it (local/_waits.ts wakeItem). */
 type Wake = { kind: string; text: string; code?: string };
 const WAKE_ICON: Record<string, typeof Hourglass> = { reply: MessageSquare, check: SquareTerminal, time: AlarmClock, teammate: Users };

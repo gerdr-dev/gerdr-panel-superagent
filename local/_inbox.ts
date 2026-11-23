@@ -39,9 +39,7 @@ export function waitingLines(tasks: Listed[]): Line[] {
     }
     if (t.live?.status === "waiting" || t.live?.status === "error") continue;
     const k = t.helpers?.find((x) => x.left);
-    const line = t.question
-      ? `问你：${t.question}`
-      : k
+    const line = k
         ? `它派出去的「${k.title}」${k.waitingKind === "ask" ? "在问" : "要你批准"}：${k.waiting ?? ""}`
         : t.stopped
           ? `${t.stopWhy ?? "停下了"}${t.said ? `。它最后说：${t.said}` : ""}`

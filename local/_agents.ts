@@ -1,5 +1,5 @@
 // The agents and roles Gerdr can start a worker with: for @-mentions on the board and the router's prompt.
-// ctx.sessions.agents() where Gerdr has it; an older Gerdr only has the CLI.
+// ctx.sessions.agents().
 
 /**
  * models: what `model` takes, with the picker's name (`fable` = `Fable 5.2`); efforts: what `effort` takes. Only from a
@@ -9,16 +9,7 @@ export type AgentChoice = { id: string; name: string; description?: string };
 export type AgentInfo = { id: string; name: string; base?: string; prompt?: string; models?: AgentChoice[]; efforts?: AgentChoice[] };
 
 export async function allAgents(ctx: Ctx): Promise<AgentInfo[]> {
-  let raw: any[] = [];
-  if (typeof (ctx.sessions as any).agents === "function") raw = (ctx.sessions as any).agents();
-  else {
-    const r = await ctx.exec("gerdr", ["session", "agents"], { timeout: 15_000 });
-    try {
-      raw = r.code === 0 ? JSON.parse(r.stdout) : [];
-    } catch {
-      raw = [];
-    }
-  }
+  const raw: any[] = ctx.sessions.agents();
   return raw
     .filter((a) => a.available !== false)
     .map((a) => ({

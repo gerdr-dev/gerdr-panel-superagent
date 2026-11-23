@@ -1,15 +1,13 @@
-// The board's panel tools: what a worker (a session the board started) calls to report on and change its task, from
-// inside a turn. Gerdr serves them to the worker over MCP; ctx.caller.session says which conversation called, so the
-// task is looked up, never taken from the input. Same rules as the old ```gerdr-task``` block (_apply.ts), plus what a
-// block couldn't do: take back a step the user no longer needs to do, and answer with ids.
+// The board's panel tools: what a worker (a session the board started) calls from inside a turn to ask the user,
+// take an ask back, or talk to the people its task came from. Gerdr serves them to the worker over MCP;
+// ctx.caller.session says which conversation called, so the task is looked up, never taken from the input.
 
-import { applyBlock } from "./_apply";
-import { activity, find, findAsk, load, note, openAsks as open_, reqOf, update, type Ask, type Store, type Task } from "./_store";
+import { activity, find, findAsk, load, newAsk, note, openAsks as open_, reqOf, update, type Ask, type Question, type Store, type Task } from "./_store";
 import { handBack, isMain, state as mainState, threadsOf } from "./_main";
 import { workflow } from "./_config";
 import { draftLines, hold, pendingFor, withdraw } from "./_outbox";
 import { eventCard } from "./_cards";
-import { endWaits, isOutside, open, question } from "./_waits";
+import { open } from "./_waits";
 import { secAsk, secCancel } from "./_secask";
 import { GENERAL, MEMORY, nameOf } from "./_memory";
 import { skillFile } from "./_user";
@@ -52,9 +50,6 @@ const STEP = {
 };
 
 export const tools = {
-  // task_update was taken out on 2026-11-12 (its code too, 2026-11-18): the card's line is the worker's newest
-  // paragraph (tasks.ts newest), links are in the reply. A worker still calling it gets "no such tool" and says it in
-  // its reply instead
   ask_human: {
     description:
       "Put something on the user's task panel that needs them: a step only they can do (give steps), or a decision (give options). It shows in this chat as a card with everything you put in it (the title, steps / options, what to hand back), answerable right there, and on their task panel: don't write the question or the steps again in your reply — a line on why you're asking is enough. Their answer / 'done' comes to you as a message, maybe days later. Decisions and values asked while earlier ones are unanswered go in one item: you get all the answers together once every one is answered. cancel_human takes one back. The user may also ignore it (an ✕ on the card, usually because it went moot): you're told at the start of your next turn, and nothing waits on it any more. When and how to ask: the superagent-panel skill, references/human.md and task.md. The secretary uses it too, for anything it asks the user (a decision, a confirmation, a value, a step): its question shows as a card in its own chat and lights the 秘书 button until answered or closed.",
@@ -103,24 +98,6 @@ export const tools = {
   my_task: {
     description: "Your task as the task panel sees it: the brief you were first given (brief), status, summary, artifacts, what you asked the user for (open or done, with what was handed back).",
     input: { type: "object", properties: {} },
-  },
-  message_user: {
-    description:
-      "Not needed: say it in your reply (opening your task on the task panel opens this chat). Kept for workers started before 2026-11-12.",
-    input: {
-      type: "object",
-      properties: {
-        text: { type: "string" },
-        files: { type: "array", items: { type: "object", properties: { path: { type: "string" }, name: { type: "string" } }, required: ["path"] }, description: "Files that go with it (absolute paths)" },
-      },
-      required: ["text"],
-    },
-  },
-  // The old name, kept so a worker started before the two were one (2026-11-10) doesn't fail mid-turn: drop it once
-  // none of those is left
-  post_progress: {
-    description: "Old name of message_user: use message_user.",
-    input: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
   },
 };
 
@@ -176,6 +153,44 @@ export async function closeSessions(ctx: Ctx, ids: string[]) {
   for (const id of ids) if ((ctx.sessions as any).close) await (ctx.sessions as any).close(id).catch(() => {});
 }
 
+/**
+ * What ask_human puts on the task: a decision or a value joins the open questions ask (the worker can't go on until
+ * the user answered them all: "反正都要我一次性做完了才继续"); a step to do (sign in, a secret) is an ask of its own.
+ * Earlier asks stay: the worker takes back what's moot itself (cancel_human, replaces).
+ */
+function addAsk(s: Store, t: Task, h: any): Ask {
+  if (h.handBack?.kind === "choice" || h.handBack?.kind === "value") {
+    const q: Omit<Question, "id"> = {
+      title: String(h.title || "要你决定"),
+      kind: h.handBack.kind,
+      options: h.handBack.kind === "choice" ? h.handBack.options : undefined,
+      multi: h.handBack.kind === "choice" ? h.handBack.multi : undefined,
+      label: h.handBack.kind === "value" ? h.handBack.label : undefined,
+      steps: h.steps ? String(h.steps) : undefined,
+      // When it was asked: the ask sits in the feed at its newest open question, not where the first one was
+      at: Date.now(),
+    };
+    const open = open_(t).find((x) => x.handBack.kind === "questions");
+    if (open) {
+      const qs = open.questions ?? [];
+      qs.push({ ...q, id: String(qs.length + 1) });
+      Object.assign(open, { questions: qs, title: `${t.title}：${qs.filter((x) => !x.dropped).length} 个问题要你定`, updatedAt: Date.now() });
+      return open;
+    }
+    // A decision can wait: it sits under 等你 without a warning mark
+    return newAsk(s, t, { title: q.title, handBack: { kind: "questions" }, questions: [{ ...q, id: "1" }], urgent: false });
+  }
+  return newAsk(s, t, {
+    expiresAt: Number(h.expires) > 0 ? Date.now() + Number(h.expires) * 60_000 : undefined,
+    title: String(h.title || "人工步骤"),
+    steps: h.steps ? String(h.steps) : undefined,
+    handBack: h.handBack?.kind ? { kind: h.handBack.kind, name: h.handBack.name, label: h.handBack.label, options: h.handBack.options, multi: h.handBack.multi } : { kind: "none" },
+    verify: h.verify ? String(h.verify) : undefined,
+    minutes: Number(h.minutes) || undefined,
+    urgent: true, // it's holding up a worker
+  });
+}
+
 /** What ask_human tells the worker about the card it made: the user sees it whole, so the reply needn't repeat it. */
 const SHOWN = "这一项已经作为卡片显示在这个对话里，内容和你写的一样，用户能直接在卡片上答：回复里不要再把问题、步骤写一遍，一句话说为什么要问就够了。";
 
@@ -191,14 +206,13 @@ export function ask_human(input: any, ctx: Ctx) {
     const decision = Array.isArray(input.options) && input.options.length > 0;
     const human = decision ? { ...input, steps: input.steps ?? "", handBack: { kind: "choice", options: input.options.map(String), multi: input.multi === true || undefined, label: "你的决定" } } : input;
     const reviewed = t.status === "review";
-    const h = applyBlock(s, t, { state: "blocked", human, replace: false })!;
+    const h = addAsk(s, t, human);
     // Asked right after reporting a result to look at: the result wasn't the end, the choice is. Its feed line stops
     // saying "等你看" (t52, 2026-11-05)
     const root = reqOf(s, t);
     const last = root?.activity?.[root.activity.length - 1];
     if (reviewed && last?.kind === "review" && last.by === t.id) Object.assign(last, { kind: "progress", text: last.text.replace(/^有结论了，等你看：?/, "") || "有结论了" });
-    Object.assign(t, { viaTools: true, reportedAt: Date.now(), nudges: 0, updatedAt: Date.now() });
-    endWaits(t, isOutside, "worker 改成问你了");
+    Object.assign(t, { reportedAt: Date.now(), nudges: 0, updatedAt: Date.now() });
     if (h.handBack.kind === "questions") {
       // Joined an ask that still has earlier questions open: say which, so the moot ones are taken back now
       const earlier = (h.questions ?? []).filter((q) => !q.dropped && q.answer == null).slice(0, -1);
@@ -346,8 +360,8 @@ export function my_task(input: unknown, ctx: Ctx) {
     // changed it; the latest words win.
     brief: briefOf(t),
     ...(t.assigned ? { requestedBy: t.assigned.by ?? t.origin?.source, requestState: t.assigned.state, deliveryDraft: t.assigned.draft, shareDir: t.assigned.shareDir } : {}),
-    question: question(t),
-    waits: open(t).map((w) => ({ kind: w.kind, what: w.what, since: w.since })),
+    // id: what cancel_wait / wait_for replaces take (one wait_for's items share what and since)
+    waits: open(t).map((w) => ({ id: w.id, kind: w.kind, what: w.what, since: new Date(w.since).toISOString() })),
     artifacts: t.links ?? [],
     // The ids are for the tools: the board shows questions without them (2026-11-16), and a worker that wrote
     // "都在卡片 t124 上，t124#1" made the user decode them
@@ -378,38 +392,6 @@ function briefOf(t: Task) {
   return b;
 }
 
-/**
- * A message to the user (DESIGN.md「消息」): the one way an agent says anything to the user — an answer, a result,
- * where things stand — a feed line drawn in its chat too, so the feed stays a part of the chat. The secretary
- * doesn't use it: its chat is the page. Answers the user's words in the feed (asked is cleared). It was two tools until
- * 2026-11-10 (post_progress for progress, this for answers); to the user both were the agent talking, and the agent
- * had to pick one each time.
- */
-export function message_user(input: { text: string; files?: { path: string; name?: string }[] }, ctx: Ctx) {
-  const text = input?.text?.trim();
-  if (!text) throw new Error("text 是空的");
-  const files = (input.files ?? []).filter((f) => f?.path);
-  // The secretary's page is its chat (2026-11-12): what it writes in its reply is what the user reads
-  if (isMain(ctx, ctx.caller.session)) return { ok: false, note: "秘书不用这个工具：用户看的就是你的对话，直接在回复里说。" };
-  return update(ctx, (s) => {
-    const t = mine(s, ctx);
-    activity(s, t, { by: t.id, kind: "message", text, ...(files.length ? { files } : {}) });
-    // A question passed on by the secretary stays open: the answer goes to its chat when the turn ends (tasks.ts),
-    // with this message in it
-    const asked = t.asked?.relay ? { ...t.asked, said: [t.asked.said, text].filter(Boolean).join("\n\n") } : undefined;
-    Object.assign(t, { asked, viaTools: true, reportedAt: Date.now() });
-    const stale = staleAsks(s, t);
-    const gerdrCard = eventCard(ctx, t.id, "message", text);
-    return stale ? { ok: true, reminder: stale, gerdrCard } : { ok: true, gerdrCard };
-  });
-}
-
-
-
-/** The old name of message_user (see tools). */
-export function post_progress(input: { text: string }, ctx: Ctx) {
-  return message_user(input, ctx);
-}
 export async function hand_back(input: { event: string; reason: string }, ctx: Ctx) {
   const { store } = load(ctx);
   const t = mine(store, ctx);

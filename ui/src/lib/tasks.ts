@@ -84,7 +84,6 @@ export type Task = {
   session?: string;
   sessions?: string[];
   blockedBy?: string[];
-  question?: string;
   summary?: string;
   links?: Link[];
   /** What its worker asks of the user (ask_human), open and answered. */

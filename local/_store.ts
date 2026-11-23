@@ -2,8 +2,7 @@
 // file per part in user/data/reqs/ (_parts.ts; this person's, never shared — _user.ts). A helper file (leading _):
 // nothing here is callable from a page.
 
-import { addWait, askUser, mrConversation, open, sync, type Wait } from "./_waits";
-import { migrate } from "./_user";
+import { sync, type Wait } from "./_waits";
 import { readAll, split, writeChanged } from "./_parts";
 import { byCaller, unarchive } from "./_archive";
 
@@ -59,8 +58,6 @@ export type Outgoing = {
 export type Ask = {
   /** "a12": unique on the board (the task counter), what the tools, the chat cards and tasks.complete name it by. */
   id: string;
-  /** The human task it was before 2026-11-19 (t206): chat cards drawn then still find it (findAsk). */
-  was?: string;
   title: string;
   /** open → done (did it / answered) | dropped (taken back, set aside, no longer needed). */
   status: "open" | "done" | "dropped";
@@ -100,16 +97,11 @@ export type Task = {
    * that name for the task. Cleared once the task is renamed by anyone else.
    */
   autoTitle?: boolean;
-  /** @deprecated "human" was a task for the user (2026-11-19: now asks on the task that asked; upgrade). */
-  owner?: "agent" | "human";
   /**
    * todo → running → done (nothing for the user to judge) | review (the user judges the result); dropped. Only the
    * worker or the user says done: no rule does (a merged MR is news for the worker, not the end).
-   * "delivering" (an MR the board followed to merge) is gone: read as running, waiting on the MR (upgrade).
    */
-  status: "todo" | "running" | "review" | "done" | "dropped" | "delivering";
-  /** @deprecated the MR of a "delivering" task: read by upgrade into a wait on the MR's conversation. */
-  delivery?: { url: string; project: string; iid: number; since: number };
+  status: "todo" | "running" | "review" | "done" | "dropped";
   /** When it was handed to the panel's agent to pick the repository / agent (the user dispatched it without one). */
   routing?: number;
   /**
@@ -121,11 +113,8 @@ export type Task = {
   reroute?: { feedback: string; at: number; router?: string; was?: string };
   /** When the user last typed in its worker's chat that the feed has (Gerdr's personSaid): each one is logged once. */
   heard?: number;
-  /**
-   * The user spoke to it from the requirement's feed (tasks.message) and is owed a message back (board.ts message);
-   * nudged: reminded once already. Cleared by its message.
-   */
-  asked?: { at: number; nudged?: boolean; /** Asked through the secretary (its words): the answer goes back to its chat. */ relay?: string; /** What it sent with message_user meanwhile. */ said?: string };
+  /** A question the secretary passed on (tasks.message, its words in relay): the worker's reply goes back to its chat. */
+  asked?: { at: number; relay: string };
   /**
    * The conversation that dispatched it: the Superagent's main session (_main.ts; a part split off shares its
    * parent's), or, for older tasks, a one-off router since closed (routerClosed). Kept, so every task traces back to
@@ -158,9 +147,6 @@ export type Task = {
   threads?: { source: string; key: string }[];
   /** Everything it waits on, open and lately ended (_waits.ts): where it stands follows from these. */
   waits?: Wait[];
-  /** @deprecated before waits: a worker's question (now a user wait) and a wait_for (reply / time waits). Read once by upgrade. */
-  waiting?: { what: string; since: number; source?: string; key?: string; where?: string; recheckAt?: number };
-  waitEnd?: unknown;
   origin?: { id: string; source: string; kind: string; key?: string; title?: string; url?: string; reply?: { kind: string; data?: unknown } };
   /**
    * Work someone asked of the user through its origin (assign.ts): whether they agreed, delivered, and who asked.
@@ -185,8 +171,6 @@ export type Task = {
   request?: string;
   /** A requirement's feed (on the task that has members): see Activity. */
   activity?: Activity[];
-  /** @deprecated: was the requirement's tell count on its root, written by every member. Now bouncesOf. */
-  bounces?: number;
   /**
    * When this member told a teammate something (board.ts tell), latest few. Kept on the member that told, not the
    * requirement, so each part has one writer; bouncesOf adds them up.
@@ -218,16 +202,12 @@ export type Task = {
    * as it was, so what the user adds goes here and rides with it to the worker (and the secretary when it routes).
    */
   remark?: string;
-  /** @deprecated a question for the user: now a user wait (_waits.ts askUser). */
-  question?: string;
   /** The latest result in a line or a paragraph, and where to look (MR, doc). */
   summary?: string;
   links?: Link[];
   /** What its worker asks of the user (ask_human), open and answered: see Ask. */
   asks?: Ask[];
-  /** Its worker reports through the panel tools (board.ts): no ```gerdr-task``` block to expect at the end of a turn. */
-  viaTools?: boolean;
-  /** When its worker last reported (task_update / ask_human): a stop with nothing reported since is noticed (tasks.list). */
+  /** When its worker last asked or waited through the panel tools (ask_human, wait_for). */
   reportedAt?: number;
   /** What it was before 放弃, so restore puts it back. */
   droppedFrom?: Task["status"];
@@ -247,116 +227,22 @@ export type Task = {
   doneAt?: number;
 };
 
-/** v: the store's shape — 2 since wait_for stopped adding the conversations it waits on to threads. */
-export type Store = { next: number; tasks: Task[]; v?: number };
+export type Store = { next: number; tasks: Task[] };
 
 /** The run's ctx, for find to bring an archived task back with (each run has its own module state). */
 let current: Ctx | undefined;
 
 export function load(ctx: Ctx) {
-  migrate(ctx);
   current = ctx;
   byCaller(ctx);
   const loaded = readAll(ctx, reqOf);
-  loaded.store = upgrade(loaded.store);
   return loaded;
 }
 
-/** Tasks written before waits: their question and wait_for become waits (kept so on the next write). */
-function upgrade(s: Store): Store {
-  fromHumanTasks(s);
-  for (const t of s.tasks) {
-    if (t.question) {
-      if (t.status !== "done" && t.status !== "dropped") askUser(t, t.question);
-      t.question = undefined;
-    }
-    const w = t.waiting;
-    if (w) {
-      if (t.status === "running") {
-        if (w.key) addWait(t, { kind: "reply", what: w.what, since: w.since, on: { source: w.source!, key: w.key }, where: w.where });
-        if (w.recheckAt) addWait(t, { kind: "time", what: w.what, since: w.since, at: w.recheckAt });
-      }
-      t.waiting = undefined;
-    }
-    t.waitEnd = undefined;
-    // Delivering: running, waiting on its MR like on any conversation (the watcher is only a source of its events now)
-    if (t.status === "delivering") {
-      t.status = "running";
-      const d = t.delivery;
-      if (d?.url) {
-        const on = { source: "gitlab", key: mrConversation(d.url)?.key ?? `${d.project}!${d.iid}` };
-        if (!open(t).some((w) => w.on?.key === on.key)) addWait(t, { kind: "reply", what: `MR !${d.iid}：review、流水线、合并`, on, where: `MR !${d.iid}`, url: d.url, since: d.since });
-      }
-    }
-    t.delivery = undefined;
-    // Before v2, wait_for added the conversation it waited on to threads for good: taken out again (a conversation
-    // some reply wait was on, other than the origin's). Still waited on, it's followed through the wait (waitingOn).
-    if (!s.v && t.threads?.length) {
-      const waited = (x: { source: string; key: string }) =>
-        (t.waits ?? []).some((w) => w.kind === "reply" && w.on?.source === x.source && w.on?.key === x.key);
-      const isOrigin = (x: { source: string; key: string }) => x.source === t.origin?.source && x.key === t.origin?.key;
-      t.threads = t.threads.filter((x) => isOrigin(x) || !waited(x));
-    }
-  }
-  s.v = 3;
-  return s;
-}
-
-/**
- * Human tasks (before 2026-11-19, see Ask) become what they were for: one a worker asked for, an ask on that worker's
- * task (same number: t206 → a206, `was` keeping the old id for the chat cards); one of the user's own (added by hand,
- * or someone's request they took on themselves), a task in 待办 like any other — sent out to an agent when they want.
- * Runs on every load, so an archived requirement brought back is upgraded too.
- */
-function fromHumanTasks(s: Store) {
-  const old = s.tasks.filter((t) => t.owner === "human") as (Task & Record<string, any>)[];
-  for (const h of old) {
-    const by = s.tasks.find((x) => x.owner !== "human" && (x.id === h.askedBy || x.blockedBy?.includes(h.id)));
-    if (!by) {
-      // The user's own: a task to do (in 待办 until they send it out), its steps the prompt
-      h.prompt = h.prompt ?? h.steps ?? h.title;
-      for (const k of ["owner", "askedBy", "steps", "handBack", "questions", "verify", "minutes", "urgent", "expiresAt", "handedBack", "dropReason", "refreshing", "orphaned"]) delete h[k];
-      continue;
-    }
-    const a: Ask = {
-      id: `a${h.id.replace(/^t/, "")}`,
-      was: h.id,
-      title: h.title,
-      status: h.status === "done" ? "done" : h.status === "dropped" ? "dropped" : "open",
-      steps: h.steps,
-      handBack: h.handBack ?? { kind: "none" },
-      questions: h.questions,
-      verify: h.verify,
-      minutes: h.minutes,
-      urgent: h.urgent,
-      expiresAt: h.expiresAt,
-      handedBack: h.handedBack,
-      dropReason: h.dropReason,
-      refreshing: h.refreshing,
-      createdAt: h.createdAt,
-      updatedAt: h.updatedAt,
-      doneAt: h.doneAt,
-    };
-    by.asks = [...(by.asks ?? []), a];
-    s.tasks = s.tasks.filter((x) => x !== h);
-    for (const x of s.tasks) {
-      if (x.blockedBy?.includes(h.id)) x.blockedBy = x.blockedBy.filter((b) => b !== h.id);
-      for (const w of x.waits ?? []) if (w.item === h.id) w.item = a.id;
-      for (const l of x.activity ?? []) if (l.of === h.id) l.of = a.id;
-    }
-    // Its own feed lines (an ask has none) go to the task that asked
-    if ((h as Task).activity?.length) by.activity = [...(by.activity ?? []), ...(h as Task).activity!].sort((x, y) => x.at - y.at);
-  }
-  for (const t of s.tasks) if (t.owner) delete t.owner;
-}
-
-/**
- * An ask by its ref: "a12" (or a human task's old id, "t206", for chat cards drawn before 2026-11-19), with a question
- * of it after "#" (a12#2). The task that asked comes with it.
- */
+/** An ask by its ref: "a12", with a question of it after "#" (a12#2). The task that asked comes with it. */
 export function findAsk(s: Store, ref: string): { t: Task; a: Ask; q?: string } {
   const [id, q] = splitRef(ref);
-  for (const t of s.tasks) for (const a of t.asks ?? []) if (a.id === id || a.was === id) return { t, a, q };
+  for (const t of s.tasks) for (const a of t.asks ?? []) if (a.id === id) return { t, a, q };
   throw new Error(`没有 ${ref}（要用户做 / 答的一项）`);
 }
 
