@@ -95,7 +95,7 @@ export const tools = {
     },
   },
   my_task: {
-    description: "Your task as the task panel sees it: status, summary, artifacts, what you asked the user for (open or done, with what was handed back).",
+    description: "Your task as the task panel sees it: the brief you were first given (brief), status, summary, artifacts, what you asked the user for (open or done, with what was handed back).",
     input: { type: "object", properties: {} },
   },
   message_user: {
@@ -133,7 +133,8 @@ export function instructions(input: unknown, ctx: Ctx) {
     `this chat: the user reads it here, so say things in your replies as you normally would, results in full. There is ` +
     `nothing to report: when your turn ends and you wait on nothing, the task goes before the user with what you said. ` +
     `Waiting on someone or something: wait_for; something only the user can decide or do: ask_human. How to work on it ` +
-    `is their superagent-panel skill, ${skillFile(ctx, "superagent-panel/references/task.md")}: read it before you stop. my_task shows the task as the panel sees it. ` +
+    `is their superagent-panel skill, ${skillFile(ctx, "superagent-panel/references/task.md")}: read it before you stop. my_task shows the task as the panel sees it, ` +
+    `with the brief your first message gave you (brief): after /clear or a compaction, read it again there instead of guessing what the task was. ` +
     `Your questions and steps for the user have ids (a5, a5#1) for your tools only: the panel doesn't show them, so to ` +
     `the user name the question itself ("套餐商品配置那个问题"), never "卡片 a5" or "a5#1". ` +
     `What the user's memory says about this repository and all of them came in your first message; the files are ` +
@@ -334,6 +335,10 @@ export function my_task(input: unknown, ctx: Ctx) {
     title: t.title,
     status: t.status,
     summary: t.summary,
+    // What its first message said: /clear or a compaction takes that message away, and the system prompt only names
+    // the task (t210, 2026-11-23: the user asked whether a cleared worker could carry on). The chat since may have
+    // changed it; the latest words win.
+    brief: briefOf(t),
     ...(t.assigned ? { requestedBy: t.assigned.by ?? t.origin?.source, requestState: t.assigned.state, deliveryDraft: t.assigned.draft, shareDir: t.assigned.shareDir } : {}),
     question: question(t),
     waits: open(t).map((w) => ({ kind: w.kind, what: w.what, since: w.since })),
@@ -349,6 +354,18 @@ export function my_task(input: unknown, ctx: Ctx) {
       ...(h.questions ? { questions: h.questions.filter((q) => !q.dropped).map((q) => ({ id: `${h.id}#${q.id}`, title: q.title, answer: q.answer })) } : {}),
     })),
   };
+}
+
+/** The task's brief as its worker was first sent it, the user's whole request when the prompt is a part of it. */
+function briefOf(t: Task) {
+  const b: Record<string, unknown> = {};
+  if (t.prompt?.trim()) b.prompt = t.prompt.trim();
+  if (t.request?.trim() && t.request.trim() !== t.prompt?.trim()) b.request = t.request.trim();
+  if (t.remark?.trim()) b.remark = t.remark.trim();
+  if (t.attachments?.length) b.attachments = t.attachments.map((a) => a.path);
+  if (!Object.keys(b).length) return undefined;
+  b.note = "派活时的原话；之后在对话里改过的，以后来的为准。";
+  return b;
 }
 
 /**
