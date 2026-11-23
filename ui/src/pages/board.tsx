@@ -1311,8 +1311,6 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
           </details>
         )
       )}
-        </div>
-      )}
       {t.assigned?.state === "ask" && <AssignBox t={t} act={act} save={save} />}
       {t.assigned && t.assigned.state !== "ask" && !t.session && <ReplyBox t={t} act={act} />}
       {t.canReply && !t.routing && (
