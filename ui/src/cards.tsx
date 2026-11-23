@@ -380,7 +380,7 @@ function TaskWait({ card }: CardProps) {
 
 registerCard("task-wait", TaskWait);
 
-type Out = { state: "pending" | "sent" | "skipped" | "missing"; text?: string; where?: string; doneAt?: number; edited?: boolean };
+type Out = { state: "pending" | "sent" | "skipped" | "withdrawn" | "missing"; text?: string; where?: string; doneAt?: number; edited?: boolean; reason?: string };
 
 /**
  * Words a worker wrote to the people in a chat its task follows, held for the user (local/outbox.ts, 设置 → 回话
@@ -439,7 +439,9 @@ function TaskOutgoing({ card }: CardProps) {
         ? st!.edited
           ? "改过后发了"
           : "已发送"
-        : "没发";
+        : st!.state === "withdrawn"
+          ? "worker 撤回了"
+          : "没发";
   return (
     <div className={`my-1.5 space-y-1.5 rounded-lg border border-l-2 bg-card px-3 py-2 ${edge}`}>
       <div className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
@@ -469,7 +471,7 @@ function TaskOutgoing({ card }: CardProps) {
       {over ? (
         // The buttons' row, at their height (py-1 and a border, as the buttons have): where it ended instead
         <div className="flex items-center gap-2 border border-transparent py-1 text-[12px] text-muted-foreground">
-          <span className={sent ? "text-ok" : ""}>{st!.state === "missing" ? "找不到了" : sent ? `发给了 ${where}` : `没发给 ${where}`}</span>
+          <span className={sent ? "text-ok" : ""}>{st!.state === "missing" ? "找不到了" : sent ? `发给了 ${where}` : st!.state === "withdrawn" ? `过时了，没发：${st!.reason ?? ""}` : `没发给 ${where}`}</span>
           {st!.doneAt && <span className="ml-auto shrink-0">{new Date(st!.doneAt).toTimeString().slice(0, 5)}</span>}
         </div>
       ) : (

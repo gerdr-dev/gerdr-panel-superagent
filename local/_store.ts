@@ -39,9 +39,12 @@ export type Outgoing = {
   /** Where it goes, in a few words, for the card: "slack-me · 千一". */
   where: string;
   at: number;
-  state: "pending" | "sent" | "skipped";
-  /** When the user sent it or let it go. */
+  /** withdrawn: its worker took it back before the user chose (board.ts drop_reply): moot by then. */
+  state: "pending" | "sent" | "skipped" | "withdrawn";
+  /** When the user sent it or let it go, or the worker took it back. */
   doneAt?: number;
+  /** Why the worker took it back (withdrawn): the card says so. */
+  reason?: string;
   /** The user changed the words before sending. */
   edited?: boolean;
 };

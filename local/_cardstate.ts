@@ -9,7 +9,7 @@ import { isOutside, wakeItem, wakeText, type Wait } from "./_waits";
 /** A held reply (outbox.status). */
 export function outgoingState(o: Outgoing | undefined) {
   if (!o) return { state: "missing" };
-  return { state: o.state, text: o.text, where: o.where, doneAt: o.doneAt, edited: o.edited };
+  return { state: o.state, text: o.text, where: o.where, doneAt: o.doneAt, edited: o.edited, reason: o.reason };
 }
 
 /** An ask, or one question of it (tasks.status). qid: the question, for a card ref like a5#2. */

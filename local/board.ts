@@ -7,7 +7,7 @@ import { applyBlock } from "./_apply";
 import { activity, find, findAsk, load, note, openAsks as open_, reqOf, update, type Ask, type Store, type Task } from "./_store";
 import { handBack, isMain, state as mainState, threadsOf } from "./_main";
 import { workflow } from "./_config";
-import { hold } from "./_outbox";
+import { draftLines, hold, pendingFor, withdraw } from "./_outbox";
 import { eventCard } from "./_cards";
 import { endWaits, isOutside, open, question } from "./_waits";
 import { secAsk, secCancel } from "./_secask";
@@ -78,9 +78,15 @@ export const tools = {
       properties: {
         text: { type: "string", description: "What they read, as you'd write it in that chat (they don't see your conversation)" },
         event: { type: "string", description: "The message you answer; default: the one the task came from" },
+        replaces: { type: "string", description: "A draft of yours still waiting for the user (o1) that this one replaces: it is taken back" },
       },
       required: ["text"],
     },
+  },
+  drop_reply: {
+    description:
+      "Take back a reply_message draft still waiting for the user to send (o1; the ids come with messages passed to you and in my_task's outbox): the conversation moved on and it no longer fits — the user answered there themselves, the other side asked something else, it's already been said. Do it as soon as you see it's moot, so the user never sends an out-of-date reply. Writing a better one instead: reply_message with replaces.",
+    input: { type: "object", properties: { id: { type: "string" }, reason: { type: "string", description: "Why, in a few words (用户已经在 Slack 回过了)" } }, required: ["id", "reason"] },
   },
   reply_requester: {
     description:
@@ -353,6 +359,10 @@ export function my_task(input: unknown, ctx: Ctx) {
       handedBack: h.handBack.kind === "secret" ? (h.status === "done" ? `secret ${h.handBack.name} saved` : undefined) : h.handedBack,
       ...(h.questions ? { questions: h.questions.filter((q) => !q.dropped).map((q) => ({ id: `${h.id}#${q.id}`, title: q.title, answer: q.answer })) } : {}),
     })),
+    // Its reply_message drafts still waiting for the user: drop_reply takes back the ones gone moot
+    ...((t.outbox ?? []).some((o) => o.state === "pending")
+      ? { outbox: (t.outbox ?? []).filter((o) => o.state === "pending").map((o) => ({ id: o.id, to: o.where, text: o.text, at: new Date(o.at).toISOString() })) }
+      : {}),
   };
 }
 
@@ -465,7 +475,7 @@ export async function reply_requester(input: { text: string; deliver?: boolean }
  * The worker writes to the people in a chat its task follows (outbox.ts): sent now (设置 → 回话 "auto"), or held as a
  * card for the user to send or not ("review"). The worker isn't told what became of it either way.
  */
-export async function reply_message(input: { text: string; event?: string }, ctx: Ctx) {
+export async function reply_message(input: { text: string; event?: string; replaces?: string }, ctx: Ctx) {
   const t = mine(load(ctx).store, ctx);
   if (t.assigned) throw new Error(`${t.id} 是别人通过另一个面板请用户做的任务：回发起人用 reply_requester`);
   const text = input?.text?.trim();
@@ -475,6 +485,9 @@ export async function reply_message(input: { text: string; event?: string }, ctx
   const ev = (ctx as any).events;
   if (!ev?.reply) throw new Error("这个 Gerdr 还没有事件功能：升级 Gerdr 后再用");
   const msg = { id: to.id, source: to.source, kind: to.kind, key: to.key, actor: to.actor, title: to.title, url: to.url, reply: to.reply };
+  // Taken back first: whether this one goes at once or waits, the old draft must not be sent after it
+  const replaced = input.replaces?.trim();
+  if (replaced) withdraw(ctx, t.id, replaced, "换成了新写的");
   if (workflow(ctx).replies === "auto") {
     ev.reply(msg, text);
     update(ctx, (s) => {
@@ -485,10 +498,25 @@ export async function reply_message(input: { text: string; event?: string }, ctx
     return { note: `已发给 ${where}。`, gerdrCard: eventCard(ctx, t.id, "reply", `${where}：${text}`) };
   }
   const o = hold(ctx, t.id, text, msg, where);
+  // Earlier drafts to the same conversation still waiting: the user would see two answers to one question (t202)
+  const others = pendingFor(find(load(ctx).store, t.id), msg).filter((x) => x.id !== o.id);
   return {
-    note: "交给用户过目了：他决定发不发，你不会收到结果。不用等、不用问，接着做你的事；这段话也不用在回复里再写一遍。",
+    note:
+      "交给用户过目了：他决定发不发，你不会收到结果。不用等、不用问，接着做你的事；这段话也不用在回复里再写一遍。" +
+      (others.length ? `\n同一段对话里你还有没发的草稿：\n${draftLines(others)}\n被这条取代或已经过时的，现在就 drop_reply 撤掉。` : ""),
     gerdrCard: { type: "task-outgoing", ref: `${t.id}~${o.id}`, project: ctx.workspace.project, task: t.id, where, text },
   };
+}
+
+/** The worker takes back a draft of its own still waiting for the user (_outbox.ts withdraw). */
+export function drop_reply(input: { id: string; reason: string }, ctx: Ctx) {
+  const t = mine(load(ctx).store, ctx);
+  const id = input?.id?.trim().replace(/^.*~/, "");
+  const reason = input?.reason?.trim();
+  if (!id) throw new Error("id 不能为空（草稿的编号，比如 o1）");
+  if (!reason) throw new Error("reason 不能为空");
+  const o = withdraw(ctx, t.id, id, reason);
+  return `撤回了要发给 ${o.where} 的草稿 ${id}。`;
 }
 
 /** The message a reply answers: the one named (from a conversation the task follows), else the one it came from. */

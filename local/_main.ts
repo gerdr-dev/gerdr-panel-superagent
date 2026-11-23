@@ -23,6 +23,7 @@ import { activity, draftOf, find, load as loadTasks, note, update as updateTasks
 import { cutLine, wake } from "./_wake";
 import { windowText } from "./_log";
 import { isOutside, waitingOn } from "./_waits";
+import { draftLines, pendingFor } from "./_outbox";
 
 const STATE = `${DATA}/superagent.json`;
 /**
@@ -285,12 +286,21 @@ export async function followUp(ctx: Ctx, id: string, e: Ev) {
   let k = ctxl.length;
   while (k > 0 && ctxl[k - 1].me) k--;
   const mine = contextLines({ ...e, context: ctxl.slice(k) });
+  // Drafts the worker wrote to this conversation that the user hasn't sent yet: the conversation moved on since (the
+  // user answered there themselves, or the other side asks something new), so some no longer fit. Named here so the
+  // worker takes them back (drop_reply); it didn't on its own, and the user nearly sent a stale answer (t202, 2026-11-23)
+  const t0 = loadTasks(ctx).store.tasks.find((x) => x.id === id);
+  const drafts = t0 && e.reply ? pendingFor(t0, e) : [];
+  const stale = drafts.length
+    ? `\n\n你之前写给这段对话、还在等用户发的草稿：\n${draftLines(drafts)}\n` +
+      `${mine ? "用户本人已经在那里说过话了，" : ""}看看它们还对不对：已经过时（用户自己答过了、对方问的已经变了）就 drop_reply 撤掉；要换个说法就 reply_message 带 replaces。`
+    : "";
   return wake(ctx, id, {
     how: e.reply ? `${by || "有人"}回复了` : e.title || `${e.source}/${e.kind}`,
     fold: `[${e.source}] ${by}${e.reply ? "接着说" : ""}：${cutLine(text, 50)}`,
     text:
       // How to handle it is in task.md「任务面板发给你的消息」(the worker's skill), not repeated in every message
-      `[${head}]（任务 ${id}，消息 ${e.id}）\n\n${mine ? `用户本人在那里先说了：\n${mine}\n\n${by || "对方"}接着说：\n` : ""}${text}`,
+      `[${head}]（任务 ${id}，消息 ${e.id}）\n\n${mine ? `用户本人在那里先说了：\n${mine}\n\n${by || "对方"}接着说：\n` : ""}${text}${stale}`,
     files: files.map((f) => f.path),
     // What it waited on outside came — or something else did: it looks again either way, and waits again if it must
     ends: isOutside,

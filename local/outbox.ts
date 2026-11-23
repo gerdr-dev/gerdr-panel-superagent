@@ -12,6 +12,10 @@ function split(ref: string): [string, string] {
   return [task, id];
 }
 
+function done(state: string) {
+  return state === "sent" ? "已经发过了" : state === "withdrawn" ? "worker 已经撤回了这条（过时了）" : "已经选了不发";
+}
+
 /** The card asks how one stands: { ref: "t5~o1" } → { state, text, where, doneAt, edited } or { state: "missing" }. */
 export function status(input: { ref: string }, ctx: Ctx) {
   const [task, id] = split(input?.ref);
@@ -28,7 +32,7 @@ export async function send(input: { ref: string; text?: string }, ctx: Ctx) {
   const t = find(load(ctx).store, task);
   const o = t.outbox?.find((x) => x.id === id);
   if (!o) throw new Error(`${input.ref} 不在了`);
-  if (o.state !== "pending") throw new Error(o.state === "sent" ? "已经发过了" : "已经选了不发");
+  if (o.state !== "pending") throw new Error(done(o.state));
   const text = (input.text ?? o.text).trim();
   if (!text) throw new Error("内容是空的");
   const ev = (ctx as any).events;
@@ -51,7 +55,7 @@ export function skip(input: { ref: string }, ctx: Ctx) {
     const x = find(s, task);
     const y = x.outbox?.find((z) => z.id === id);
     if (!y) throw new Error(`${input.ref} 不在了`);
-    if (y.state !== "pending") throw new Error(y.state === "sent" ? "已经发过了" : "已经选了不发");
+    if (y.state !== "pending") throw new Error(done(y.state));
     Object.assign(y, { state: "skipped", doneAt: Date.now() });
     note(x, `没发给 ${y.where}：${y.text}`);
     x.updatedAt = Date.now();
