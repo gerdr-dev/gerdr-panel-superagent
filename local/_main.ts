@@ -47,6 +47,11 @@ export type Ev = {
   actor?: string;
   /** Display name, when the source gives one (data.userName). */
   who?: string;
+  /**
+   * Where it was said, in words, when the source gives it (data.place: "私聊", "#whale-ai-dev 的消息列"). Without it an
+   * answer's card read "回给 slack-me · 乔巴", taken for a DM to him when it went to a channel's thread (t202, 2026-11-23).
+   */
+  place?: string;
   title?: string;
   text?: string;
   url?: string;
@@ -196,6 +201,7 @@ export function compact(e: GerdrEvent): Ev {
     key: e.key || undefined,
     actor: e.actor || undefined,
     who: e.data?.userName || undefined,
+    place: typeof e.data?.place === "string" && e.data.place ? e.data.place : undefined,
     title: e.title,
     text: (e.text ?? "").slice(0, 8000),
     url: e.url,
@@ -257,6 +263,11 @@ export function sharers(tasks: Task[], e: { source: string; key?: string }): Tas
 
 function who(e: Ev) {
   return e.who || e.actor || "";
+}
+
+/** Where an answer to it goes, for people: "slack-me · #whale-ai-dev 的消息列 · 乔巴 (Li Maoqun)". */
+export function placeOf(e: Pick<Ev, "source" | "place" | "who" | "title">) {
+  return [e.source, e.place, e.who || (e.place ? "" : e.title)].filter(Boolean).join(" · ");
 }
 
 /**
@@ -642,7 +653,7 @@ function taskBlock(t: Task, agents: { id: string; name: string }[]) {
 /** One outside message as the fold line of the chat: "[消息 c21] slack-me · 张三：好，等我看个线上问题". */
 function eventLine(it: Item) {
   const e = it.event;
-  return `[消息 ${it.id}] ${e.source}${who(e) ? ` · ${who(e)}` : ""}：${cut(e.text || e.title || "", 40)}`;
+  return `[消息 ${it.id}] ${e.source}${e.place ? ` · ${e.place}` : ""}${who(e) ? ` · ${who(e)}` : ""}：${cut(e.text || e.title || "", 40)}`;
 }
 
 /** A one-line cut, for fold lines. */
@@ -662,7 +673,7 @@ function eventBlock(ctx: Ctx, it: Item, tasks: Task[], hint?: string) {
   // No list of recent tasks any more (2026-11-12): it hung under every message, a dozen lines under a one-line "ok";
   // the secretary looks tasks up when a message is about one (dispatch: attach / stop)
   return [
-    `[消息 ${it.id}]${it.inferred ? "（不是找你的：只按主动工作的规则判断）" : ""} ${e.source}/${e.kind}${who(e) ? ` · ${who(e)}` : ""}`,
+    `[消息 ${it.id}]${it.inferred ? "（不是找你的：只按主动工作的规则判断）" : ""} ${e.source}/${e.kind}${e.place ? ` · ${e.place}` : ""}${who(e) ? ` · ${who(e)}` : ""}`,
     e.context?.length ? `这段对话之前说的（「用户本人」是用户自己说的，判断这条是在回什么）：\n${contextLines(e)}\n\n这一条：` : "",
     e.text || e.title || "",
     e.files?.length ? `附件：\n${e.files.map((f) => `- ${f.name}：${f.path}`).join("\n")}` : "",

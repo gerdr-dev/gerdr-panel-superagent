@@ -3,7 +3,7 @@
 // ctx.caller.session says which conversation called, so the task is looked up, never taken from the input.
 
 import { activity, find, findAsk, load, newAsk, note, openAsks as open_, reqOf, update, type Ask, type Question, type Store, type Task } from "./_store";
-import { handBack, isMain, state as mainState, threadsOf } from "./_main";
+import { handBack, isMain, placeOf, state as mainState, threadsOf } from "./_main";
 import { workflow } from "./_config";
 import { draftLines, hold, pendingFor, withdraw } from "./_outbox";
 import { eventCard } from "./_cards";
@@ -463,7 +463,7 @@ export async function reply_message(input: { text: string; event?: string; repla
   const text = input?.text?.trim();
   if (!text) throw new Error("text 不能为空");
   const to = replyTarget(ctx, t, input.event?.trim());
-  const where = [to.source, to.who || to.title].filter(Boolean).join(" · ");
+  const where = placeOf(to);
   const ev = (ctx as any).events;
   if (!ev?.reply) throw new Error("这个 Gerdr 还没有事件功能：升级 Gerdr 后再用");
   const msg = { id: to.id, source: to.source, kind: to.kind, key: to.key, actor: to.actor, title: to.title, url: to.url, reply: to.reply };

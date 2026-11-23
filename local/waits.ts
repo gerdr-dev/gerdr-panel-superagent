@@ -123,8 +123,8 @@ function resolve(ctx: Ctx, conv: string): { source: string; key: string; where: 
       // For the chat's card: where, in words — "Slack 有人私聊我 · 石石 (Yang Lei)", not D09DJBLRF4K
       const e = seen[seen.length - 1];
       const kind = ctx.events.catalog().find((x) => x.on === `${e.source}/${e.kind}`)?.title || e.source;
-      const who = compact(e).who;
-      return { source: e.source, key, where: who ? `${kind} · ${who}` : `${kind} · ${key}` };
+      const { who, place } = compact(e);
+      return { source: e.source, key, where: [kind, place, who || (place ? "" : key)].filter(Boolean).join(" · ") };
     }
   }
   const chan = /^[CG][A-Z0-9]+$/.test(c) ? c : "";
