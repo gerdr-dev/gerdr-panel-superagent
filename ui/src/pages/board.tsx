@@ -587,15 +587,17 @@ export default function BoardPage() {
       )}</Linger>
       {drag &&
         // The card being dragged, under the pointer: an opaque card with its contents dimmed, tilted a little. On
-        // the panel's own portal area (as its dialogs): a transformed ancestor would shift a fixed box inside it
+        // the panel's own portal area (as its dialogs). Gerdr makes that area the containing block of fixed boxes
+        // (a transform, so drawers stay off its browser column): a fixed inset-0 layer is the area, and the card is
+        // placed in it at the pointer less the area's own offset (DragGhost)
         createPortal(
-          <div className="pointer-events-none fixed z-50" style={{ left: drag.x - drag.dx, top: drag.y - drag.dy, width: drag.w }}>
+          <DragGhost x={drag.x - drag.dx} y={drag.y - drag.dy} w={drag.w}>
             <div className="rotate-[1.5deg] rounded-lg bg-card shadow-2xl ring-1 ring-brand/50">
               <div className="opacity-60">
                 <MiniCard t={drag.t} byId={byId} active={false} onOpen={() => {}} />
               </div>
             </div>
-          </div>,
+          </DragGhost>,
           portal ?? document.body,
         )}
       <Linger>{creating && <NewTask onClose={() => setCreating(false)} act={act} />}</Linger>
@@ -2009,5 +2011,26 @@ function ArchiveDialog({ onClose, onOpen }: { onClose: () => void; onOpen: (id: 
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * A box at viewport point x / y (a pointer's clientX / clientY) while it is drawn in a fixed layer whose containing
+ * block may not be the viewport (Gerdr's panel area has a transform): the layer measures where it really is and the
+ * box is placed less that.
+ */
+function DragGhost({ x, y, w, children }: { x: number; y: number; w: number; children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [at, setAt] = useState({ x: 0, y: 0 });
+  useLayoutEffect(() => {
+    const r = ref.current?.getBoundingClientRect();
+    if (r && (r.left !== at.x || r.top !== at.y)) setAt({ x: r.left, y: r.top });
+  });
+  return (
+    <div ref={ref} className="pointer-events-none fixed inset-0 z-50">
+      <div className="absolute" style={{ left: x - at.x, top: y - at.y, width: w }}>
+        {children}
+      </div>
+    </div>
   );
 }
