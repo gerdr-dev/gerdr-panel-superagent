@@ -1230,12 +1230,25 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
   }, [t.prompt, open]);
   const dirty = editable && !quoted && draft.trim() !== (t.prompt ?? t.title).trim();
   const remarkDirty = editable && quoted && remark.trim() !== (t.remark ?? "").trim();
-  const save = async () => {
-    if (remarkDirty) return !!(await go("edit", "edit", { id: t.id, remark: remark.trim() }));
-    const prompt = draft.trim();
-    if (!dirty || !prompt) return true;
-    return !!(await go("edit", "edit", { id: t.id, title: firstLine(prompt) || t.title, prompt }));
+  // Pressing 派出去 while typing in a box blurs it, and the blur saves: one save in flight, shared, so the button's
+  // own save() waits for it instead of saving twice. The button must not go disabled for that save (busy "edit"):
+  // disabled between mousedown and mouseup swallows the click, and 派出去 took two presses (user report, 2026-11-23).
+  const saving = useRef<Promise<boolean> | null>(null);
+  const save = () => {
+    if (saving.current) return saving.current;
+    const run = async () => {
+      if (remarkDirty) return !!(await go("edit", "edit", { id: t.id, remark: remark.trim() }));
+      const prompt = draft.trim();
+      if (!dirty || !prompt) return true;
+      return !!(await go("edit", "edit", { id: t.id, title: firstLine(prompt) || t.title, prompt }));
+    };
+    const p = run().finally(() => {
+      saving.current = null;
+    });
+    saving.current = p;
+    return p;
   };
+  const stepBusy = busy !== "" && busy !== "edit";
   const l = t.live;
   const stale = l?.status === "running" && l.turnStartedAt && Date.now() - l.turnStartedAt > 40 * 60000;
   const tone = l?.status === "waiting" || l?.status === "error" || stale ? "text-warn" : l?.status === "running" ? "text-ok" : "text-muted-foreground";
@@ -1356,7 +1369,7 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
           // secretary about the card before it is (2026-11-16: a button opening a box mid-drawer felt odd)
           <div className="flex items-end gap-2">
             <Composer busy={busy === "reroute"} placeholder="哪里不对？跟秘书说，它来重排" onSend={(feedback) => go("reroute", "reroute", { id: t.id, feedback })} before={save} />
-            <Button className="h-9 shrink-0" disabled={!!busy || (!quoted && !draft.trim())} onClick={async () => (await save()) && go("start", "start", { id: t.id, ...(t.canReply ? { reply } : {}) })}>
+            <Button className="h-9 shrink-0" disabled={stepBusy || (!quoted && !draft.trim())} onClick={async () => (await save()) && go("start", "start", { id: t.id, ...(t.canReply ? { reply } : {}) })}>
               {busy === "start" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}派出去
             </Button>
           </div>
@@ -1369,7 +1382,7 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
           </div>
         ) : (
           <div className="flex justify-end">
-            <Button className="h-9" disabled={!!busy} onClick={async () => (await save()) && go("start", "start", { id: t.id, ...(t.canReply ? { reply } : {}) })}>
+            <Button className="h-9" disabled={stepBusy} onClick={async () => (await save()) && go("start", "start", { id: t.id, ...(t.canReply ? { reply } : {}) })}>
               {busy === "start" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}派出去
             </Button>
           </div>
