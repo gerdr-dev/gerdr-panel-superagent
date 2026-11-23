@@ -1212,7 +1212,7 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
   const [open, setOpen] = useState(false);
   // Whether the quote is cut: measured, not guessed from its lines (a phone wraps 6 lines into 12, and 展开全部 never
   // showed, user report 2026-11-16)
-  const quote = useRef<HTMLParagraphElement>(null);
+  const quote = useRef<HTMLDivElement>(null);
   const [cut, setCut] = useState(false);
   useLayoutEffect(() => {
     const el = quote.current;
@@ -1270,9 +1270,11 @@ function AgentCard({ t, byId, act }: { t: Task; byId: Record<string, Task>; act:
       {editable && quoted ? (
         <>
           <div className="rounded-md border-l-2 border-muted-foreground/30 bg-muted/40 px-3 py-2">
-            <p ref={quote} className={clsx(txt, "leading-relaxed whitespace-pre-wrap text-muted-foreground", !open && "line-clamp-[8]")}>
-              {t.prompt ?? t.title}
-            </p>
+            {/* Markdown, as the sender wrote it (Meegle / Slack text has **bold** and - lists). Cut by height, not
+                line-clamp: line-clamp only cuts one block of text, and Markdown is several (paragraphs, lists) */}
+            <div ref={quote} className={clsx("text-muted-foreground", !open && "max-h-48 overflow-hidden")}>
+              <Md className={txt}>{t.prompt ?? t.title}</Md>
+            </div>
             {(cut || open) && (
               <button className="mt-1 text-[12px] text-brand hover:underline" onClick={() => setOpen(!open)}>
                 {open ? "收起" : "展开全部"}
