@@ -359,6 +359,9 @@ async function brief(ctx: Ctx): Promise<string> {
         ? `- decide 的 accept 会替你建任务，但**不派出去**：放进任务面板的「待办」，用户看过、改好再派（他的设置）。parts 照常写，会成为卡片上的仓库和 agent；拆成几份就是几张卡。` +
           `记下这条消息的去向；回不回原对话、什么时候回，按他的设置自动处理，你不用另外回。\n\n`
         : `- decide 会替你建任务、派出去、记下这条消息的去向；回不回原对话按用户的设置自动处理。\n`) +
+      `- 一轮里没给决定的 [消息 cN]（比如先问了用户、等他补信息）一直挂在「去向」里，标着没判断成。用户答了以后照样用 superagent.decide 给这条 cN 决定：` +
+      `accept 会建任务派出去，并记下它从哪个对话来（对方在那里的后续直接交给这个任务，回不回对方按用户的设置）；别另用 tasks.add / tasks.dispatch 建，那样这条消息一直挂着，对方的后续也到不了任务。` +
+      `已经另建了，就用 attach 把 cN 并进那个任务，加 "told": true（它已经知道这条消息，不再转一遍）。\n` +
       `- 把消息和人对上已有的事：\`gerdr panel run memory.mid\`（中期记忆：agent 记下的眼下的事和人，加上各任务在等外面的什么；可带 '{"q":"词 词"}'），` +
       `\`gerdr panel run tasks.search '{"q":"词 词"}'\`（按人名、关键词找任务，含归档的）。什么时候查见判断规则；你知道了眼下的事（谁在等什么、谁在跟用户对接什么），用 note 工具记进中期记忆（没有这个工具就 gerdr panel run memory.note 同样的参数），怎么记见下面「中期记忆」。\n\n` +
       `## 任务面板上的任务 [任务 tN]：用任务面板的命令（和用户点按钮是同一套）\n` +
@@ -780,7 +783,11 @@ export function sweep(ctx: Ctx) {
   if (Date.now() - m.updatedAt < 20_000) return;
   if (s.items.some((x) => x.state === "pending" && left(x.sentAt))) {
     updateState(ctx, (x) => {
-      for (const it of x.items) if (it.state === "pending" && left(it.sentAt)) Object.assign(it, { state: "unavailable", reason: "调度会话这一轮结束了，没给决定" });
+      // What it said instead (usually a question to the user): the 去向 row shows it, so "没给决定" doesn't read as a
+      // failure when the secretary is waiting on the user's answer (2026-11-24, c623)
+      const said = cutLine(String(m.reply ?? "").split(/\n\s*\n/)[0] ?? "", 200);
+      const reason = said ? `秘书这一轮没给决定，它说：${said}` : "调度会话这一轮结束了，没给决定";
+      for (const it of x.items) if (it.state === "pending" && left(it.sentAt)) Object.assign(it, { state: "unavailable", reason });
     });
   }
   const stuck = (t: Task) => t.status === "todo" && !!t.routing && t.router === s.main && left(t.routing);

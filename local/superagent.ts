@@ -9,12 +9,12 @@ import { secAsks } from "./_secask";
 
 /** task: on a reroute, an existing worker of the card kept for this part (it is told, not restarted). */
 type Part = { repo: string; agent?: string; model?: string; effort?: string; worktree?: boolean; title?: string; prompt?: string; task?: string };
-type Decision = { item: string; decision?: "accept" | "attach" | "stop" | "ignore"; title?: string; parts?: Part[]; task?: string; reason?: string; reply?: string; rule?: string };
+type Decision = { item: string; decision?: "accept" | "attach" | "stop" | "ignore"; title?: string; parts?: Part[]; task?: string; reason?: string; reply?: string; rule?: string; told?: boolean };
 
 /**
  * The main session's decisions on a batch, in one call: { decisions: [{ item, decision?, title?, parts?, task?,
  * reason?, reply? }] }. A board task (item tN) only needs parts. A message (item cN): accept (with parts) / attach
- * (task) / stop (task, reason) / ignore (reason, reply?). Each is applied on its own; the ones that failed are
+ * (task; told: true when the task already has the message, only linked) / stop (task, reason) / ignore (reason, reply?). Each is applied on its own; the ones that failed are
  * reported together, so it fixes and resends only those.
  */
 export async function decide(input: { decisions: Decision[] }, ctx: Ctx) {
@@ -64,7 +64,9 @@ async function one(d: Decision, ctx: Ctx) {
           const th = x.threads ?? (x.origin?.key ? [{ source: x.origin.source, key: x.origin.key }] : []);
           if (!th.some((y) => y.source === e.source && y.key === e.key)) x.threads = [...th, { source: e.source, key: e.key! }];
         });
-      await followUp(ctx, t.id, e);
+      // told: the task already has it (the secretary asked the user first, then made the task itself): only linked,
+      // so the item stops hanging in 去向 and the sender's follow-ups reach the task
+      if (!d.told) await followUp(ctx, t.id, e);
       settle({ state: "attached", tasks: [t.id], reason: d.reason });
       return { item: it.id, tasks: [t.id] };
     }

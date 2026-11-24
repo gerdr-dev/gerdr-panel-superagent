@@ -1,6 +1,6 @@
 import { ExternalLink, Loader2, Play, RotateCcw, Send, X } from "lucide-react";
 import clsx from "clsx";
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Button } from "../components/Button";
 import { run } from "../lib/gerdr";
 import { since } from "../lib/tasks";
@@ -119,7 +119,7 @@ function Row({ x, onTask, onRetried }: { x: Item; onTask: (id: string) => void; 
           </a>
         )}
       </div>
-      <p className="line-clamp-3 text-[13px] break-words whitespace-pre-wrap">{e.text || e.title}</p>
+      <Clamped text={e.text || e.title || ""} />
       {x.rule && <p className="text-[12px] text-muted-foreground">按规则：{x.rule}</p>}
       {x.would && x.state === "observed" && (
         <p className="text-[12px] text-muted-foreground">
@@ -183,5 +183,35 @@ function Row({ x, onTask, onRetried }: { x: Item; onTask: (id: string) => void; 
         </div>
       )}
     </article>
+  );
+}
+
+/**
+ * The message, three lines at most until clicked: long requirements (a Meegle item's nodes and status) were cut off
+ * with no way to read the rest here. Only clickable when something is actually hidden.
+ */
+function Clamped({ text }: { text: string }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  const [open, setOpen] = useState(false);
+  const [cut, setCut] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el && !open) setCut(el.scrollHeight > el.clientHeight + 1);
+  }, [text, open]);
+  return (
+    <div>
+      <p
+        ref={ref}
+        className={clsx("text-[13px] break-words whitespace-pre-wrap", !open && "line-clamp-3", (cut || open) && "cursor-pointer")}
+        onClick={() => (cut || open) && !window.getSelection()?.toString() && setOpen(!open)}
+      >
+        {text}
+      </p>
+      {(cut || open) && (
+        <button className="text-[12px] text-muted-foreground hover:text-foreground" onClick={() => setOpen(!open)}>
+          {open ? "收起" : "展开全部"}
+        </button>
+      )}
+    </div>
   );
 }
