@@ -1,31 +1,33 @@
 import * as core from "@gerdr/core";
 import clsx from "clsx";
-import { Check, ChevronRight, Forward, MessageSquare, Play, Settings, X } from "lucide-react";
-import { useState } from "react";
+import { Check, ChevronRight, Forward, MessageSquare, Play, Plus, Settings, X } from "lucide-react";
+import { useMemo, useState } from "react";
 import { run } from "../lib/gerdr";
 import { openAsks, type Task, useTasks } from "../lib/tasks";
-import { openSettings, showInCode, useCodeSession } from "../lib/view";
+import { CodeRow, type CodeRowInfo, newCodeTab, openSettings, showInCode, useCodeRows, useCodeSession } from "../lib/view";
 import { usePanelChange, useRefresh, useSessions } from "../lib/visible";
 
-// The secretary's part of Code's list (lib/view.ts, layout.tsx): the secretary's own conversation first, then the
-// tasks it handed out that are in progress, whatever repository each works in. Rows open as ordinary Code panes, so
-// a worker gets what any conversation in Code has: splits, a terminal beside it, the diff. The person's own quick
-// conversations stay below, in Code's workspaces, and never become tasks unless handed over (交给秘书).
+// Code's whole list, drawn by this panel (lib/view.ts, layout.tsx; core CodeView list="replace"): not Code's
+// workspaces but where each piece of work stands. The secretary first; then 等你, 进行中, 待验收, 待办 — the tasks the
+// secretary handed out and the person's own conversations in the same groups (2026-11-24, the person: the groups on
+// the left are the board's statuses, not workspaces) — and 其他 for panes that aren't conversations (a terminal, a
+// file, a browser page). A row whose conversation has a pane is Code's own row (core CodeRow).
 //
-// Kept short on purpose: 进行中 open, 等你 first; 待办 (not handed out yet) and 待验收 fold to a line each, 已完成 isn't
-// here at all. There is no board (2026-11-24): this list is the tasks.
+// A task's group is its status, which only the person changes (DESIGN.md). Their own conversations have none: one is
+// 进行中 while its tab is open and 等你 while its agent waits on them (an approval, an error); closing it ends it.
 
 const toast = (core as unknown as { toast?: { error?: (m: string) => unknown } }).toast;
 const useSession = (core as unknown as { useSession?: (id: string | undefined) => { id: string; title?: string; cwd?: string; tags?: Record<string, string> } | undefined }).useSession;
 
 /** A folded group of rows, open or not, per device. */
-function useFold(name: string): [boolean, () => void] {
+function useFold(name: string, init = false): [boolean, () => void] {
   const key = `gerdr-panel-fusion.open.${name}`;
   const [open, setOpen] = useState(() => {
     try {
-      return localStorage.getItem(key) === "1";
+      const v = localStorage.getItem(key);
+      return v == null ? init : v === "1";
     } catch {
-      return false;
+      return init;
     }
   });
   const toggle = () =>
@@ -52,10 +54,12 @@ function FoldTitle({ open, onClick, children }: { open: boolean; onClick: () => 
 const base = (p?: string) => (p ?? "").replace(/\/+$/, "").split("/").pop() ?? "";
 
 type Main = { id: string; status: string; waiting?: string } | null;
+type Sess = { id: string; status: string; tags?: Record<string, string> };
 
 export function CodeSection() {
   const { tasks, act } = useTasks();
   const cur = useCodeSession();
+  const rows = useCodeRows();
   const [main, setMain] = useState<Main>(null);
   const [asks, setAsks] = useState(0);
   // Which session is the secretary only changes with the log (pushed); its status is followed live below
@@ -68,8 +72,12 @@ export function CodeSection() {
     [usePanelChange("user/data")],
     { poll: 10_000 },
   );
-  const live = useSessions((s) => s.id === main?.id)[0];
-  const status = main && main.status !== "gone" ? (live?.status ?? main.status) : "";
+  // The conversations in Code's panes, and the secretary: what each is doing now
+  const open = new Set(rows.map((r) => r.session).filter(Boolean) as string[]);
+  const openKey = [...open].sort().join(",");
+  const live = useSessions((s) => open.has(s.id) || s.id === main?.id) as Sess[];
+  const byId = useMemo(() => Object.fromEntries(live.map((s) => [s.id, s])), [live, openKey]);
+  const status = main && main.status !== "gone" ? (byId[main.id]?.status ?? main.status) : "";
   const openMain = () =>
     main && status
       ? showInCode(main.id)
@@ -78,89 +86,139 @@ export function CodeSection() {
           (e) => toast?.error?.(String(e?.message ?? e)),
         );
 
+  const [activeOpen, foldActive] = useFold("active", true);
   const [reviewOpen, foldReview] = useFold("review");
   const [todoOpen, foldTodo] = useFold("todo");
+  const [otherOpen, foldOther] = useFold("other", true);
 
-  // Members of a requirement are folded into its card on the board; here each is a row: each is a conversation
-  const mine = (tasks ?? []).filter((t) => t.status === "running" || t.status === "review");
-  const running = mine.filter((t) => t.status === "running").sort((a, b) => Number(b.column === "you") - Number(a.column === "you") || b.updatedAt - a.updatedAt);
-  const review = mine.filter((t) => t.status === "review").sort((a, b) => b.updatedAt - a.updatedAt);
-  const todo = (tasks ?? []).filter((t) => t.status === "todo").sort((a, b) => b.updatedAt - a.updatedAt);
-  const you = running.filter((t) => t.column === "you").length + asks;
+  // Tasks by status. A task's worker may have a pane (drawn as Code's own row) or not yet (our row; a click opens it)
+  const all = tasks ?? [];
+  const taskOf = new Map<string, Task>();
+  for (const t of all) if (t.session && t.status !== "done" && t.status !== "dropped") taskOf.set(t.session, t);
+  const paneOf = new Map<string, CodeRowInfo>();
+  for (const r of rows) if (r.session && r.kind === "session" && !paneOf.has(r.session)) paneOf.set(r.session, r);
+  const byRecent = (a: Task, b: Task) => b.updatedAt - a.updatedAt;
+  const running = all.filter((t) => t.status === "running");
+  const youTasks = running.filter((t) => t.column === "you").sort(byRecent);
+  const activeTasks = running.filter((t) => t.column !== "you").sort(byRecent);
+  const review = all.filter((t) => t.status === "review").sort(byRecent);
+  const todo = all.filter((t) => t.status === "todo").sort(byRecent);
 
-  // Not handed out yet: no conversation to show; its row's button hands it out
-  const open = (t: Task) => t.session && showInCode(t.session);
+  // The rest of Code's panes: the person's own conversations (and ours no task has: a helper, an old secretary) stand
+  // where their agent does — waiting on the person, or simply open (进行中, until closed). What isn't a conversation
+  // (a terminal, a file, a browser page) has no standing: 其他.
+  const isMain = (id?: string) => !!id && (id === main?.id || byId[id]?.tags?.superagent === "main");
+  const own = rows.filter((r) => (r.kind === "session" || r.kind === "new") && !(r.session && (taskOf.has(r.session) || isMain(r.session))));
+  const needs = (r: CodeRowInfo) => !!r.session && (byId[r.session]?.status === "waiting" || byId[r.session]?.status === "error");
+  const youOwn = own.filter(needs);
+  const activeOwn = own.filter((r) => !needs(r));
+  const other = rows.filter((r) => r.kind !== "session" && r.kind !== "new");
+  const you = youTasks.length + youOwn.length;
+
   const move = (t: Task, to: "review" | "done" | "running") => act("setStatus", { id: t.id, status: to }).catch((e) => toast?.error?.(String(e?.message ?? e)));
+  const taskRow = (t: Task, action: React.ReactNode) => <TaskRow key={t.id} t={t} pane={t.session ? paneOf.get(t.session) : undefined} current={!!t.session && cur === t.session} action={action} />;
+  const toReview = (t: Task) => (
+    <RowButton title="移到待验收" onClick={() => move(t, "review")}>
+      <Check className="size-3.5" />
+    </RowButton>
+  );
+  const ownRow = (r: CodeRowInfo) => <CodeRow key={r.pane} pane={r.pane} where={base(r.cwd)} />;
 
   return (
-    <div className="pt-1.5" data-fusion-section>
-      <div className="flex h-7 items-center gap-1 pr-1 pl-1.5 text-[11px] font-medium text-muted-foreground select-none">
-        <span>秘书</span>
-        {you > 0 && <span className="rounded-full bg-warn px-1.5 text-[10px] leading-4 font-semibold text-background tabular-nums">等你 {you}</span>}
-        <span className="flex-1" />
-        <button
-          className="flex size-5 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
-          title="秘书背后的东西：设置（谁干活、仓库）、流程、记忆、触发器、定时任务、外面来的消息的去向"
-          onClick={() => openSettings("settings")}
-        >
-          <Settings className="size-3.5" />
-        </button>
-      </div>
-
+    <div className="pt-1.5 pb-1" data-fusion-section>
       <RowShell current={!!main && cur === main.id} onClick={openMain} title="和秘书说话：交给它的事、它怎么判断外面来的消息、派给了谁，都在这段对话里">
         <MessageSquare className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="min-w-0 flex-1 truncate">秘书</span>
-        <AgentPick main={main?.id} current={cur} />
+        <span className="min-w-0 flex-1 truncate font-medium">秘书</span>
         {asks > 0 ? (
           <span className="shrink-0 rounded-full bg-warn px-1.5 text-[10px] leading-4 font-semibold text-background tabular-nums">{asks} 个问题</span>
         ) : (
           <span className="shrink-0 text-[11px] text-muted-foreground">{status === "running" ? "在判断" : status === "waiting" ? "等你回答" : status === "error" ? "出错了" : ""}</span>
         )}
+        <AgentPick main={main?.id} current={cur} />
+        <button
+          className="flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+          title="秘书背后的东西：设置（谁干活、仓库）、流程、记忆、触发器、定时任务、外面来的消息的去向"
+          onClick={(e) => (e.stopPropagation(), openSettings("settings"))}
+        >
+          <Settings className="size-3.5" />
+        </button>
       </RowShell>
       <HandOver current={cur} main={main?.id} onSent={(id) => showInCode(id)} />
 
-      {running.map((t) => (
-        <TaskRow key={t.id} t={t} current={!!t.session && cur === t.session} onOpen={() => open(t)}>
-          <RowButton title="移到待验收" onClick={() => move(t, "review")}>
-            <Check className="size-3.5" />
-          </RowButton>
-        </TaskRow>
-      ))}
-      {tasks && !running.length && <div className="py-1 pl-[26px] text-[12px] text-muted-foreground">没有进行中的任务</div>}
-
-      {todo.length > 0 && (
+      {you > 0 && (
         <>
-          <FoldTitle open={todoOpen} onClick={foldTodo}>
-            待办 {todo.length}
-          </FoldTitle>
-          {todoOpen &&
-            todo.map((t) => (
-              <TaskRow key={t.id} t={t} current={false} onOpen={() => {}}>
-                <RowButton title="派出去：交给 agent 开始做" onClick={() => move(t, "running")}>
-                  <Play className="size-3.5" />
-                </RowButton>
-              </TaskRow>
-            ))}
+          <GroupTitle tone="you">等你 {you}</GroupTitle>
+          {youTasks.map((t) => taskRow(t, toReview(t)))}
+          {youOwn.map(ownRow)}
         </>
       )}
+
+      <FoldTitle open={activeOpen} onClick={foldActive}>
+        进行中 {activeTasks.length + activeOwn.length}
+        <span className="flex-1" />
+        <span
+          role="button"
+          className="flex size-5 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
+          title="新对话：自己随手开一个，不经过秘书"
+          onClick={(e) => (e.stopPropagation(), newCodeTab())}
+        >
+          <Plus className="size-3.5" />
+        </span>
+      </FoldTitle>
+      {activeOpen && (
+        <>
+          {activeTasks.map((t) => taskRow(t, toReview(t)))}
+          {activeOwn.map(ownRow)}
+          {!activeTasks.length && !activeOwn.length && <div className="py-1 pl-[26px] text-[12px] text-muted-foreground">没有进行中的</div>}
+        </>
+      )}
+
       {review.length > 0 && (
         <>
           <FoldTitle open={reviewOpen} onClick={foldReview}>
             待验收 {review.length}
           </FoldTitle>
           {reviewOpen &&
-            review.map((t) => (
-              <TaskRow key={t.id} t={t} current={!!t.session && cur === t.session} onOpen={() => open(t)}>
+            review.map((t) =>
+              taskRow(
+                t,
                 <RowButton title="通过：移到已完成" onClick={() => move(t, "done")}>
                   <Check className="size-3.5" />
-                </RowButton>
-              </TaskRow>
-            ))}
+                </RowButton>,
+              ),
+            )}
         </>
       )}
-      <div className="mx-1.5 mt-1.5 border-b" />
+      {todo.length > 0 && (
+        <>
+          <FoldTitle open={todoOpen} onClick={foldTodo}>
+            待办 {todo.length}
+          </FoldTitle>
+          {todoOpen &&
+            todo.map((t) =>
+              taskRow(
+                t,
+                <RowButton title="派出去：交给 agent 开始做" onClick={() => move(t, "running")}>
+                  <Play className="size-3.5" />
+                </RowButton>,
+              ),
+            )}
+        </>
+      )}
+      {other.length > 0 && (
+        <>
+          <FoldTitle open={otherOpen} onClick={foldOther}>
+            其他 {other.length}
+          </FoldTitle>
+          {otherOpen && other.map(ownRow)}
+        </>
+      )}
     </div>
   );
+}
+
+function GroupTitle({ tone, children }: { tone?: "you"; children: React.ReactNode }) {
+  return <div className={clsx("flex h-7 items-center pr-1 pl-[26px] text-[11px] font-medium select-none", tone === "you" ? "text-warn" : "text-muted-foreground")}>{children}</div>;
 }
 
 type AgentOpt = { id: string; name: string; default?: boolean };
@@ -235,7 +293,7 @@ function RowButton({ title, onClick, children }: { title: string; onClick: () =>
   return (
     <button
       title={title}
-      className="hidden size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground group-hover:flex hover:bg-muted hover:text-foreground [@media(hover:none)]:flex"
+      className="hidden size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground group-hover/task:flex hover:bg-muted hover:text-foreground [@media(hover:none)]:flex"
       onClick={(e) => {
         e.stopPropagation();
         onClick();
@@ -258,24 +316,35 @@ function lineOf(t: Task): string {
   return (t.latest || t.summary || (t.status === "todo" ? t.prompt : "") || "").split("\n")[0];
 }
 
-function TaskRow({ t, current, onOpen, children }: { t: Task; current: boolean; onOpen: () => void; children?: React.ReactNode }) {
+/**
+ * A task: Code's own row when its worker's conversation has a pane (so it's closed, renamed, split, dragged like any
+ * row), ours when it hasn't been opened yet (a click opens it). Under it, what Code's row can't say: what it waits
+ * on the person for, or its worker's newest line, and the one move that makes sense from where it stands.
+ */
+function TaskRow({ t, pane, current, action }: { t: Task; pane?: CodeRowInfo; current: boolean; action?: React.ReactNode }) {
   const you = t.column === "you" && t.status === "running";
   const busy = t.live?.status === "running";
   const line = lineOf(t);
   return (
-    <RowShell current={current} onClick={onOpen} title={`${t.id} ${t.title}${t.repo ? `\n${t.repo}` : ""}`}>
-      <span className="flex size-3.5 shrink-0 items-center justify-center self-start pt-1.5">
-        <span className={clsx("size-2 rounded-full", you ? "bg-warn" : busy ? "animate-pulse bg-ok" : "bg-muted-foreground/40")} />
-      </span>
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span className="flex min-w-0 items-baseline gap-2">
+    <div className="group/task" title={`${t.id} ${t.title}${t.repo ? `\n${t.repo}` : ""}`}>
+      {pane ? (
+        <CodeRow pane={pane.pane} where={base(t.repo)} />
+      ) : (
+        <RowShell current={current} onClick={() => t.session && showInCode(t.session)}>
+          <span className="flex size-3.5 shrink-0 items-center justify-center">
+            <span className={clsx("size-2 rounded-full", you ? "bg-warn" : busy ? "animate-pulse bg-ok" : "bg-muted-foreground/40")} />
+          </span>
           <span className={clsx("min-w-0 flex-1 truncate", you && "font-medium")}>{t.title}</span>
-          {t.repo && <span className="max-w-[40%] shrink-0 truncate text-[11px] text-muted-foreground group-hover:hidden">{base(t.repo)}</span>}
-        </span>
-        {line && <span className={clsx("truncate text-[11px]", you ? "text-warn" : "text-muted-foreground")}>{line}</span>}
-      </span>
-      {children}
-    </RowShell>
+          {t.repo && <span className="max-w-[40%] shrink-0 truncate text-[11px] text-muted-foreground">{base(t.repo)}</span>}
+        </RowShell>
+      )}
+      {(line || action) && (
+        <div className="group -mt-0.5 flex min-h-5 items-center gap-1 pr-2 pl-[26px]">
+          <span className={clsx("min-w-0 flex-1 truncate text-[11px]", you ? "text-warn" : "text-muted-foreground")}>{line}</span>
+          {action}
+        </div>
+      )}
+    </div>
   );
 }
 

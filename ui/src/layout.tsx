@@ -6,8 +6,9 @@ import { SettingsSheet } from "./components/SettingsSheet";
 import { project, run } from "./lib/gerdr";
 import { CodeView, canHostCode, openSettings, showInCode, useSettingsTab } from "./lib/view";
 
-// The panel is Code itself (Gerdr's own layout: the same workspaces, tabs and panes Code mode shows) with the
-// secretary and its tasks at the top of Code's list (components/CodeSection.tsx). No board. The settings sheet takes
+// The panel is a Code of its own: Gerdr's own panes and tabs (the same layout Code mode shows) beside a list we draw
+// (components/CodeSection.tsx): the secretary, then everything open grouped by where it stands — 等你, 进行中, 待验收,
+// 待办 — the secretary's tasks and the person's own conversations together. No board, no workspace groups. The settings sheet takes
 // Code's place while it's open: the panel's own overlays aren't drawn over Code.
 export default function Layout() {
   const tab = useSettingsTab();
@@ -23,7 +24,7 @@ export default function Layout() {
       },
       () => openSettings(null),
     );
-  if (!tab && CodeView) return <CodeView sidebar={<CodeSection />} />;
+  if (!tab && CodeView && canHostCode) return <CodeView list="replace" sidebar={<CodeSection />} />;
   return (
     <div className="h-full min-h-0 overflow-y-auto overscroll-y-contain">
       {!canHostCode && (
