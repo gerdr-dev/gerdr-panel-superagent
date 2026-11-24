@@ -1,6 +1,6 @@
 import * as core from "@gerdr/core";
 import clsx from "clsx";
-import { Ban, Check, CheckCircle2, ChevronRight, Circle, CircleAlert, CircleDashed, CircleDot, MessageSquare, Play, Plus, Settings, Undo2 } from "lucide-react";
+import { Ban, Check, CheckCircle2, ChevronRight, Circle, CircleAlert, CircleDashed, CircleDot, LayoutGrid, MessageSquare, Play, Plus, Settings, Undo2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { run } from "../lib/gerdr";
 import { openAsks, type Task, useTasks } from "../lib/tasks";
@@ -50,20 +50,21 @@ const STATUS_ICON: Record<Status, React.ReactNode> = {
 /**
  * A group's title, laid out as a row is (Code's Row: the icon column, then the text): the status icon sits where the
  * rows' icons do and the name starts where their titles do, so the list reads as one column. The fold arrow follows
- * the name, small. Before, arrow + icon pushed the name right of the titles under it. A group with no icon of its own
- * (其他) has the arrow in the icon column. Sizes follow Code's rows on a phone (max-md: the drawer's roomier rows).
+ * the name, small, in every group alike (其他, which had no icon, got one: with its arrow in the icon column it folded
+ * from the other side than the rest). Before, arrow + icon pushed the name right of the titles under it. Sizes follow
+ * Code's rows on a phone (max-md: the drawer's roomier rows).
  */
-function FoldTitle({ open, onClick, icon, label, children }: { open: boolean; onClick: () => void; icon?: React.ReactNode; label: React.ReactNode; children?: React.ReactNode }) {
+function FoldTitle({ open, onClick, icon, label, children }: { open: boolean; onClick: () => void; icon: React.ReactNode; label: React.ReactNode; children?: React.ReactNode }) {
   const arrow = <ChevronRight className={clsx("size-3 shrink-0 transition-transform", open && "rotate-90")} />;
   return (
     <button
       className="flex h-7 w-full items-center gap-2 rounded-md pr-1 pl-1.5 text-[11px] font-medium text-muted-foreground select-none hover:bg-accent/60 hover:text-foreground max-md:h-9"
       onClick={onClick}
     >
-      <span className="flex size-3.5 shrink-0 items-center justify-center max-md:size-4">{icon ?? arrow}</span>
+      <span className="flex size-3.5 shrink-0 items-center justify-center max-md:size-4">{icon}</span>
       <span className="flex min-w-0 items-center gap-1">
         {label}
-        {icon && arrow}
+        {arrow}
       </span>
       <span className="flex-1" />
       {children}
@@ -303,7 +304,7 @@ export function CodeSection() {
       </>
       {other.length > 0 && (
         <>
-          <FoldTitle open={otherOpen} onClick={foldOther} label={`其他 ${other.length}`} />
+          <FoldTitle open={otherOpen} onClick={foldOther} icon={<LayoutGrid className="size-3.5 shrink-0 text-muted-foreground max-md:size-4" />} label={`其他 ${other.length}`} />
           {otherOpen && other.map(ownRow)}
         </>
       )}
