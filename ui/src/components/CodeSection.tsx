@@ -324,7 +324,8 @@ function lineOf(t: Task): string {
 function TaskRow({ t, pane, current, action }: { t: Task; pane?: CodeRowInfo; current: boolean; action?: React.ReactNode }) {
   const you = t.column === "you" && t.status === "running";
   const busy = t.live?.status === "running";
-  const line = lineOf(t);
+  // Never empty: the line is also where the row's one move sits, and a row that grows on hover makes the list jump
+  const line = lineOf(t) || (t.status === "todo" ? "还没派出去" : t.status === "review" ? "等你验收" : t.id);
   return (
     <div className="group/task" title={`${t.id} ${t.title}${t.repo ? `\n${t.repo}` : ""}`}>
       {pane ? (
