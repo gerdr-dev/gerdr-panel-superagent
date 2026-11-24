@@ -1,11 +1,10 @@
 import * as core from "@gerdr/core";
 import clsx from "clsx";
-import { Check, ChevronRight, Forward, Kanban, MessageSquare, X } from "lucide-react";
+import { Check, ChevronRight, Forward, MessageSquare, Play, Settings, X } from "lucide-react";
 import { useState } from "react";
-import { useNavigate } from "react-router";
 import { run } from "../lib/gerdr";
 import { openAsks, type Task, useTasks } from "../lib/tasks";
-import { setView, showInCode, useCodeSession } from "../lib/view";
+import { openSettings, showInCode, useCodeSession } from "../lib/view";
 import { usePanelChange, useRefresh, useSessions } from "../lib/visible";
 
 // The secretary's part of Code's list (lib/view.ts, layout.tsx): the secretary's own conversation first, then the
@@ -13,13 +12,43 @@ import { usePanelChange, useRefresh, useSessions } from "../lib/visible";
 // a worker gets what any conversation in Code has: splits, a terminal beside it, the diff. The person's own quick
 // conversations stay below, in Code's workspaces, and never become tasks unless handed over (交给秘书).
 //
-// Kept short on purpose: 进行中 only, 等你 first; 待验收 folds to a line and 已完成 isn't here at all. The board has
-// everything.
+// Kept short on purpose: 进行中 open, 等你 first; 待办 (not handed out yet) and 待验收 fold to a line each, 已完成 isn't
+// here at all. There is no board (2026-11-24): this list is the tasks.
 
 const toast = (core as unknown as { toast?: { error?: (m: string) => unknown } }).toast;
 const useSession = (core as unknown as { useSession?: (id: string | undefined) => { id: string; title?: string; cwd?: string; tags?: Record<string, string> } | undefined }).useSession;
 
-const FOLD = "gerdr-panel-fusion.reviewOpen";
+/** A folded group of rows, open or not, per device. */
+function useFold(name: string): [boolean, () => void] {
+  const key = `gerdr-panel-fusion.open.${name}`;
+  const [open, setOpen] = useState(() => {
+    try {
+      return localStorage.getItem(key) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggle = () =>
+    setOpen((v) => {
+      try {
+        localStorage.setItem(key, v ? "0" : "1");
+      } catch {}
+      return !v;
+    });
+  return [open, toggle];
+}
+
+function FoldTitle({ open, onClick, children }: { open: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      className="flex h-7 w-full items-center gap-1 rounded-md pr-1 pl-1.5 text-[11px] font-medium text-muted-foreground select-none hover:bg-accent/60 hover:text-foreground"
+      onClick={onClick}
+    >
+      <ChevronRight className={clsx("size-3.5 shrink-0 transition-transform", open && "rotate-90")} />
+      {children}
+    </button>
+  );
+}
 const base = (p?: string) => (p ?? "").replace(/\/+$/, "").split("/").pop() ?? "";
 
 type Main = { id: string; status: string; waiting?: string } | null;
@@ -27,7 +56,6 @@ type Main = { id: string; status: string; waiting?: string } | null;
 export function CodeSection() {
   const { tasks, act } = useTasks();
   const cur = useCodeSession();
-  const navigate = useNavigate();
   const [main, setMain] = useState<Main>(null);
   const [asks, setAsks] = useState(0);
   // Which session is the secretary only changes with the log (pushed); its status is followed live below
@@ -50,35 +78,18 @@ export function CodeSection() {
           (e) => toast?.error?.(String(e?.message ?? e)),
         );
 
-  const [reviewOpen, setReviewOpen] = useState(() => {
-    try {
-      return localStorage.getItem(FOLD) === "1";
-    } catch {
-      return false;
-    }
-  });
-  const foldReview = () => {
-    setReviewOpen((v) => {
-      try {
-        localStorage.setItem(FOLD, v ? "0" : "1");
-      } catch {}
-      return !v;
-    });
-  };
+  const [reviewOpen, foldReview] = useFold("review");
+  const [todoOpen, foldTodo] = useFold("todo");
 
   // Members of a requirement are folded into its card on the board; here each is a row: each is a conversation
   const mine = (tasks ?? []).filter((t) => t.status === "running" || t.status === "review");
   const running = mine.filter((t) => t.status === "running").sort((a, b) => Number(b.column === "you") - Number(a.column === "you") || b.updatedAt - a.updatedAt);
   const review = mine.filter((t) => t.status === "review").sort((a, b) => b.updatedAt - a.updatedAt);
-  const todo = (tasks ?? []).filter((t) => t.status === "todo").length;
+  const todo = (tasks ?? []).filter((t) => t.status === "todo").sort((a, b) => b.updatedAt - a.updatedAt);
   const you = running.filter((t) => t.column === "you").length + asks;
 
-  const open = (t: Task) => {
-    if (t.session) return showInCode(t.session);
-    // Not handed out yet: nothing to show in Code, its card is on the board
-    setView("board");
-    navigate(`/?open=${t.id}`);
-  };
+  // Not handed out yet: no conversation to show; its row's button hands it out
+  const open = (t: Task) => t.session && showInCode(t.session);
   const move = (t: Task, to: "review" | "done" | "running") => act("setStatus", { id: t.id, status: to }).catch((e) => toast?.error?.(String(e?.message ?? e)));
 
   return (
@@ -88,12 +99,11 @@ export function CodeSection() {
         {you > 0 && <span className="rounded-full bg-warn px-1.5 text-[10px] leading-4 font-semibold text-background tabular-nums">等你 {you}</span>}
         <span className="flex-1" />
         <button
-          className="flex h-5 items-center gap-1 rounded-sm px-1 hover:bg-muted hover:text-foreground"
-          title="任务面板：四列全貌、待办、去向、设置、新任务"
-          onClick={() => setView("board")}
+          className="flex size-5 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
+          title="秘书背后的东西：设置（谁干活、仓库）、流程、记忆、触发器、定时任务、外面来的消息的去向"
+          onClick={() => openSettings("settings")}
         >
-          <Kanban className="size-3.5" />
-          {todo > 0 && <span className="tabular-nums">待办 {todo}</span>}
+          <Settings className="size-3.5" />
         </button>
       </div>
 
@@ -118,15 +128,26 @@ export function CodeSection() {
       ))}
       {tasks && !running.length && <div className="py-1 pl-[26px] text-[12px] text-muted-foreground">没有进行中的任务</div>}
 
+      {todo.length > 0 && (
+        <>
+          <FoldTitle open={todoOpen} onClick={foldTodo}>
+            待办 {todo.length}
+          </FoldTitle>
+          {todoOpen &&
+            todo.map((t) => (
+              <TaskRow key={t.id} t={t} current={false} onOpen={() => {}}>
+                <RowButton title="派出去：交给 agent 开始做" onClick={() => move(t, "running")}>
+                  <Play className="size-3.5" />
+                </RowButton>
+              </TaskRow>
+            ))}
+        </>
+      )}
       {review.length > 0 && (
         <>
-          <button
-            className="flex h-7 w-full items-center gap-1 rounded-md pr-1 pl-1.5 text-[11px] font-medium text-muted-foreground select-none hover:bg-accent/60 hover:text-foreground"
-            onClick={foldReview}
-          >
-            <ChevronRight className={clsx("size-3.5 shrink-0 transition-transform", reviewOpen && "rotate-90")} />
+          <FoldTitle open={reviewOpen} onClick={foldReview}>
             待验收 {review.length}
-          </button>
+          </FoldTitle>
           {reviewOpen &&
             review.map((t) => (
               <TaskRow key={t.id} t={t} current={!!t.session && cur === t.session} onOpen={() => open(t)}>
@@ -234,7 +255,7 @@ function lineOf(t: Task): string {
     if (t.live?.status === "error") return t.live.error || "出错了";
     if (t.stopWhy) return t.stopWhy;
   }
-  return (t.latest || t.summary || "").split("\n")[0];
+  return (t.latest || t.summary || (t.status === "todo" ? t.prompt : "") || "").split("\n")[0];
 }
 
 function TaskRow({ t, current, onOpen, children }: { t: Task; current: boolean; onOpen: () => void; children?: React.ReactNode }) {

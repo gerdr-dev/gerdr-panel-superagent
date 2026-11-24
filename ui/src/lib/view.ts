@@ -1,10 +1,12 @@
 import * as core from "@gerdr/core";
 import type { ReactNode } from "react";
 import { useSyncExternalStore } from "react";
+import type { SettingsTab } from "../components/SettingsSheet";
 
 // This panel is Code with the secretary in it: Gerdr's own Code layout (core CodeView) with our part at the top of
-// its list. The board is the other view of the same tasks, shown instead of Code when asked for.
-// Through the namespace: a Gerdr without CodeView (it's experimental, 2026-11) shows the board alone, as Superagent does.
+// its list. There is no board. What's behind the secretary (设置, 流程, 记忆, 触发器, 定时任务, 去向) is a sheet shown
+// instead of Code while it's open.
+// Through the namespace: CodeView is experimental (2026-11); a Gerdr without it can't show this panel (layout.tsx says so).
 type Core = {
   CodeView?: (props: { sidebar?: ReactNode }) => ReactNode;
   showInCodeView?: (session: string) => void;
@@ -17,28 +19,19 @@ export const canHostCode = !!c.CodeView && !!c.showInCodeView;
 export const showInCode = (session: string) => c.showInCodeView?.(session);
 export const useCodeSession: () => string | undefined = c.useCodeSession ?? (() => undefined);
 
-export type View = "code" | "board";
-const KEY = "gerdr-panel-fusion.view";
-let view: View = "code";
-try {
-  if (localStorage.getItem(KEY) === "board") view = "board";
-} catch {}
+/** The settings sheet's open tab; null = Code. Not kept across reloads: coming back, one wants Code. */
+let settings: SettingsTab | null = null;
 const subs = new Set<() => void>();
 
-export function setView(v: View) {
-  if (v === view) return;
-  view = v;
-  try {
-    localStorage.setItem(KEY, v);
-  } catch {}
+export function openSettings(tab: SettingsTab | null) {
+  if (tab === settings) return;
+  settings = tab;
   for (const f of subs) f();
 }
 
-/** Which view shows: Code with the secretary's part (the default), or the board. Always the board without CodeView. */
-export function useView(): View {
-  const v = useSyncExternalStore(
+export function useSettingsTab(): SettingsTab | null {
+  return useSyncExternalStore(
     (f) => (subs.add(f), () => subs.delete(f)),
-    () => view,
+    () => settings,
   );
-  return canHostCode ? v : "board";
 }
