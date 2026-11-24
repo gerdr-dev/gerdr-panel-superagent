@@ -62,7 +62,7 @@ function FoldTitle({ open, onClick, icon, children }: { open: boolean; onClick: 
 const base = (p?: string) => (p ?? "").replace(/\/+$/, "").split("/").pop() ?? "";
 
 type Main = { id: string; status: string; waiting?: string } | null;
-type Sess = { id: string; status: string; tags?: Record<string, string> };
+type Sess = { id: string; status: string; updatedAt?: number; turn?: { startedAt?: number }; tags?: Record<string, string> };
 /** What the functions last answered, for the next mount to start from. */
 const last: { main: Main; asks: number; standing: Record<string, "review" | "done">; agents: AgentOpt[]; agent: string } = { main: null, asks: 0, standing: {}, agents: [], agent: "" };
 type Status = "todo" | "running" | "review" | "done";
@@ -196,6 +196,31 @@ export function CodeSection() {
   );
   const ownRow = (r: CodeRowInfo) => <CodeRow key={r.pane} pane={r.pane} where={base(r.cwd)} />;
 
+  // One order for a group, tasks and the person's own conversations together (they aren't told apart): what's
+  // running now first, then by when each last moved, newest first. "Moved" is when its turn started, not its last
+  // output (as Code sorts its rows): a row mustn't climb with every line its agent prints. A conversation not started
+  // yet (a new tab) is the newest there is. Before this the tasks came first and the person's own followed in Code's
+  // order, workspace by workspace, which read as no order at all once the workspaces weren't shown.
+  const at = (id?: string) => (id && byId[id] ? (byId[id].turn?.startedAt ?? byId[id].updatedAt ?? 0) : 0);
+  const busy = (id?: string) => !!id && byId[id]?.status === "running";
+  const sorted = (ts: Task[], rs: CodeRowInfo[], action: (t: Task) => React.ReactNode) =>
+    [
+      ...ts.map((t) => ({ run: busy(t.session) || t.live?.status === "running", at: Math.max(at(t.session), t.live?.updatedAt ?? 0) || t.updatedAt, el: taskRow(t, action(t)) })),
+      ...rs.map((r) => ({ run: busy(r.session), at: r.kind === "new" ? Infinity : at(r.session), el: ownRow(r) })),
+    ]
+      .sort((a, b) => Number(b.run) - Number(a.run) || b.at - a.at)
+      .map((x) => x.el);
+  const toDone = (t: Task) => (
+    <RowButton title="通过：移到已完成" onClick={() => move(t, "done")}>
+      <Check className="size-3.5" />
+    </RowButton>
+  );
+  const toRunning = (t: Task) => (
+    <RowButton title="打回：移回进行中" onClick={() => move(t, "running")}>
+      <Undo2 className="size-3.5" />
+    </RowButton>
+  );
+
   return (
     <div className="pt-1.5 pb-1" data-fusion-section>
       <RowShell current={!!main && cur === main.id} onClick={openMain} title="和秘书说话：交给它的事、它怎么判断外面来的消息、派给了谁，都在这段对话里">
@@ -219,8 +244,7 @@ export function CodeSection() {
       {you > 0 && (
         <Drop to="running" onMove={onMove}>
           <GroupTitle tone="you">等你 {you}</GroupTitle>
-          {youTasks.map((t) => taskRow(t, toReview(t)))}
-          {youOwn.map(ownRow)}
+          {sorted(youTasks, youOwn, toReview)}
         </Drop>
       )}
 
@@ -239,8 +263,7 @@ export function CodeSection() {
         </FoldTitle>
         {activeOpen && (
           <>
-            {activeTasks.map((t) => taskRow(t, toReview(t)))}
-            {activeOwn.map(ownRow)}
+            {sorted(activeTasks, activeOwn, toReview)}
             {!activeTasks.length && !activeOwn.length && <div className="py-1 pl-[26px] text-[12px] text-muted-foreground">没有进行中的</div>}
           </>
         )}
@@ -252,16 +275,7 @@ export function CodeSection() {
             <FoldTitle open={reviewOpen} onClick={foldReview} icon={STATUS_ICON.review}>
               待验收 {review.length + reviewOwn.length}
             </FoldTitle>
-            {reviewOpen &&
-              review.map((t) =>
-                taskRow(
-                  t,
-                  <RowButton title="通过：移到已完成" onClick={() => move(t, "done")}>
-                    <Check className="size-3.5" />
-                  </RowButton>,
-                ),
-              )}
-            {reviewOpen && reviewOwn.map(ownRow)}
+            {reviewOpen && sorted(review, reviewOwn, toDone)}
           </Drop>
           <Drop to="todo" onMove={onMove}>
             <FoldTitle open={todoOpen} onClick={foldTodo} icon={STATUS_ICON.todo}>
@@ -281,16 +295,7 @@ export function CodeSection() {
             <FoldTitle open={doneOpen} onClick={foldDone} icon={STATUS_ICON.done}>
               已完成 {done.length + doneOwn.length}
             </FoldTitle>
-            {doneOpen && doneOwn.map(ownRow)}
-            {doneOpen &&
-              done.map((t) =>
-                taskRow(
-                  t,
-                  <RowButton title="打回：移回进行中" onClick={() => move(t, "running")}>
-                    <Undo2 className="size-3.5" />
-                  </RowButton>,
-                ),
-              )}
+            {doneOpen && sorted(done, doneOwn, toRunning)}
           </Drop>
       </>
       {other.length > 0 && (
