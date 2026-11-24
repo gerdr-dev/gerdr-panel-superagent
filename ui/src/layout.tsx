@@ -24,7 +24,15 @@ export default function Layout() {
       },
       () => openSettings(null),
     );
-  if (!tab && CodeView && canHostCode) return <CodeView list="replace" sidebar={<CodeSection />} />;
+  // Code stays hosted under the settings sheet. Shown in Code's place instead (as it first was), opening the sheet
+  // took Code away: on a phone the drawer's list turned into Code's default one and the sheet opened behind the drawer
+  if (CodeView && canHostCode)
+    return (
+      <>
+        <CodeView list="replace" sidebar={<CodeSection />} />
+        {tab && <SettingsSheet tab={tab} onTab={openSettings} onClose={() => openSettings(null)} onTask={(id) => void toTask(id)} />}
+      </>
+    );
   return (
     <div className="h-full min-h-0 overflow-y-auto overscroll-y-contain">
       {!canHostCode && (

@@ -4,8 +4,7 @@ import { useSyncExternalStore } from "react";
 import type { SettingsTab } from "../components/SettingsSheet";
 
 // This panel is a Code of its own, made from Code's parts (core CodeView): Gerdr's panes, tabs and terminals as they
-// are, and a list we draw ourselves, grouped by where each piece of work stands instead of by workspace. There is no board. What's behind the secretary (设置, 流程, 记忆, 触发器, 定时任务, 去向) is a sheet shown
-// instead of Code while it's open.
+// are, and a list we draw ourselves, grouped by where each piece of work stands instead of by workspace. There is no board. What's behind the secretary (设置, 流程, 记忆, 触发器, 定时任务, 去向) is a sheet over Code.
 // Through the namespace: CodeView is experimental (2026-11); a Gerdr without it can't show this panel (layout.tsx says so).
 /** A pane of Code's layout (core CodeRowInfo): a conversation, a terminal, a file, a browser page… */
 export type CodeRowInfo = {
@@ -21,6 +20,7 @@ type Core = {
   CodeRow?: (props: { pane: string; where?: string }) => ReactNode;
   useCodeRows?: () => CodeRowInfo[];
   newCodeTab?: (opts?: { cwd?: string }) => void;
+  closeCodeDrawer?: () => void;
   useCodeRowMenu?: (fn: (row: { pane: string; session?: string }) => CodeMenuItem[]) => void;
   useCodeRowDrop?: (fn: (row: { pane: string; session?: string }) => void) => (el: HTMLElement | null) => void;
   showInCodeView?: (session: string) => void;
@@ -48,6 +48,8 @@ let settings: SettingsTab | null = null;
 const subs = new Set<() => void>();
 
 export function openSettings(tab: SettingsTab | null) {
+  // Opened from the list: on a phone that list is Gerdr's drawer, over everything
+  if (tab) c.closeCodeDrawer?.();
   if (tab === settings) return;
   settings = tab;
   for (const f of subs) f();

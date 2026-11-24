@@ -34,7 +34,7 @@ export function Select({ value, options, onChange, className }: { value: string;
         <SelectPrimitive.Content
           position="popper"
           sideOffset={4}
-          className="z-50 max-h-[min(24rem,var(--radix-select-content-available-height))] min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md"
+          className="visible pointer-events-auto z-50 max-h-[min(24rem,var(--radix-select-content-available-height))] min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md"
         >
           <SelectPrimitive.Viewport className="p-1">
             {options.map((o) => (
