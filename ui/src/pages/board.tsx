@@ -433,7 +433,8 @@ export default function BoardPage() {
               key={t.id}
               t={t}
               byId={byId}
-              active={t.id === open}
+              // The card of the drawer on top: a conversation opened from a notification (peek) is its task's too
+              active={t.id === (peek?.task ?? open)}
               onOpen={() => (setPeek(null), setOpen(t.id))}
               ghost={dragging?.id === t.id}
               onGrab={!phone && movable(t) ? (e) => beginDrag(t, e) : undefined}
