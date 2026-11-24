@@ -13,7 +13,7 @@ import { usePoll } from "../lib/visible";
 
 type Source = { on: string; title?: string; description?: string; addon?: string; canReply?: boolean; seen?: number; enabled: boolean; key?: string; allow?: string[]; deny?: string[]; inferred?: boolean; by?: string };
 /** One of the panel's own triggers (triggers/*.json): always on. */
-type Builtin = { id: string; on: string; name?: string; key?: string; fn?: string; off?: boolean };
+type Builtin = { id: string; on: string; name?: string; key?: string; fn?: string; off?: boolean; fixed?: boolean };
 /** A trigger wait_for wrote for a conversation a worker waits on (user/triggers/follow-*.json, waits.followed). */
 type Followed = { id: string; on: string; key?: string; fn: string; name?: string; tasks: string[] };
 
@@ -77,7 +77,7 @@ export default function TriggersPage() {
       )}
       {own.length > 0 && (
         <section className="space-y-3">
-          <h2 className="text-[13px] font-medium text-muted-foreground">面板自带：默认开着</h2>
+          <h2 className="text-[13px] font-medium text-muted-foreground">面板自带</h2>
           {own.map((b) => (
             <OwnRow key={b.id} b={b} info={runs[b.on]} onSaved={load} />
           ))}
@@ -154,11 +154,16 @@ function OwnRow({ b, info, onSaved }: { b: Builtin; info?: TriggerInfo; onSaved:
           </p>
           <Dest fn={b.fn} />
         </div>
-        <label className="flex shrink-0 cursor-pointer items-center gap-2 text-[13px]">
-          {busy && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
-          <input type="checkbox" className="size-4 accent-[var(--brand)]" checked={!b.off} disabled={busy} onChange={(e) => toggle(e.target.checked)} />
-          收进来
-        </label>
+        {b.fixed ? (
+          // The board's own machinery (local/inbox.ts switchable): always on, nothing to choose
+          <span className="shrink-0 text-[12px] text-muted-foreground">一直开着</span>
+        ) : (
+          <label className="flex shrink-0 cursor-pointer items-center gap-2 text-[13px]">
+            {busy && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
+            <input type="checkbox" className="size-4 accent-[var(--brand)]" checked={!b.off} disabled={busy} onChange={(e) => toggle(e.target.checked)} />
+            收进来
+          </label>
+        )}
       </div>
       {err && <p className="text-[12px] text-bad">{err}</p>}
     </article>

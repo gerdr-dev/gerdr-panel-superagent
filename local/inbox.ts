@@ -48,7 +48,17 @@ function ours(ctx: Ctx): Record<string, Ours> {
   return out;
 }
 
-type Builtin = { id: string; on: string; name?: string; key?: string; fn?: string; off?: boolean };
+type Builtin = { id: string; on: string; name?: string; key?: string; fn?: string; off?: boolean; fixed?: boolean };
+
+/**
+ * Only a built-in trigger that takes messages in (inbox.onEvent) is the person's to switch off. The others are the
+ * board's own machinery (tasks.sync on gerdr/session.*: cards and the inbox following the workers): off, the board only
+ * catches up on the 5-minute schedule, nobody chose that on purpose, and the page showed it with the same "收进来"
+ * box as a Slack source (2026-11-24, the user: "这里不应该可以关闭才对").
+ */
+function switchable(t: { fn?: string }) {
+  return t.fn === FN;
+}
 
 /**
  * The panel's own triggers (triggers/*.json, shipped with it, like mr.json): on unless this person switched one off.
@@ -65,8 +75,13 @@ export function builtin(input: unknown, ctx: Ctx): Builtin[] {
       const t = JSON.parse(ctx.fs.read(f.path));
       const own = `${DIR}/${name}`;
       const mineT = ctx.fs.stat(own) ? JSON.parse(ctx.fs.read(own)) : null;
-      const off = !!mineT && (!!mineT.off || !!mineT.input?.off);
-      if (t.on) out.push({ id: name.slice(0, -5), on: t.on, name: t.name, key: t.key, fn: t.fn, ...(off ? { off } : {}) });
+      let off = !!mineT && (!!mineT.off || !!mineT.input?.off);
+      // Switched off before it stopped being switchable: back on (the copy only ever held the switch)
+      if (off && !switchable(t)) {
+        ctx.fs.trash(own);
+        off = false;
+      }
+      if (t.on) out.push({ id: name.slice(0, -5), on: t.on, name: t.name, key: t.key, fn: t.fn, ...(off ? { off } : {}), ...(switchable(t) ? {} : { fixed: true }) });
     } catch {
       // a broken file is Gerdr's to report (gerdr panel triggers)
     }
@@ -79,6 +94,7 @@ export function setBuiltin(input: { id: string; on: boolean }, ctx: Ctx) {
   const id = input?.id ?? "";
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id) || !ctx.fs.stat(`triggers/${id}.json`)) throw new Error(`面板没有自带的触发器 ${id}`);
   const own = `${DIR}/${id}.json`;
+  if (!input.on && !switchable(JSON.parse(ctx.fs.read(`triggers/${id}.json`)))) throw new Error("这个触发器是看板自己运转要用的，不能关");
   if (input.on) {
     if (ctx.fs.stat(own)) ctx.fs.trash(own);
     return { id, off: false };
