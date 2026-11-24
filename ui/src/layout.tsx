@@ -4,6 +4,8 @@ import { Outlet } from "react-router";
 import { CodeSection } from "./components/CodeSection";
 import { SettingsSheet } from "./components/SettingsSheet";
 import { project, run } from "./lib/gerdr";
+import { WholeWindow } from "./lib/portal";
+import { usePanelVisible } from "./lib/visible";
 import { CodeView, canHostCode, openSettings, showInCode, useSettingsTab } from "./lib/view";
 
 // The panel is a Code of its own: Gerdr's own panes and tabs (the same layout Code mode shows) beside a list we draw
@@ -12,6 +14,11 @@ import { CodeView, canHostCode, openSettings, showInCode, useSettingsTab } from 
 // Code's place while it's open: the panel's own overlays aren't drawn over Code.
 export default function Layout() {
   const tab = useSettingsTab();
+  // The sheet is on the whole window, so nothing hides it with the panel: leaving the panel closes it
+  const visible = usePanelVisible();
+  useEffect(() => {
+    if (!visible) openSettings(null);
+  }, [visible]);
   // A conversation of ours brought up from elsewhere (a notification, the inbox) is a pane like any other
   useEffect(() => onShowSession(project, (session) => (openSettings(null), showInCode(session))), []);
   // 去向 names tasks: go to the task's conversation
@@ -30,7 +37,12 @@ export default function Layout() {
     return (
       <>
         <CodeView list="replace" sidebar={<CodeSection />} />
-        {tab && <SettingsSheet tab={tab} onTab={openSettings} onClose={() => openSettings(null)} onTask={(id) => void toTask(id)} />}
+        {/* Over the whole window, Gerdr's bars included (lib/portal.ts WholeWindow) */}
+        {tab && (
+          <WholeWindow>
+            <SettingsSheet tab={tab} onTab={openSettings} onClose={() => openSettings(null)} onTask={(id) => void toTask(id)} />
+          </WholeWindow>
+        )}
       </>
     );
   return (
