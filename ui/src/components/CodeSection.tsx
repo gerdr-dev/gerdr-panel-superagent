@@ -1,6 +1,6 @@
 import * as core from "@gerdr/core";
 import clsx from "clsx";
-import { Ban, Check, ChevronRight, Eye, MessageSquare, Play, Plus, Settings, Undo2 } from "lucide-react";
+import { Ban, Check, CheckCircle2, ChevronRight, Circle, CircleAlert, CircleDashed, CircleDot, MessageSquare, Play, Plus, Settings, Undo2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { run } from "../lib/gerdr";
 import { openAsks, type Task, useTasks } from "../lib/tasks";
@@ -39,13 +39,22 @@ function useFold(name: string, init = false): [boolean, () => void] {
   return [open, toggle];
 }
 
-function FoldTitle({ open, onClick, children }: { open: boolean; onClick: () => void; children: React.ReactNode }) {
+/** A status's icon, the board's own (its columns' titles had them): the same four in the groups' titles and in 移到…. */
+const STATUS_ICON: Record<Status, React.ReactNode> = {
+  todo: <Circle className="size-3.5 shrink-0 text-muted-foreground" />,
+  running: <CircleDashed className="size-3.5 shrink-0 text-brand" />,
+  review: <CircleDot className="size-3.5 shrink-0 text-ok" />,
+  done: <CheckCircle2 className="size-3.5 shrink-0 text-muted-foreground" />,
+};
+
+function FoldTitle({ open, onClick, icon, children }: { open: boolean; onClick: () => void; icon?: React.ReactNode; children: React.ReactNode }) {
   return (
     <button
       className="flex h-7 w-full items-center gap-1 rounded-md pr-1 pl-1.5 text-[11px] font-medium text-muted-foreground select-none hover:bg-accent/60 hover:text-foreground"
       onClick={onClick}
     >
       <ChevronRight className={clsx("size-3.5 shrink-0 transition-transform", open && "rotate-90")} />
+      {icon}
       {children}
     </button>
   );
@@ -56,7 +65,7 @@ type Main = { id: string; status: string; waiting?: string } | null;
 type Sess = { id: string; status: string; tags?: Record<string, string> };
 type Status = "todo" | "running" | "review" | "done";
 const LABEL: Record<Status, string> = { todo: "待办", running: "进行中", review: "待验收", done: "已完成" };
-const ICON: Record<"running" | "review" | "done", React.ReactNode> = { running: <Undo2 />, review: <Eye />, done: <Check /> };
+const ICON: Record<"running" | "review" | "done", React.ReactNode> = { running: <CircleDashed />, review: <CircleDot />, done: <CheckCircle2 /> };
 /** A task row of ours being dragged (rows that are Code's own are dragged by Code: useCodeRowDrop). */
 const TASK_MIME = "text/x-gerdr-task";
 
@@ -203,7 +212,7 @@ export function CodeSection() {
       )}
 
       <Drop to="running" onMove={onMove}>
-        <FoldTitle open={activeOpen} onClick={foldActive}>
+        <FoldTitle open={activeOpen} onClick={foldActive} icon={STATUS_ICON.running}>
           进行中 {activeTasks.length + activeOwn.length}
           <span className="flex-1" />
           <span
@@ -227,7 +236,7 @@ export function CodeSection() {
       {/* Always listed, empty ones too: each is where a row is dragged to */}
       <>
           <Drop to="review" onMove={onMove}>
-            <FoldTitle open={reviewOpen} onClick={foldReview}>
+            <FoldTitle open={reviewOpen} onClick={foldReview} icon={STATUS_ICON.review}>
               待验收 {review.length + reviewOwn.length}
             </FoldTitle>
             {reviewOpen &&
@@ -242,7 +251,7 @@ export function CodeSection() {
             {reviewOpen && reviewOwn.map(ownRow)}
           </Drop>
           <Drop to="todo" onMove={onMove}>
-            <FoldTitle open={todoOpen} onClick={foldTodo}>
+            <FoldTitle open={todoOpen} onClick={foldTodo} icon={STATUS_ICON.todo}>
               待办 {todo.length}
             </FoldTitle>
             {todoOpen &&
@@ -256,7 +265,7 @@ export function CodeSection() {
               )}
           </Drop>
           <Drop to="done" onMove={onMove}>
-            <FoldTitle open={doneOpen} onClick={foldDone}>
+            <FoldTitle open={doneOpen} onClick={foldDone} icon={STATUS_ICON.done}>
               已完成 {done.length + doneOwn.length}
             </FoldTitle>
             {doneOpen && doneOwn.map(ownRow)}
@@ -312,7 +321,12 @@ function Drop({ to, onMove, children }: { to: Status; onMove: (to: Status, row: 
 }
 
 function GroupTitle({ tone, children }: { tone?: "you"; children: React.ReactNode }) {
-  return <div className={clsx("flex h-7 items-center pr-1 pl-[26px] text-[11px] font-medium select-none", tone === "you" ? "text-warn" : "text-muted-foreground")}>{children}</div>;
+  return (
+    <div className={clsx("flex h-7 items-center gap-1 pr-1 pl-[24px] text-[11px] font-medium select-none", tone === "you" ? "text-warn" : "text-muted-foreground")}>
+      {tone === "you" && <CircleAlert className="size-3.5 shrink-0" />}
+      {children}
+    </div>
+  );
 }
 
 type AgentOpt = { id: string; name: string; default?: boolean };
