@@ -170,14 +170,18 @@ export function CodeSection() {
   // Before the tasks are known at all (the very first load), a worker's pane is told by its tag and waits for its
   // task rather than show among the person's own and jump groups a second later
   const unknownTask = (id: string) => tasks == null && !!byId[id]?.tags?.task;
-  const own = rows.filter((r) => (r.kind === "session" || r.kind === "new") && !(r.session && (taskOf.has(r.session) || isMain(r.session) || unknownTask(r.session))));
+  const own = rows.filter((r) => r.kind === "session" && !(r.session && (taskOf.has(r.session) || isMain(r.session) || unknownTask(r.session))));
   const needs = (r: CodeRowInfo) => !!r.session && (byId[r.session]?.status === "waiting" || byId[r.session]?.status === "error");
   const stands = (r: CodeRowInfo) => (r.session ? standing[r.session] : undefined);
   const youOwn = own.filter((r) => needs(r) && stands(r) !== "done");
   const activeOwn = own.filter((r) => !stands(r) && !needs(r));
   const reviewOwn = own.filter((r) => stands(r) === "review" && !needs(r));
   const doneOwn = own.filter((r) => stands(r) === "done");
-  const other = rows.filter((r) => r.kind !== "session" && r.kind !== "new");
+  // A tab with no conversation started in it ("新会话") isn't work in progress, and mostly isn't anyone's doing: Code
+  // keeps one in every workspace that has nothing else, so with the workspaces not shown they turned up in 进行中 one
+  // per empty workspace, and closing one only made Code put it back. Not listed, except the one in front (so the
+  // list still says where one is), under 其他.
+  const other = rows.filter((r) => r.kind !== "session" && (r.kind !== "new" || r.current));
   const you = youTasks.length + youOwn.length;
 
   const move = (t: Task, to: Status) => act("setStatus", { id: t.id, status: to }).catch((e) => toast?.error?.(String(e?.message ?? e)));
@@ -210,15 +214,14 @@ export function CodeSection() {
 
   // One order for a group, tasks and the person's own conversations together (they aren't told apart): what's
   // running now first, then by when each last moved, newest first. "Moved" is when its turn started, not its last
-  // output (as Code sorts its rows): a row mustn't climb with every line its agent prints. A conversation not started
-  // yet (a new tab) is the newest there is. Before this the tasks came first and the person's own followed in Code's
+  // output (as Code sorts its rows): a row mustn't climb with every line its agent prints. Before this the tasks came first and the person's own followed in Code's
   // order, workspace by workspace, which read as no order at all once the workspaces weren't shown.
   const at = (id?: string) => (id && byId[id] ? (byId[id].turn?.startedAt ?? byId[id].updatedAt ?? 0) : 0);
   const busy = (id?: string) => !!id && byId[id]?.status === "running";
   const sorted = (ts: Task[], rs: CodeRowInfo[], action: (t: Task) => React.ReactNode) =>
     [
       ...ts.map((t) => ({ run: busy(t.session) || t.live?.status === "running", at: Math.max(at(t.session), t.live?.turnStartedAt ?? 0) || t.updatedAt, el: taskRow(t, action(t)) })),
-      ...rs.map((r) => ({ run: busy(r.session), at: r.kind === "new" ? Infinity : at(r.session), el: ownRow(r) })),
+      ...rs.map((r) => ({ run: busy(r.session), at: at(r.session), el: ownRow(r) })),
     ]
       .sort((a, b) => Number(b.run) - Number(a.run) || b.at - a.at)
       .map((x) => x.el);
