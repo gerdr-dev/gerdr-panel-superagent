@@ -467,7 +467,9 @@ function TaskRow({ t, pane, current, action }: { t: Task; pane?: CodeRowInfo; cu
   const busy = t.live?.status === "running";
   const line = lineOf(t) || (t.status === "todo" ? "还没派出去" : "");
   return (
-    <div className="group/task" title={`${t.id} ${t.title}${t.repo ? `\n${t.repo}` : ""}`}>
+    // The row in front is tinted, and its line is part of it: tinted here, around both (the same tint as Code's
+    // row, so the two read as one block). With the row alone tinted, its edge ran through the middle of the line
+    <div className={clsx("group/task rounded-md", current && line && "bg-accent")} title={`${t.id} ${t.title}${t.repo ? `\n${t.repo}` : ""}`}>
       {pane ? (
         <CodeRow pane={pane.pane} where={base(t.repo)} />
       ) : (
@@ -483,7 +485,7 @@ function TaskRow({ t, pane, current, action }: { t: Task; pane?: CodeRowInfo; cu
         // Starts where the titles do: the row's left padding + its icon + the gap (28px; a phone's icon is 16px: 30px)
         // -mt / pb: it belongs to the row above. That row ends in padding (6px in a phone's drawer) and the next one
         // starts with as much, so at the row's own distance the line sat nearer the row under it than its own
-        <div className="group -mt-1.5 flex items-center gap-1 pr-1 pb-2 pl-7 leading-4 max-md:pl-[30px]">
+        <div className="group -mt-1.5 flex items-center gap-1 pr-2 pb-1.5 pl-7 leading-4 max-md:pl-[30px]">
           <span className={clsx("min-w-0 flex-1 truncate text-[11px]", you ? "text-warn" : "text-muted-foreground")}>{line}</span>
           {action}
         </div>
