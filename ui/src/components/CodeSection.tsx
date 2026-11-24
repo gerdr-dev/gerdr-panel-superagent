@@ -1,10 +1,10 @@
 import * as core from "@gerdr/core";
 import clsx from "clsx";
-import { Check, ChevronRight, Forward, MessageSquare, Play, Plus, Settings, X } from "lucide-react";
+import { Check, ChevronRight, Forward, MessageSquare, Play, Plus, Settings, Undo2, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { run } from "../lib/gerdr";
 import { openAsks, type Task, useTasks } from "../lib/tasks";
-import { CodeRow, type CodeRowInfo, newCodeTab, openSettings, showInCode, useCodeRows, useCodeSession } from "../lib/view";
+import { CodeRow, type CodeRowInfo, newCodeTab, openSettings, showInCode, useCodeRowDrop, useCodeRows, useCodeSession } from "../lib/view";
 import { usePanelChange, useRefresh, useSessions } from "../lib/visible";
 
 // Code's whole list, drawn by this panel (lib/view.ts, layout.tsx; core CodeView list="replace"): not Code's
@@ -55,6 +55,9 @@ const base = (p?: string) => (p ?? "").replace(/\/+$/, "").split("/").pop() ?? "
 
 type Main = { id: string; status: string; waiting?: string } | null;
 type Sess = { id: string; status: string; tags?: Record<string, string> };
+type Status = "todo" | "running" | "review" | "done";
+/** A task row of ours being dragged (rows that are Code's own are dragged by Code: useCodeRowDrop). */
+const TASK_MIME = "text/x-gerdr-task";
 
 export function CodeSection() {
   const { tasks, act } = useTasks();
@@ -89,12 +92,13 @@ export function CodeSection() {
   const [activeOpen, foldActive] = useFold("active", true);
   const [reviewOpen, foldReview] = useFold("review");
   const [todoOpen, foldTodo] = useFold("todo");
+  const [doneOpen, foldDone] = useFold("done");
   const [otherOpen, foldOther] = useFold("other", true);
 
   // Tasks by status. A task's worker may have a pane (drawn as Code's own row) or not yet (our row; a click opens it)
   const all = tasks ?? [];
   const taskOf = new Map<string, Task>();
-  for (const t of all) if (t.session && t.status !== "done" && t.status !== "dropped") taskOf.set(t.session, t);
+  for (const t of all) if (t.session && t.status !== "dropped") taskOf.set(t.session, t);
   const paneOf = new Map<string, CodeRowInfo>();
   for (const r of rows) if (r.session && r.kind === "session" && !paneOf.has(r.session)) paneOf.set(r.session, r);
   const byRecent = (a: Task, b: Task) => b.updatedAt - a.updatedAt;
@@ -103,6 +107,11 @@ export function CodeSection() {
   const activeTasks = running.filter((t) => t.column !== "you").sort(byRecent);
   const review = all.filter((t) => t.status === "review").sort(byRecent);
   const todo = all.filter((t) => t.status === "todo").sort(byRecent);
+  // The ones not archived yet (local/_archive.ts moves old ones out): the newest few are enough here
+  const done = all
+    .filter((t) => t.status === "done")
+    .sort((a, b) => (b.doneAt ?? b.updatedAt) - (a.doneAt ?? a.updatedAt))
+    .slice(0, 30);
 
   // The rest of Code's panes: the person's own conversations (and ours no task has: a helper, an old secretary) stand
   // where their agent does — waiting on the person, or simply open (进行中, until closed). What isn't a conversation
@@ -115,7 +124,15 @@ export function CodeSection() {
   const other = rows.filter((r) => r.kind !== "session" && r.kind !== "new");
   const you = youTasks.length + youOwn.length;
 
-  const move = (t: Task, to: "review" | "done" | "running") => act("setStatus", { id: t.id, status: to }).catch((e) => toast?.error?.(String(e?.message ?? e)));
+  const move = (t: Task, to: Status) => act("setStatus", { id: t.id, status: to }).catch((e) => toast?.error?.(String(e?.message ?? e)));
+  // A row dragged onto a group (Code's row: by its conversation; ours: by the task's id): the task takes that status.
+  // Only the person moves a task (DESIGN.md), and this is them doing it. Their own conversations aren't tasks: they
+  // stand where their agent does, there is nothing to move
+  const onMove = (to: Status, row: { session?: string; task?: string }) => {
+    const t = row.task ? all.find((x) => x.id === row.task) : row.session ? taskOf.get(row.session) : undefined;
+    if (!t) return void toast?.error?.("这是你自己的对话，不是任务：它开着就在进行中。想让秘书跟着，先把它交给秘书");
+    if (t.status !== to) void move(t, to);
+  };
   const taskRow = (t: Task, action: React.ReactNode) => <TaskRow key={t.id} t={t} pane={t.session ? paneOf.get(t.session) : undefined} current={!!t.session && cur === t.session} action={action} />;
   const toReview = (t: Task) => (
     <RowButton title="移到待验收" onClick={() => move(t, "review")}>
@@ -146,63 +163,80 @@ export function CodeSection() {
       <HandOver current={cur} main={main?.id} onSent={(id) => showInCode(id)} />
 
       {you > 0 && (
-        <>
+        <Drop to="running" onMove={onMove}>
           <GroupTitle tone="you">等你 {you}</GroupTitle>
           {youTasks.map((t) => taskRow(t, toReview(t)))}
           {youOwn.map(ownRow)}
-        </>
+        </Drop>
       )}
 
-      <FoldTitle open={activeOpen} onClick={foldActive}>
-        进行中 {activeTasks.length + activeOwn.length}
-        <span className="flex-1" />
-        <span
-          role="button"
-          className="flex size-5 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
-          title="新对话：自己随手开一个，不经过秘书"
-          onClick={(e) => (e.stopPropagation(), newCodeTab())}
-        >
-          <Plus className="size-3.5" />
-        </span>
-      </FoldTitle>
-      {activeOpen && (
-        <>
-          {activeTasks.map((t) => taskRow(t, toReview(t)))}
-          {activeOwn.map(ownRow)}
-          {!activeTasks.length && !activeOwn.length && <div className="py-1 pl-[26px] text-[12px] text-muted-foreground">没有进行中的</div>}
-        </>
-      )}
+      <Drop to="running" onMove={onMove}>
+        <FoldTitle open={activeOpen} onClick={foldActive}>
+          进行中 {activeTasks.length + activeOwn.length}
+          <span className="flex-1" />
+          <span
+            role="button"
+            className="flex size-5 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
+            title="新对话：自己随手开一个，不经过秘书"
+            onClick={(e) => (e.stopPropagation(), newCodeTab())}
+          >
+            <Plus className="size-3.5" />
+          </span>
+        </FoldTitle>
+        {activeOpen && (
+          <>
+            {activeTasks.map((t) => taskRow(t, toReview(t)))}
+            {activeOwn.map(ownRow)}
+            {!activeTasks.length && !activeOwn.length && <div className="py-1 pl-[26px] text-[12px] text-muted-foreground">没有进行中的</div>}
+          </>
+        )}
+      </Drop>
 
-      {review.length > 0 && (
+      {/* The task groups stay listed while there are tasks at all, empty ones too: each is where a row is dragged to */}
+      {all.length > 0 && (
         <>
-          <FoldTitle open={reviewOpen} onClick={foldReview}>
-            待验收 {review.length}
-          </FoldTitle>
-          {reviewOpen &&
-            review.map((t) =>
-              taskRow(
-                t,
-                <RowButton title="通过：移到已完成" onClick={() => move(t, "done")}>
-                  <Check className="size-3.5" />
-                </RowButton>,
-              ),
-            )}
-        </>
-      )}
-      {todo.length > 0 && (
-        <>
-          <FoldTitle open={todoOpen} onClick={foldTodo}>
-            待办 {todo.length}
-          </FoldTitle>
-          {todoOpen &&
-            todo.map((t) =>
-              taskRow(
-                t,
-                <RowButton title="派出去：交给 agent 开始做" onClick={() => move(t, "running")}>
-                  <Play className="size-3.5" />
-                </RowButton>,
-              ),
-            )}
+          <Drop to="review" onMove={onMove}>
+            <FoldTitle open={reviewOpen} onClick={foldReview}>
+              待验收 {review.length}
+            </FoldTitle>
+            {reviewOpen &&
+              review.map((t) =>
+                taskRow(
+                  t,
+                  <RowButton title="通过：移到已完成" onClick={() => move(t, "done")}>
+                    <Check className="size-3.5" />
+                  </RowButton>,
+                ),
+              )}
+          </Drop>
+          <Drop to="todo" onMove={onMove}>
+            <FoldTitle open={todoOpen} onClick={foldTodo}>
+              待办 {todo.length}
+            </FoldTitle>
+            {todoOpen &&
+              todo.map((t) =>
+                taskRow(
+                  t,
+                  <RowButton title="派出去：交给 agent 开始做" onClick={() => move(t, "running")}>
+                    <Play className="size-3.5" />
+                  </RowButton>,
+                ),
+              )}
+          </Drop>
+          <Drop to="done" onMove={onMove}>
+            <FoldTitle open={doneOpen} onClick={foldDone}>
+              已完成 {done.length}
+            </FoldTitle>
+            {doneOpen &&
+              done.map((t) =>
+                taskRow(
+                  t,
+                  <RowButton title="打回：移回进行中" onClick={() => move(t, "running")}>
+                    <Undo2 className="size-3.5" />
+                  </RowButton>,
+                ),
+              )}
+          </Drop>
         </>
       )}
       {other.length > 0 && (
@@ -213,6 +247,34 @@ export function CodeSection() {
           {otherOpen && other.map(ownRow)}
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * A group as a place to drop rows on: Code's own rows (core useCodeRowDrop, lit up by Code) and ours (a task whose
+ * conversation has no pane yet: plain HTML drag). The whole group, title included, so a folded one takes drops too.
+ */
+function Drop({ to, onMove, children }: { to: Status; onMove: (to: Status, row: { session?: string; task?: string }) => void; children: React.ReactNode }) {
+  const ref = useCodeRowDrop((r) => onMove(to, { session: r.session }));
+  const [over, setOver] = useState(false);
+  return (
+    <div
+      ref={ref}
+      className={clsx("rounded-md", over && "bg-brand/10 ring-2 ring-brand")}
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes(TASK_MIME)) return;
+        e.preventDefault();
+        setOver(true);
+      }}
+      onDragLeave={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && setOver(false)}
+      onDrop={(e) => {
+        setOver(false);
+        const task = e.dataTransfer.getData(TASK_MIME);
+        if (task) (e.preventDefault(), onMove(to, { task }));
+      }}
+    >
+      {children}
     </div>
   );
 }
@@ -273,12 +335,14 @@ function AgentPick({ main, current }: { main?: string; current?: string }) {
   );
 }
 
-function RowShell({ current, onClick, title, children }: { current?: boolean; onClick: () => void; title?: string; children: React.ReactNode }) {
+function RowShell({ current, onClick, title, drag, children }: { current?: boolean; onClick: () => void; title?: string; /** A task's id: the row can be dragged onto a group */ drag?: string; children: React.ReactNode }) {
   return (
     <div
       role="button"
       title={title}
       onClick={onClick}
+      draggable={!!drag}
+      onDragStart={drag ? (e) => (e.dataTransfer.setData(TASK_MIME, drag), (e.dataTransfer.effectAllowed = "move")) : undefined}
       className={clsx(
         "group relative flex min-h-8 cursor-default items-center gap-2 rounded-md py-1 pr-2 pl-1.5 text-[12px] select-none",
         current ? "bg-accent text-foreground" : "text-foreground/90 hover:bg-accent/60",
@@ -325,13 +389,13 @@ function TaskRow({ t, pane, current, action }: { t: Task; pane?: CodeRowInfo; cu
   const you = t.column === "you" && t.status === "running";
   const busy = t.live?.status === "running";
   // Never empty: the line is also where the row's one move sits, and a row that grows on hover makes the list jump
-  const line = lineOf(t) || (t.status === "todo" ? "还没派出去" : t.status === "review" ? "等你验收" : t.id);
+  const line = lineOf(t) || (t.status === "todo" ? "还没派出去" : t.status === "review" ? "等你验收" : t.status === "done" ? "已完成" : t.id);
   return (
     <div className="group/task" title={`${t.id} ${t.title}${t.repo ? `\n${t.repo}` : ""}`}>
       {pane ? (
         <CodeRow pane={pane.pane} where={base(t.repo)} />
       ) : (
-        <RowShell current={current} onClick={() => t.session && showInCode(t.session)}>
+        <RowShell current={current} drag={t.id} onClick={() => t.session && showInCode(t.session)}>
           <span className="flex size-3.5 shrink-0 items-center justify-center">
             <span className={clsx("size-2 rounded-full", you ? "bg-warn" : busy ? "animate-pulse bg-ok" : "bg-muted-foreground/40")} />
           </span>
