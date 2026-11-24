@@ -1,6 +1,6 @@
 import * as core from "@gerdr/core";
 import clsx from "clsx";
-import { Ban, Check, CheckCircle2, ChevronRight, Circle, CircleAlert, CircleDashed, CircleDot, LayoutGrid, MessageSquare, Play, Plus, Settings, Undo2 } from "lucide-react";
+import { Ban, Check, CheckCircle2, ChevronRight, Circle, CircleDashed, CircleDot, LayoutGrid, MessageSquare, Play, Plus, Settings, Undo2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { run } from "../lib/gerdr";
 import { WholeWindow } from "../lib/portal";
@@ -265,15 +265,12 @@ export function CodeSection() {
         </button>
       </RowShell>
 
-      {you > 0 && (
-        <Drop to="running" onMove={onMove}>
-          <GroupTitle tone="you">等你 {you}</GroupTitle>
-          {sorted(youTasks, youOwn, toReview)}
-        </Drop>
-      )}
-
       <Drop to="running" onMove={onMove}>
-        <FoldTitle open={activeOpen} onClick={foldActive} icon={STATUS_ICON.running} label={`进行中 ${activeTasks.length + activeOwn.length}`}>
+        <FoldTitle open={activeOpen} onClick={foldActive} icon={STATUS_ICON.running} label={`进行中 ${you + activeTasks.length + activeOwn.length}`}>
+          {/* What waits on the person is in 进行中, first and in amber, not a group of its own: DESIGN.md, 2026-11-13
+              (「不需要 等你 和 进行中。否则就是会跳来跳去…等我的直接提前，黄色」). It was a group here for a day, right under
+              the secretary, and read as something of the secretary's rather than work in progress */}
+          {you > 0 && <span className="rounded-full bg-warn px-1.5 text-[10px] leading-4 font-semibold text-background tabular-nums">等你 {you}</span>}
           <span
             role="button"
             className="flex size-5 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
@@ -283,10 +280,12 @@ export function CodeSection() {
             <Plus className="size-3.5" />
           </span>
         </FoldTitle>
+        {/* Shown with the group folded too: they are the reason to look */}
+        {sorted(youTasks, youOwn, toReview)}
         {activeOpen && (
           <>
             {sorted(activeTasks, activeOwn, toReview)}
-            {!activeTasks.length && !activeOwn.length && <div className="py-1 pl-[26px] text-[12px] text-muted-foreground">没有进行中的</div>}
+            {!you && !activeTasks.length && !activeOwn.length && <div className="py-1 pl-[26px] text-[12px] text-muted-foreground">没有进行中的</div>}
           </>
         )}
       </Drop>
@@ -347,15 +346,6 @@ function Drop({ to, onMove, children }: { to: Status; onMove: (to: Status, row: 
         if (task) (e.preventDefault(), onMove(to, { task }));
       }}
     >
-      {children}
-    </div>
-  );
-}
-
-function GroupTitle({ tone, children }: { tone?: "you"; children: React.ReactNode }) {
-  return (
-    <div className={clsx("flex h-7 items-center gap-2 pr-1 pl-1.5 text-[11px] font-medium select-none max-md:h-9", tone === "you" ? "text-warn" : "text-muted-foreground")}>
-      <span className="flex size-3.5 shrink-0 items-center justify-center max-md:size-4">{tone === "you" && <CircleAlert className="size-3.5 max-md:size-4" />}</span>
       {children}
     </div>
   );
