@@ -455,15 +455,12 @@ function lineOf(t: Task): string {
     const asks = openAsks(t);
     if (asks.length) {
       const open = (a: (typeof asks)[number]) => (a.questions ?? []).filter((q) => !q.answer && !q.dropped && !q.skipped);
-      const things = asks.flatMap((a) =>
-        a.handBack.kind === "none" ? [{ todo: true, title: a.title }] : a.handBack.kind === "questions" && open(a).length ? open(a).map((q) => ({ todo: false, title: q.title })) : [{ todo: false, title: a.title }],
-      );
-      const answer = things.filter((x) => !x.todo).length;
-      const todo = things.length - answer;
-      const first = sameStart(things[0].title, t.title);
-      if (things.length === 1) return `${things[0].todo ? "要你做" : "待你答"}${first ? `：${first}` : ""}`;
-      const count = [answer && `待你答 ${answer}`, todo && `要你做 ${todo}`].filter(Boolean).join(" · ");
-      return first ? `${count}：${first}` : count;
+      // One word for all of it, the group's own (等你): whether it's a question to answer, a step to do or a value to
+      // hand over is what the title says, and three labels for "it needs you" were three things to decode
+      const things = asks.flatMap((a) => (a.handBack.kind === "questions" && open(a).length ? open(a).map((q) => q.title) : [a.title]));
+      const first = sameStart(things[0], t.title);
+      const head = things.length > 1 ? `等你 ${things.length}` : "等你";
+      return first ? `${head}：${first}` : head;
     }
     if (t.live?.status === "waiting") return t.live.waiting || "等你审批";
     if (t.live?.status === "error") return t.live.error || "出错了";
