@@ -238,10 +238,19 @@ export function CodeSection() {
       <RowShell current={!!main && cur === main.id} onClick={openMain} title="和秘书说话：交给它的事、它怎么判断外面来的消息、派给了谁，都在这段对话里">
         <MessageSquare className="size-3.5 shrink-0 text-muted-foreground max-md:size-4" />
         <span className="min-w-0 flex-1 truncate font-medium">秘书</span>
+        {/* As everywhere in the list: what it asks of the person is 等你 N in amber (it read 「2 个问题」 here, a second
+            word for the same thing), and what it's doing is a dot, as on any agent's row — running, waiting, failed —
+            not words (「在判断」) */}
         {asks > 0 ? (
-          <span className="shrink-0 rounded-full bg-warn px-1.5 text-[10px] leading-4 font-semibold text-background tabular-nums">{asks} 个问题</span>
+          <span className="shrink-0 rounded-full bg-warn px-1.5 text-[10px] leading-4 font-semibold text-background tabular-nums">等你 {asks}</span>
         ) : (
-          <span className="shrink-0 text-[11px] text-muted-foreground">{status === "running" ? "在判断" : status === "waiting" ? "等你回答" : status === "error" ? "出错了" : ""}</span>
+          status &&
+          status !== "idle" && (
+            <span
+              title={status === "running" ? "在干活" : status === "waiting" ? "等你回答" : status === "error" ? "出错了" : status}
+              className={clsx("size-2 shrink-0 rounded-full", status === "running" ? "bg-ok" : status === "error" ? "bg-bad" : "bg-warn")}
+            />
+          )
         )}
         <AgentPick main={main?.id} current={cur} />
         <button
