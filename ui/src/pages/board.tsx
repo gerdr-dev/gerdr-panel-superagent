@@ -1823,7 +1823,20 @@ function Steps({ text }: { text: string }) {
   return <Md className="rounded-md bg-muted/60 px-3 py-2">{text}</Md>;
 }
 
-function DoneDetail({ t, act }: { t: Task; act?: Act }) {
+function DoneDetail({ t: card, act }: { t: Task; act?: Act }) {
+  // The board's copy of a finished task is slim (local/tasks.ts slim: no notes, the brief cut): the whole task when opened
+  const [full, setFull] = useState<Task | null>(null);
+  useEffect(() => {
+    let on = true;
+    run<Task>("tasks.get", { id: card.id }).then(
+      (x) => on && setFull(x),
+      () => {},
+    );
+    return () => {
+      on = false;
+    };
+  }, [card.id, card.updatedAt]);
+  const t = full?.id === card.id ? { ...card, notes: full.notes, prompt: full.prompt } : card;
   return (
     <div className="space-y-3">
       <h3 className={clsx("text-[16px] font-medium", t.status === "dropped" && "text-muted-foreground line-through")}>{t.title}</h3>

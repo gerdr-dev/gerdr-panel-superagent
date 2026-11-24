@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { run } from "./gerdr";
 import * as core from "@gerdr/core";
-import { sessionsKey, usePanelChange, useRefresh, useSessions } from "./visible";
+import { sessionsKey, usePanelChange, usePanelVisible, useRefresh, useSessions } from "./visible";
 import { fileCardStates } from "./cardstates";
 
 // Gerdr's toast (sonner), through the namespace so an older Gerdr without it still runs the board
@@ -200,15 +200,30 @@ export function useTasks() {
       (!!x.tags?.task && watched.taskIds.has(x.tags.task)),
   );
   // Streamed text isn't in sessionsKey (a chunk mustn't refresh the board); while a worker runs, the card's line
-  // (its newest paragraph) is read again every 10 s instead
-  const running = sessions.some((x) => x.status === "running");
-  const [beat, setBeat] = useState(0);
+  // (its newest paragraph) is read again every 10 s instead, through tasks.lines: that line alone, not the whole
+  // board (rerunning tasks.list for it was most of the board's runs, and its biggest answers)
+  const running = useMemo(() => {
+    const busy = new Set(sessions.filter((x) => x.status === "running").map((x) => x.id));
+    return (tasks ?? []).filter((t) => t.session && busy.has(t.session)).map((t) => t.id);
+  }, [sessions, tasks]);
+  const runningKey = running.join(",");
+  const visible = usePanelVisible();
   useEffect(() => {
-    if (!running) return;
-    const id = setInterval(() => setBeat((n) => n + 1), 10_000);
+    if (!runningKey || !visible) return;
+    const ids = runningKey.split(",");
+    const id = setInterval(() => {
+      run<Record<string, string>>("tasks.lines", { ids }).then(
+        // Only when a line moved: a new array re-renders the whole board
+        (got) =>
+          setTasks((ts) =>
+            ts?.some((t) => t.id in got && (got[t.id] || undefined) !== t.latest) ? ts.map((t) => (t.id in got ? { ...t, latest: got[t.id] || undefined } : t)) : ts,
+          ),
+        () => {},
+      );
+    }, 10_000);
     return () => clearInterval(id);
-  }, [running]);
-  useRefresh(reload, [data, sessionsKey(sessions), beat]);
+  }, [runningKey, visible]);
+  useRefresh(reload, [data, sessionsKey(sessions)]);
   /** Runs a tasks.<fn> and refreshes the board after. 放弃 gets an undo in a toast: it's easy to click by mistake. */
   const act = useCallback(
     async (fn: string, input: unknown) => {

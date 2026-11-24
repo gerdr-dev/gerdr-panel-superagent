@@ -226,11 +226,54 @@ export async function list(input: unknown, ctx: Ctx) {
   const board = teams(s, tasks);
   const id = want;
   // project: the key the chat cards carry (ctx.workspace.project), for the page to file the tasks' card states under
-  if (!id) return { tasks: board, at: Date.now(), archived: archivedCount(ctx), project: ctx.workspace.project };
+  if (!id) return { tasks: board.map(slim), at: Date.now(), archived: archivedCount(ctx), project: ctx.workspace.project };
   if (!board.some((t) => t.id === id)) throw new Error(`没有 ${id}`);
   // The task, the requirement it is in, and everything in that requirement
   const root = (board.find((t) => t.id === id) as any)?.in ?? id;
   return { tasks: board.filter((t: any) => t.id === root || t.in === root || t.id === id), at: Date.now(), project: ctx.workspace.project };
+}
+
+/**
+ * A task as the whole board gets it: what the cards, the 等你 lines and the search read, without the parts only a
+ * task's own view needs. The board runs this on every change it hears of and it came to over 1 MB for 53 tasks
+ * (2026-11-24): notes, asks' answers and the activity feed, mostly on cards long done. Kept in Gerdr's memory until
+ * delivered and parsed by the page each time, it held hundreds of MB and stalled the page. A finished card's notes
+ * and full brief come from tasks.get when it's opened; tasks.list { id } (an agent asking about one) stays whole.
+ */
+function slim<T extends Task>(t: T) {
+  // activity: the page doesn't show it (teams() has already taken its newest time); notes: only a finished card's view
+  const { activity, notes, ...card } = t;
+  // Only replies still waiting are shown (待发送); a sent / skipped one's card asks outbox.status
+  const pending = t.outbox?.filter((o) => o.state === "pending");
+  const rest = { ...card, outbox: pending?.length ? pending : undefined };
+  if (t.status !== "done" && t.status !== "dropped") return rest;
+  return {
+    ...rest,
+    // The search matches the start of the brief; the whole of it is in tasks.get
+    prompt: t.prompt && t.prompt.length > 300 ? t.prompt.slice(0, 300) : t.prompt,
+    // Its asks are closed: their titles for the search and their state, not every question's answer
+    asks: t.asks?.map(({ questions, ...a }) => a),
+  };
+}
+
+/**
+ * The cards' lines alone: { ids } → { [task id]: its worker's newest paragraph }. While a worker runs the board reads
+ * these every 10 s; it used to rerun the whole of tasks.list for that, the board's biggest answer, several times a
+ * minute with a few workers going (2026-11-24).
+ */
+export function lines(input: { ids?: string[] }, ctx: Ctx) {
+  const want = new Set(input?.ids ?? []);
+  const out: Record<string, string> = {};
+  for (const t of load(ctx).store.tasks)
+    if (want.has(t.id) && t.session && t.status !== "done" && t.status !== "dropped") out[t.id] = newest(ctx, t.session);
+  return out;
+}
+
+/** One task as stored, whole (notes, the full brief, asks with their answers): a finished card's view. */
+export function get(input: { id: string }, ctx: Ctx) {
+  const t = load(ctx).store.tasks.find((x) => x.id === input?.id);
+  if (!t) throw new Error(`没有 ${input?.id}`);
+  return t;
 }
 
 /**
