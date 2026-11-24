@@ -118,7 +118,13 @@ function resolve(ctx: Ctx, conv: string): { source: string; key: string; where: 
     keys.push(`${evId[1]}/${evId[2]}`, evId[1]);
   } else if (/\/archives\/([A-Z0-9]+)/.test(c)) keys.push(/\/archives\/([A-Z0-9]+)/.exec(c)![1]);
   for (const key of keys) {
-    const seen = ctx.events.list({ key, since, limit: 1 });
+    // The source comes from a message that came in there (it has a reply address), not from the newest event with the
+    // key: ctx.events.reply keeps the key, so a draft the user sent from the outbox is an event there too, under this
+    // panel's own reply source (lb-gerdr-panel-taskboard). 2026-11-24, t266: a wait followed that source, so the user's
+    // next send woke the worker as if the colleague had answered, and the colleague's real answer would have woken nobody.
+    const all = ctx.events.list({ key, since, limit: 50 });
+    const came = all.filter((x) => x.reply);
+    const seen = came.length ? came : all;
     if (seen.length) {
       // For the chat's card: where, in words — "Slack 有人私聊我 · 石石 (Yang Lei)", not D09DJBLRF4K
       const e = seen[seen.length - 1];
