@@ -448,16 +448,22 @@ function sameStart(text: string, title: string): string {
 /** What the row says under its title: what it waits on the person for, else the newest line of its worker. */
 function lineOf(t: Task): string {
   if (t.column === "you") {
+    // What waits on the person, counted as they would: an ask with several questions is that many things to
+    // answer, not one (a card), and a step to do isn't a question. The worker's own title for the card isn't used
+    // for the count: it said 「3 个问题要你定」 for one card while a second card asked for a step — four things, which
+    // the line gave as 「3 个问题…（共 2 件）」. Then the first of them, by its own words
     const asks = openAsks(t);
-    const a = asks[0];
-    if (a) {
-      // The row above is the task's title, and a worker usually opens its question with it (「排查 X：3 个问题要你定」):
-      // said again here, the line was the title twice and its own point cut off at the end. What's left after the
-      // title is the point; nothing left, the kind alone says enough
-      const what = a.handBack.kind === "none" ? "要你做" : "待你答";
-      const rest = sameStart(a.title, t.title);
-      const more = asks.length > 1 ? `（共 ${asks.length} 件）` : "";
-      return (rest ? `${what}：${rest}` : what) + more;
+    if (asks.length) {
+      const open = (a: (typeof asks)[number]) => (a.questions ?? []).filter((q) => !q.answer && !q.dropped && !q.skipped);
+      const things = asks.flatMap((a) =>
+        a.handBack.kind === "none" ? [{ todo: true, title: a.title }] : a.handBack.kind === "questions" && open(a).length ? open(a).map((q) => ({ todo: false, title: q.title })) : [{ todo: false, title: a.title }],
+      );
+      const answer = things.filter((x) => !x.todo).length;
+      const todo = things.length - answer;
+      const first = sameStart(things[0].title, t.title);
+      if (things.length === 1) return `${things[0].todo ? "要你做" : "待你答"}${first ? `：${first}` : ""}`;
+      const count = [answer && `待你答 ${answer}`, todo && `要你做 ${todo}`].filter(Boolean).join(" · ");
+      return first ? `${count}：${first}` : count;
     }
     if (t.live?.status === "waiting") return t.live.waiting || "等你审批";
     if (t.live?.status === "error") return t.live.error || "出错了";
