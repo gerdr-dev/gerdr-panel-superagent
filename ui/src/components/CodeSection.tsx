@@ -437,11 +437,28 @@ function RowButton({ title, onClick, children }: { title: string; onClick: () =>
   );
 }
 
+/** `text` without `title` at its start (and the punctuation that joined them); all of it when it doesn't start so. */
+function sameStart(text: string, title: string): string {
+  const a = text.trim();
+  const b = title.trim();
+  if (!b || !a.startsWith(b)) return a;
+  return a.slice(b.length).replace(/^[\s:：,，、。.\-—–|/·]+/, "");
+}
+
 /** What the row says under its title: what it waits on the person for, else the newest line of its worker. */
 function lineOf(t: Task): string {
   if (t.column === "you") {
-    const a = openAsks(t)[0];
-    if (a) return `${a.handBack.kind === "none" ? "要你做" : "待你答"}：${a.title}`;
+    const asks = openAsks(t);
+    const a = asks[0];
+    if (a) {
+      // The row above is the task's title, and a worker usually opens its question with it (「排查 X：3 个问题要你定」):
+      // said again here, the line was the title twice and its own point cut off at the end. What's left after the
+      // title is the point; nothing left, the kind alone says enough
+      const what = a.handBack.kind === "none" ? "要你做" : "待你答";
+      const rest = sameStart(a.title, t.title);
+      const more = asks.length > 1 ? `（共 ${asks.length} 件）` : "";
+      return (rest ? `${what}：${rest}` : what) + more;
+    }
     if (t.live?.status === "waiting") return t.live.waiting || "等你审批";
     if (t.live?.status === "error") return t.live.error || "出错了";
     if (t.stopWhy) return t.stopWhy;
