@@ -41,20 +41,31 @@ function useFold(name: string, init = false): [boolean, () => void] {
 
 /** A status's icon, the board's own (its columns' titles had them): the same four in the groups' titles and in 移到…. */
 const STATUS_ICON: Record<Status, React.ReactNode> = {
-  todo: <Circle className="size-3.5 shrink-0 text-muted-foreground" />,
-  running: <CircleDashed className="size-3.5 shrink-0 text-brand" />,
-  review: <CircleDot className="size-3.5 shrink-0 text-ok" />,
-  done: <CheckCircle2 className="size-3.5 shrink-0 text-muted-foreground" />,
+  todo: <Circle className="size-3.5 shrink-0 text-muted-foreground max-md:size-4" />,
+  running: <CircleDashed className="size-3.5 shrink-0 text-brand max-md:size-4" />,
+  review: <CircleDot className="size-3.5 shrink-0 text-ok max-md:size-4" />,
+  done: <CheckCircle2 className="size-3.5 shrink-0 text-muted-foreground max-md:size-4" />,
 };
 
-function FoldTitle({ open, onClick, icon, children }: { open: boolean; onClick: () => void; icon?: React.ReactNode; children: React.ReactNode }) {
+/**
+ * A group's title, laid out as a row is (Code's Row: the icon column, then the text): the status icon sits where the
+ * rows' icons do and the name starts where their titles do, so the list reads as one column. The fold arrow follows
+ * the name, small. Before, arrow + icon pushed the name right of the titles under it. A group with no icon of its own
+ * (其他) has the arrow in the icon column. Sizes follow Code's rows on a phone (max-md: the drawer's roomier rows).
+ */
+function FoldTitle({ open, onClick, icon, label, children }: { open: boolean; onClick: () => void; icon?: React.ReactNode; label: React.ReactNode; children?: React.ReactNode }) {
+  const arrow = <ChevronRight className={clsx("size-3 shrink-0 transition-transform", open && "rotate-90")} />;
   return (
     <button
-      className="flex h-7 w-full items-center gap-1 rounded-md pr-1 pl-1.5 text-[11px] font-medium text-muted-foreground select-none hover:bg-accent/60 hover:text-foreground"
+      className="flex h-7 w-full items-center gap-2 rounded-md pr-1 pl-1.5 text-[11px] font-medium text-muted-foreground select-none hover:bg-accent/60 hover:text-foreground max-md:h-9"
       onClick={onClick}
     >
-      <ChevronRight className={clsx("size-3.5 shrink-0 transition-transform", open && "rotate-90")} />
-      {icon}
+      <span className="flex size-3.5 shrink-0 items-center justify-center max-md:size-4">{icon ?? arrow}</span>
+      <span className="flex min-w-0 items-center gap-1">
+        {label}
+        {icon && arrow}
+      </span>
+      <span className="flex-1" />
       {children}
     </button>
   );
@@ -224,7 +235,7 @@ export function CodeSection() {
   return (
     <div className="pt-1.5 pb-1" data-fusion-section>
       <RowShell current={!!main && cur === main.id} onClick={openMain} title="和秘书说话：交给它的事、它怎么判断外面来的消息、派给了谁，都在这段对话里">
-        <MessageSquare className="size-3.5 shrink-0 text-muted-foreground" />
+        <MessageSquare className="size-3.5 shrink-0 text-muted-foreground max-md:size-4" />
         <span className="min-w-0 flex-1 truncate font-medium">秘书</span>
         {asks > 0 ? (
           <span className="shrink-0 rounded-full bg-warn px-1.5 text-[10px] leading-4 font-semibold text-background tabular-nums">{asks} 个问题</span>
@@ -249,9 +260,7 @@ export function CodeSection() {
       )}
 
       <Drop to="running" onMove={onMove}>
-        <FoldTitle open={activeOpen} onClick={foldActive} icon={STATUS_ICON.running}>
-          进行中 {activeTasks.length + activeOwn.length}
-          <span className="flex-1" />
+        <FoldTitle open={activeOpen} onClick={foldActive} icon={STATUS_ICON.running} label={`进行中 ${activeTasks.length + activeOwn.length}`}>
           <span
             role="button"
             className="flex size-5 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
@@ -272,15 +281,11 @@ export function CodeSection() {
       {/* Always listed, empty ones too: each is where a row is dragged to */}
       <>
           <Drop to="review" onMove={onMove}>
-            <FoldTitle open={reviewOpen} onClick={foldReview} icon={STATUS_ICON.review}>
-              待验收 {review.length + reviewOwn.length}
-            </FoldTitle>
+            <FoldTitle open={reviewOpen} onClick={foldReview} icon={STATUS_ICON.review} label={`待验收 ${review.length + reviewOwn.length}`} />
             {reviewOpen && sorted(review, reviewOwn, toDone)}
           </Drop>
           <Drop to="todo" onMove={onMove}>
-            <FoldTitle open={todoOpen} onClick={foldTodo} icon={STATUS_ICON.todo}>
-              待办 {todo.length}
-            </FoldTitle>
+            <FoldTitle open={todoOpen} onClick={foldTodo} icon={STATUS_ICON.todo} label={`待办 ${todo.length}`} />
             {todoOpen &&
               todo.map((t) =>
                 taskRow(
@@ -292,17 +297,13 @@ export function CodeSection() {
               )}
           </Drop>
           <Drop to="done" onMove={onMove}>
-            <FoldTitle open={doneOpen} onClick={foldDone} icon={STATUS_ICON.done}>
-              已完成 {done.length + doneOwn.length}
-            </FoldTitle>
+            <FoldTitle open={doneOpen} onClick={foldDone} icon={STATUS_ICON.done} label={`已完成 ${done.length + doneOwn.length}`} />
             {doneOpen && sorted(done, doneOwn, toRunning)}
           </Drop>
       </>
       {other.length > 0 && (
         <>
-          <FoldTitle open={otherOpen} onClick={foldOther}>
-            其他 {other.length}
-          </FoldTitle>
+          <FoldTitle open={otherOpen} onClick={foldOther} label={`其他 ${other.length}`} />
           {otherOpen && other.map(ownRow)}
         </>
       )}
@@ -340,8 +341,8 @@ function Drop({ to, onMove, children }: { to: Status; onMove: (to: Status, row: 
 
 function GroupTitle({ tone, children }: { tone?: "you"; children: React.ReactNode }) {
   return (
-    <div className={clsx("flex h-7 items-center gap-1 pr-1 pl-[24px] text-[11px] font-medium select-none", tone === "you" ? "text-warn" : "text-muted-foreground")}>
-      {tone === "you" && <CircleAlert className="size-3.5 shrink-0" />}
+    <div className={clsx("flex h-7 items-center gap-2 pr-1 pl-1.5 text-[11px] font-medium select-none max-md:h-9", tone === "you" ? "text-warn" : "text-muted-foreground")}>
+      <span className="flex size-3.5 shrink-0 items-center justify-center max-md:size-4">{tone === "you" && <CircleAlert className="size-3.5 max-md:size-4" />}</span>
       {children}
     </div>
   );
@@ -410,7 +411,9 @@ function RowShell({ current, onClick, title, drag, children }: { current?: boole
       draggable={!!drag}
       onDragStart={drag ? (e) => (e.dataTransfer.setData(TASK_MIME, drag), (e.dataTransfer.effectAllowed = "move")) : undefined}
       className={clsx(
-        "group relative flex min-h-8 cursor-default items-center gap-2 rounded-md py-1 pr-2 pl-1.5 text-[12px] select-none",
+        // Code's Row metrics (UnifiedSidebar): h-7 beside the rail, 44px in a phone's drawer. pr-1 as the groups'
+        // titles: the button at this row's end (the secretary's gear) stands over theirs (进行中's +)
+        "group relative flex min-h-7 cursor-default items-center gap-2 rounded-md py-0.5 pr-1 pl-1.5 text-[12px] select-none max-md:min-h-11 max-md:py-1.5",
         current ? "bg-accent text-foreground" : "text-foreground/90 hover:bg-accent/60",
       )}
     >
@@ -462,7 +465,7 @@ function TaskRow({ t, pane, current, action }: { t: Task; pane?: CodeRowInfo; cu
         <CodeRow pane={pane.pane} where={base(t.repo)} />
       ) : (
         <RowShell current={current} drag={t.id} onClick={() => t.session && showInCode(t.session)}>
-          <span className="flex size-3.5 shrink-0 items-center justify-center">
+          <span className="flex size-3.5 shrink-0 items-center justify-center max-md:size-4">
             <span className={clsx("size-2 rounded-full", you ? "bg-warn" : busy ? "animate-pulse bg-ok" : "bg-muted-foreground/40")} />
           </span>
           <span className={clsx("min-w-0 flex-1 truncate", you && "font-medium")}>{t.title}</span>
@@ -470,7 +473,8 @@ function TaskRow({ t, pane, current, action }: { t: Task; pane?: CodeRowInfo; cu
         </RowShell>
       )}
       {(line || action) && (
-        <div className="group -mt-0.5 flex min-h-5 items-center gap-1 pr-2 pl-[26px]">
+        // Starts where the titles do: the row's left padding + its icon + the gap (28px; a phone's icon is 16px: 30px)
+        <div className="group -mt-0.5 flex min-h-5 items-center gap-1 pr-1 pl-7 max-md:pl-[30px]">
           <span className={clsx("min-w-0 flex-1 truncate text-[11px]", you ? "text-warn" : "text-muted-foreground")}>{line}</span>
           {action}
         </div>
