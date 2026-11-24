@@ -3,6 +3,8 @@ import clsx from "clsx";
 import { Ban, Check, CheckCircle2, ChevronRight, Circle, CircleAlert, CircleDashed, CircleDot, LayoutGrid, MessageSquare, Play, Plus, Settings, Undo2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { run } from "../lib/gerdr";
+import { WholeWindow } from "../lib/portal";
+import { Select } from "./ui/select";
 import { openAsks, type Task, useTasks } from "../lib/tasks";
 import { CodeRow, type CodeRowInfo, newCodeTab, openSettings, showInCode, useCodeRowDrop, useCodeRowMenu, useCodeRows, useCodeSession } from "../lib/view";
 import { usePanelChange, useRefresh, useSessions } from "../lib/visible";
@@ -360,7 +362,6 @@ type AgentOpt = { id: string; name: string; default?: boolean };
  * when it starts, so a change means a new conversation that carries the old one on (local/_main.ts); it is started
  * right away when the secretary is idle, and shown in place of the old one if that was the pane in front. Model and
  * effort go back to the new agent's defaults: they are names of the old agent's.
- * A native select: the panel's own menus are portaled into its page, which isn't drawn while Code shows.
  */
 function AgentPick({ main, current }: { main?: string; current?: string }) {
   const [agents, setAgents0] = useState<AgentOpt[]>(last.agents);
@@ -387,22 +388,20 @@ function AgentPick({ main, current }: { main?: string; current?: string }) {
       setBusy(false);
     }
   };
+  // The panel's own dropdown (ui/select.tsx), opened over the whole window: this row sits in Code's list, in a phone's
+  // drawer even, while the panel's area (where its menus open by default) is hidden under Code. It was the system's
+  // <select> at first, which on a phone is a dialog in another look altogether.
   return (
-    <select
-      value={agent}
-      disabled={busy}
-      title="秘书用哪个 agent：换了之后新开一段对话接着聊（之前说的都带着）；秘书正忙时，等它这一轮结束后的下一条消息起生效"
-      className="max-w-[45%] shrink-0 cursor-pointer appearance-none truncate rounded-sm bg-transparent px-1 text-right text-[11px] text-muted-foreground outline-none hover:bg-muted hover:text-foreground disabled:opacity-50"
-      onClick={(e) => e.stopPropagation()}
-      onChange={(e) => void pick(e.target.value)}
-    >
-      <option value="">{def ? `默认（${def.name}）` : "默认"}</option>
-      {agents.map((a) => (
-        <option key={a.id} value={a.id}>
-          {a.name}
-        </option>
-      ))}
-    </select>
+    <span className={clsx("flex max-w-[50%] shrink-0", busy && "pointer-events-none opacity-50")} title="秘书用哪个 agent：换了之后新开一段对话接着聊（之前说的都带着）；秘书正忙时，等它这一轮结束后的下一条消息起生效" onClick={(e) => e.stopPropagation()}>
+      <WholeWindow>
+        <Select
+          value={agent}
+          onChange={(v) => void pick(v)}
+          options={[{ value: "", label: def ? `默认（${def.name}）` : "默认" }, ...agents.map((a) => ({ value: a.id, label: a.name }))]}
+          className="h-6 w-auto gap-1 border-0 bg-transparent px-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground max-md:text-[13px]"
+        />
+      </WholeWindow>
+    </span>
   );
 }
 
