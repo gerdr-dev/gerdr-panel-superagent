@@ -205,7 +205,7 @@ export function CodeSection() {
   const busy = (id?: string) => !!id && byId[id]?.status === "running";
   const sorted = (ts: Task[], rs: CodeRowInfo[], action: (t: Task) => React.ReactNode) =>
     [
-      ...ts.map((t) => ({ run: busy(t.session) || t.live?.status === "running", at: Math.max(at(t.session), t.live?.updatedAt ?? 0) || t.updatedAt, el: taskRow(t, action(t)) })),
+      ...ts.map((t) => ({ run: busy(t.session) || t.live?.status === "running", at: Math.max(at(t.session), t.live?.turnStartedAt ?? 0) || t.updatedAt, el: taskRow(t, action(t)) })),
       ...rs.map((r) => ({ run: busy(r.session), at: r.kind === "new" ? Infinity : at(r.session), el: ownRow(r) })),
     ]
       .sort((a, b) => Number(b.run) - Number(a.run) || b.at - a.at)
