@@ -1,10 +1,8 @@
 import * as core from "@gerdr/core";
 import clsx from "clsx";
-import { Ban, CheckCircle2, ChevronRight, Circle, CircleDashed, CircleDot, LayoutGrid, MessageSquare, Play, Plus, Settings } from "lucide-react";
+import { ArrowRightLeft, Ban, Bot, CheckCircle2, ChevronRight, Circle, CircleDashed, CircleDot, LayoutGrid, MessageSquare, Play, Plus, Settings } from "lucide-react";
 import { useMemo, useState } from "react";
 import { run } from "../lib/gerdr";
-import { WholeWindow } from "../lib/portal";
-import { Select } from "./ui/select";
 import { openAsks, type Task, useTasks } from "../lib/tasks";
 import { CodeRow, type CodeRowInfo, newCodeTab, useCodeDirs, openSettings, showInCode, useCodeRowDrop, useCodeRowMenu, useCodeRows, useCodeSession } from "../lib/view";
 import { usePanelChange, useRefresh, useSessions } from "../lib/visible";
@@ -144,7 +142,33 @@ export function CodeSection() {
   // from here, not from Code's workspaces, which this panel doesn't show; Code mode keeps its own). The same list the
   // secretary picks from, so a conversation started by hand lands where one it dispatched would
   const [repos, setRepos] = useState<{ path: string }[]>(last.repos);
-  useRefresh(() => run<{ settings: { repos: { path: string }[] } }>("settings.get").then((r) => setRepos((last.repos = r.settings.repos ?? [])), () => {}), [usePanelChange("user")], { fallback: 600_000, poll: 600_000 });
+  // Which agent the secretary runs as (设置 → 秘书 → agent, settings.router.agent), and the ones there are
+  const [agent, setAgent] = useState(last.agent);
+  const [agents, setAgents] = useState<AgentOpt[]>(last.agents);
+  useRefresh(
+    () =>
+      run<{ settings: { repos: { path: string }[]; router: { agent: string } } }>("settings.get").then(
+        (r) => (setRepos((last.repos = r.settings.repos ?? [])), setAgent((last.agent = r.settings.router.agent ?? ""))),
+        () => {},
+      ),
+    [usePanelChange("user")],
+    { fallback: 600_000, poll: 600_000 },
+  );
+  // The list comes from Gerdr's own config (a few commands): once, not with every change of ours
+  useRefresh(() => run<AgentOpt[]>("settings.agents").then((a) => setAgents((last.agents = a)), () => {}), [], { fallback: 600_000, poll: 600_000 });
+  // Who a conversation runs as is fixed when it starts, so a change means a new conversation that carries the old
+  // one on (local/_main.ts): started right away when the secretary is idle, and shown in place of the old one when
+  // that was the pane in front. Model and effort go back to the new agent's defaults: they are names of the old one's
+  const pickAgent = async (id: string) => {
+    setAgent((last.agent = id));
+    try {
+      await run("settings.set", { router: { agent: id, model: "", effort: "" } });
+      const r = await run<{ main: string }>("secretary.open", {});
+      if (main && cur === main.id && r.main !== main.id) showInCode(r.main);
+    } catch (e: any) {
+      toast?.error?.(String(e?.message ?? e));
+    }
+  };
   useCodeDirs(repos.map((r) => ({ path: r.path, name: base(r.path) })));
 
   const [activeOpen, foldActive] = useFold("active", true);
@@ -204,7 +228,20 @@ export function CodeSection() {
   };
   // The same moves in the pane's ⋯ menu and the row's right-click menu: the only way on a phone (no hover, no drag)
   useCodeRowMenu(({ session }) => {
-    if (!session || isMain(session)) return [];
+    // The secretary's own conversation: which agent it runs as. Here, in its pane's ⋯ menu, rather than a dropdown on
+    // its row in the list, where it took a third of the row for something changed once in a while (the person,
+    // 2026-11-24). 设置 → 秘书 has it too, with the model and effort
+    if (session && isMain(session)) {
+      const def = agents.find((a) => a.default);
+      const now = agents.find((a) => a.id === agent)?.name ?? (def ? `默认（${def.name}）` : "默认");
+      return [
+        { id: "agent-now", label: `秘书现在用：${now}`, icon: <Bot />, disabled: true, onSelect: () => {} },
+        ...[{ id: "", name: def ? `默认（${def.name}）` : "默认" }, ...agents]
+          .filter((a) => a.id !== agent)
+          .map((a) => ({ id: `agent-${a.id || "default"}`, label: `换成 ${a.name}`, icon: <ArrowRightLeft />, onSelect: () => void pickAgent(a.id) })),
+      ];
+    }
+    if (!session) return [];
     const t = taskOf.get(session);
     const at: Status = t ? (t.status as Status) : (standing[session] ?? "running");
     const items = (["running", "review", "done"] as const)
@@ -252,7 +289,6 @@ export function CodeSection() {
             />
           )
         )}
-        <AgentPick main={main?.id} current={cur} />
         <button
           className="flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
           title="秘书背后的东西：设置（谁干活、仓库）、流程、记忆、触发器、定时任务、外面来的消息的去向"
@@ -349,55 +385,6 @@ function Drop({ to, onMove, children }: { to: Status; onMove: (to: Status, row: 
 }
 
 type AgentOpt = { id: string; name: string; default?: boolean };
-
-/**
- * Which agent the secretary runs as, changed on its row: the same setting as 设置 → 谁派活 (settings.router.agent),
- * here because in the Code view the settings are two clicks away in the board. Who a conversation runs as is fixed
- * when it starts, so a change means a new conversation that carries the old one on (local/_main.ts); it is started
- * right away when the secretary is idle, and shown in place of the old one if that was the pane in front. Model and
- * effort go back to the new agent's defaults: they are names of the old agent's.
- */
-function AgentPick({ main, current }: { main?: string; current?: string }) {
-  const [agents, setAgents0] = useState<AgentOpt[]>(last.agents);
-  const [agent, setAgent0] = useState(last.agent);
-  const setAgents = (a: AgentOpt[]) => setAgents0((last.agents = a));
-  const setAgent = (a: string) => setAgent0((last.agent = a));
-  const [busy, setBusy] = useState(false);
-  const changed = usePanelChange("user");
-  useRefresh(() => run<{ settings: { router: { agent: string } } }>("settings.get").then((r) => setAgent(r.settings.router.agent ?? ""), () => {}), [changed], { fallback: 600_000, poll: 600_000 });
-  // The list comes from Gerdr's own config (a few commands): once, not with every change of ours
-  useRefresh(() => run<AgentOpt[]>("settings.agents").then(setAgents, () => {}), [], { fallback: 600_000, poll: 600_000 });
-  if (!agents.length) return null;
-  const def = agents.find((a) => a.default);
-  const pick = async (id: string) => {
-    setBusy(true);
-    setAgent(id);
-    try {
-      await run("settings.set", { router: { agent: id, model: "", effort: "" } });
-      const r = await run<{ main: string }>("secretary.open", {});
-      if (main && current === main && r.main !== main) showInCode(r.main);
-    } catch (e: any) {
-      toast?.error?.(String(e?.message ?? e));
-    } finally {
-      setBusy(false);
-    }
-  };
-  // The panel's own dropdown (ui/select.tsx), opened over the whole window: this row sits in Code's list, in a phone's
-  // drawer even, while the panel's area (where its menus open by default) is hidden under Code. It was the system's
-  // <select> at first, which on a phone is a dialog in another look altogether.
-  return (
-    <span className={clsx("flex max-w-[50%] shrink-0", busy && "pointer-events-none opacity-50")} title="秘书用哪个 agent：换了之后新开一段对话接着聊（之前说的都带着）；秘书正忙时，等它这一轮结束后的下一条消息起生效" onClick={(e) => e.stopPropagation()}>
-      <WholeWindow>
-        <Select
-          value={agent}
-          onChange={(v) => void pick(v)}
-          options={[{ value: "", label: def ? `默认（${def.name}）` : "默认" }, ...agents.map((a) => ({ value: a.id, label: a.name }))]}
-          className="h-6 w-auto gap-1 border-0 bg-transparent px-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground max-md:text-[13px]"
-        />
-      </WholeWindow>
-    </span>
-  );
-}
 
 function RowShell({ current, onClick, title, drag, children }: { current?: boolean; onClick: () => void; title?: string; /** A task's id: the row can be dragged onto a group */ drag?: string; children: React.ReactNode }) {
   return (
