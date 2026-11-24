@@ -394,5 +394,30 @@ export function ignoredLead(t: Task): string {
   const asks = (t.asks ?? []).filter((a) => a.ignored && !a.told);
   if (!asks.length) return "";
   for (const a of asks) a.told = true;
+  return ignoredText(asks);
+}
+
+/** What an agent is told about its questions the user ignored. */
+export function ignoredText(asks: { id: string; title: string }[]): string {
   return `[任务面板] 用户忽略了你问的${asks.map((a) => `「${a.title}」（${a.id}）`).join("、")}：多半已经过时了。别等它，也别原样再问；还需要的话按现在的情况重新 ask_human。`;
 }
+
+/**
+ * Leaves an ignored question as a note on its conversation (Gerdr's ctx.sessions.note): it goes in front of the next
+ * message that conversation gets, the user's own typing included, as one folded line above it. It used to be a
+ * message of its own, sent once a turn had started: the user typed, and "用户忽略了你问的问题" came after their message
+ * as a second one, starting a turn of its own when the first had ended (2026-11-24). false on a Gerdr without notes:
+ * the caller leaves it untold, for ignoredLead / secIgnoredLead.
+ */
+export function noteIgnored(ctx: Ctx, session: string | undefined, a: { id: string; title: string }): boolean {
+  const note = (ctx.sessions as any).note;
+  if (!session || typeof note !== "function") return false;
+  try {
+    note(session, `ignored:${a.id}`, ignoredText([a]), { fold: `[任务面板] 用户忽略了你问的「${cutTitle(a.title)}」` });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const cutTitle = (t: string) => ([...t].length > 30 ? [...t].slice(0, 30).join("") + "…" : t);

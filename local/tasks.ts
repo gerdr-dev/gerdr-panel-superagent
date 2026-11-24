@@ -3,7 +3,7 @@ import { tellBadge } from "./_badge";
 import { DATA, skillFile } from "./_user";
 import { workflow } from "./_config";
 import { forWorker } from "./memory";
-import { activity, blockersDone, going, draftOf, find, findAsk, ignoredLead, load, members, newTask, note, reqOf, update, type Ask, type Question, type Store, type Task } from "./_store";
+import { activity, blockersDone, going, draftOf, find, findAsk, ignoredLead, load, noteIgnored, members, newTask, note, reqOf, update, type Ask, type Question, type Store, type Task } from "./_store";
 import { open, syncAgents, syncSessions, wakeText } from "./_waits";
 import { cutLine, wake } from "./_wake";
 import { askState, cardStates } from "./_cardstate";
@@ -1510,7 +1510,9 @@ export async function ignore(input: { id: string }, ctx: Ctx) {
     const { t, a: h } = findAsk(s, aid);
     if (h.status !== "open") throw new Error(`「${h.title}」已经不在等你了`);
     for (const q of h.questions ?? []) if (!q.dropped && q.answer == null) Object.assign(q, { dropped: "你忽略了", skipped: true });
-    Object.assign(h, { status: "dropped", dropReason: "你忽略了", ignored: true, told: false, doneAt: Date.now(), updatedAt: Date.now() });
+    // Said with the worker's next message, whoever sends it (noteIgnored); untold only on a Gerdr without notes
+    const told = noteIgnored(ctx, t.session, h);
+    Object.assign(h, { status: "dropped", dropReason: "你忽略了", ignored: true, told, doneAt: Date.now(), updatedAt: Date.now() });
     activity(s, t, { kind: "user", by: t.id, of: h.id, text: `你忽略了「${h.title}」` });
   });
   return { ignored: id };
