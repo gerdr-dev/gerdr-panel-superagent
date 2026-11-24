@@ -35,7 +35,7 @@ export const CodeRow = c.CodeRow!;
 export const useCodeRows = c.useCodeRows!;
 /** A place Code's rows can be dropped on (a group of ours). Without it (an older Gerdr): nothing lands, the buttons still move. */
 export const useCodeRowDrop: (fn: (row: { pane: string; session?: string }) => void) => (el: HTMLElement | null) => void = c.useCodeRowDrop ?? (() => () => {});
-export type CodeMenuItem = { id: string; label: string; icon?: ReactNode; disabled?: boolean; onSelect: () => void };
+export type CodeMenuItem = { id: string; label: string; icon?: ReactNode; disabled?: boolean; onSelect?: () => void; children?: CodeMenuItem[] };
 /** Our items in a pane's ⋯ menu and its row's right-click menu (移到…). Without it (an older Gerdr): none there. */
 export const useCodeRowMenu: (fn: (row: { pane: string; session?: string }) => CodeMenuItem[]) => void = c.useCodeRowMenu ?? (() => {});
 /** The folders offered on Code's new-conversation page while we show: ours (设置 → 仓库), not Code's workspaces. */

@@ -1,7 +1,7 @@
 import * as core from "@gerdr/core";
 import clsx from "clsx";
 import { ArrowRightLeft, Ban, Bot, CheckCircle2, ChevronRight, Circle, CircleDashed, CircleDot, LayoutGrid, MessageSquare, Play, Plus, Settings } from "lucide-react";
-import { useMemo, useState } from "react";
+import { createContext, useContext, useMemo, useState } from "react";
 import { run } from "../lib/gerdr";
 import { openAsks, type Task, useTasks } from "../lib/tasks";
 import { CodeRow, type CodeRowInfo, newCodeTab, useCodeDirs, openSettings, showInCode, useCodeRowDrop, useCodeRowMenu, useCodeRows, useCodeSession } from "../lib/view";
@@ -83,7 +83,22 @@ const ICON: Record<"running" | "review" | "done", React.ReactNode> = { running: 
 /** A task row of ours being dragged (rows that are Code's own are dragged by Code: useCodeRowDrop). */
 const TASK_MIME = "text/x-gerdr-task";
 
+/** The list as Fusion draws it, for CodeSection to put where Code's list goes. */
+const ListContext = createContext<React.ReactNode>(null);
+
+/**
+ * The list, put into Code's frame (layout.tsx gives it to CodeView as `sidebar`). Nothing else: what it shows and
+ * everything that goes with it (the tasks, the menus' items, the folders offered) lives in Fusion, which is mounted
+ * for as long as the panel is. This is only mounted while Code's list is on screen: on a phone, while the drawer is
+ * open. When all of it lived here, a phone with the drawer closed had no 移到… in a pane's ⋯ menu at all (they were
+ * registered from here), and every opening of the drawer started from nothing.
+ */
 export function CodeSection() {
+  return useContext(ListContext);
+}
+
+/** The panel's working part, around CodeView: follows the tasks and the panes, gives Code's menus and pages our items, and draws the list. */
+export function Fusion({ children }: { children: React.ReactNode }) {
   const { tasks, act } = useTasks();
   const cur = useCodeSession();
   const rows = useCodeRows();
@@ -235,10 +250,15 @@ export function CodeSection() {
       const def = agents.find((a) => a.default);
       const now = agents.find((a) => a.id === agent)?.name ?? (def ? `默认（${def.name}）` : "默认");
       return [
-        { id: "agent-now", label: `秘书现在用：${now}`, icon: <Bot />, disabled: true, onSelect: () => {} },
-        ...[{ id: "", name: def ? `默认（${def.name}）` : "默认" }, ...agents]
-          .filter((a) => a.id !== agent)
-          .map((a) => ({ id: `agent-${a.id || "default"}`, label: `换成 ${a.name}`, icon: <ArrowRightLeft />, onSelect: () => void pickAgent(a.id) })),
+        {
+          id: "agent",
+          label: `秘书的 agent：${now}`,
+          icon: <Bot />,
+          // A second level, unfolded when picked: listed outright, seven agents made the menu twice as long
+          children: [{ id: "", name: def ? `默认（${def.name}）` : "默认" }, ...agents]
+            .filter((a) => a.id !== agent)
+            .map((a) => ({ id: `agent-${a.id || "default"}`, label: `换成 ${a.name}`, icon: <ArrowRightLeft />, onSelect: () => void pickAgent(a.id) })),
+        },
       ];
     }
     if (!session) return [];
@@ -270,7 +290,7 @@ export function CodeSection() {
       .sort((a, b) => Number(b.run) - Number(a.run) || b.at - a.at)
       .map((x) => x.el);
 
-  return (
+  const list = (
     <div className="pt-1.5 pb-1" data-fusion-section>
       <RowShell current={!!main && cur === main.id} onClick={openMain} title="和秘书说话：交给它的事、它怎么判断外面来的消息、派给了谁，都在这段对话里">
         <MessageSquare className="size-3.5 shrink-0 text-muted-foreground max-md:size-4" />
@@ -354,6 +374,7 @@ export function CodeSection() {
       )}
     </div>
   );
+  return <ListContext.Provider value={list}>{children}</ListContext.Provider>;
 }
 
 /**

@@ -1,7 +1,7 @@
 import { onShowSession } from "@gerdr/core";
 import { useEffect } from "react";
 import { Outlet } from "react-router";
-import { CodeSection } from "./components/CodeSection";
+import { CodeSection, Fusion } from "./components/CodeSection";
 import { SettingsSheet } from "./components/SettingsSheet";
 import { project, run } from "./lib/gerdr";
 import { WholeWindow } from "./lib/portal";
@@ -36,7 +36,10 @@ export default function Layout() {
   if (CodeView && canHostCode)
     return (
       <>
-        <CodeView list="replace" sidebar={<CodeSection />} />
+        {/* Fusion is mounted with the panel; the list it draws is only in the page while Code's list is (CodeSection) */}
+        <Fusion>
+          <CodeView list="replace" sidebar={<CodeSection />} />
+        </Fusion>
         {/* Over the whole window, Gerdr's bars included (lib/portal.ts WholeWindow) */}
         {tab && (
           <WholeWindow>
