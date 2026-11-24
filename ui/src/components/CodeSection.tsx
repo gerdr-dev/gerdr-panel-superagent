@@ -1,6 +1,6 @@
 import * as core from "@gerdr/core";
 import clsx from "clsx";
-import { Check, ChevronRight, Forward, MessageSquare, Play, Plus, Settings, Undo2, X } from "lucide-react";
+import { Check, ChevronRight, MessageSquare, Play, Plus, Settings, Undo2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { run } from "../lib/gerdr";
 import { openAsks, type Task, useTasks } from "../lib/tasks";
@@ -17,7 +17,6 @@ import { usePanelChange, useRefresh, useSessions } from "../lib/visible";
 // 进行中 while its tab is open and 等你 while its agent waits on them (an approval, an error); closing it ends it.
 
 const toast = (core as unknown as { toast?: { error?: (m: string) => unknown } }).toast;
-const useSession = (core as unknown as { useSession?: (id: string | undefined) => { id: string; title?: string; cwd?: string; tags?: Record<string, string> } | undefined }).useSession;
 
 /** A folded group of rows, open or not, per device. */
 function useFold(name: string, init = false): [boolean, () => void] {
@@ -160,7 +159,6 @@ export function CodeSection() {
           <Settings className="size-3.5" />
         </button>
       </RowShell>
-      <HandOver current={cur} main={main?.id} onSent={(id) => showInCode(id)} />
 
       {you > 0 && (
         <Drop to="running" onMove={onMove}>
@@ -409,78 +407,6 @@ function TaskRow({ t, pane, current, action }: { t: Task; pane?: CodeRowInfo; cu
           {action}
         </div>
       )}
-    </div>
-  );
-}
-
-/**
- * 交给秘书: the conversation in Code's focused pane, when it isn't one of ours, goes to the secretary with a sentence
- * from the person. One entry for both "take this over" and "just have a look": the secretary judges from the
- * sentence (the person's call, 2026-11-24). It reads the conversation itself (`gerdr session read`), so nothing of
- * it is copied here.
- */
-function HandOver({ current, main, onSent }: { current?: string; main?: string; onSent: (main: string) => void }) {
-  const s = useSession?.(current);
-  const [open, setOpen] = useState(false);
-  const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
-  // Ours already (the secretary, a worker), or no conversation in the pane (a terminal, a new tab): nothing to hand over
-  if (!s || s.tags?.panel || s.id === main) return null;
-  const send = async () => {
-    setBusy(true);
-    const msg = [
-      `我把 Code 里的一个对话交给你：「${s.title || "未命名"}」，会话 id ${s.id}${s.cwd ? `，目录 ${s.cwd}` : ""}。`,
-      `先用 \`gerdr session read ${s.id}\` 读它，再照我下面说的办。我可能是要你接手跟进（建任务、派 worker，把这段对话里已经定下的东西带上），也可能只是问你一句；没说清就你来判断，拿不准再问我。`,
-      text.trim() ? `我的话：${text.trim()}` : "我没多说：你看了之后告诉我你打算怎么办。",
-    ].join("\n\n");
-    try {
-      const r = await run<{ main: string }>("secretary.say", { text: msg });
-      setOpen(false);
-      setText("");
-      onSent(r.main);
-    } catch (e: any) {
-      toast?.error?.(String(e?.message ?? e));
-    } finally {
-      setBusy(false);
-    }
-  };
-  if (!open)
-    return (
-      <button
-        className="flex h-7 w-full items-center gap-2 rounded-md pr-2 pl-1.5 text-[11px] text-muted-foreground select-none hover:bg-accent/60 hover:text-foreground"
-        title="把正在看的这个对话交给秘书：让它接手跟进，或者只是问它一句，你说一句话，它自己判断"
-        onClick={() => setOpen(true)}
-      >
-        <Forward className="size-3.5 shrink-0" />
-        <span className="min-w-0 truncate">把「{s.title || "这个对话"}」交给秘书</span>
-      </button>
-    );
-  return (
-    <div className="mx-1 my-1 rounded-md border bg-background p-1.5">
-      <div className="flex items-center gap-1 pb-1 text-[11px] text-muted-foreground">
-        <span className="min-w-0 flex-1 truncate">交给秘书：{s.title || "这个对话"}</span>
-        <button className="flex size-4 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground" title="不交了" onClick={() => setOpen(false)}>
-          <X className="size-3" />
-        </button>
-      </div>
-      <textarea
-        autoFocus
-        rows={2}
-        value={text}
-        disabled={busy}
-        placeholder="跟秘书说一句：接手跟到合并 / 这个该放哪个仓库…（可不填）"
-        className="w-full resize-none rounded-sm bg-muted/60 px-1.5 py-1 text-[12px] outline-none placeholder:text-muted-foreground/70"
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) (e.preventDefault(), void send());
-          if (e.key === "Escape") setOpen(false);
-        }}
-      />
-      <div className="flex justify-end pt-1">
-        <button className="h-6 rounded-sm bg-brand px-2 text-[11px] font-medium text-background disabled:opacity-50" disabled={busy} onClick={() => void send()}>
-          {busy ? "在交给它…" : "交给秘书"}
-        </button>
-      </div>
     </div>
   );
 }
