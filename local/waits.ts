@@ -513,6 +513,30 @@ function lastLine(s: string) {
   return [...line].length > 200 ? [...line].slice(0, 200).join("") + "…" : line;
 }
 
+/**
+ * The triggers wait_for wrote (user/triggers/follow-*.json), for the 触发器 page: they are triggers too, and the page
+ * says of each where its events go. One row each: { id, on, key, fn, name, tasks: the live tasks waiting on it }.
+ */
+export function followed(input: unknown, ctx: Ctx) {
+  if (!ctx.fs.stat(DIR)) return [];
+  const live = load(ctx).store.tasks.filter((t) => t.status !== "done" && t.status !== "dropped");
+  const out: { id: string; on: string; key?: string; fn: string; name?: string; tasks: string[] }[] = [];
+  for (const f of ctx.fs.list(DIR)) {
+    const name = f.path.split("/").pop() ?? "";
+    if (f.dir || !name.startsWith(PREFIX) || !name.endsWith(".json")) continue;
+    try {
+      const t = JSON.parse(ctx.fs.read(f.path));
+      if (t.fn !== FN && t.fn !== STATE_FN) continue;
+      const source = t.source || String(t.on).split("/")[0];
+      const tasks = live.filter((x) => follows(x).some((th) => th.source === source && th.key === t.key)).map((x) => `${x.id}「${x.title}」`);
+      out.push({ id: name.slice(0, -5), on: t.on, key: t.key, fn: t.fn, name: t.name, tasks });
+    } catch {
+      // a broken file is Gerdr's to report
+    }
+  }
+  return out;
+}
+
 function sweepTriggers(ctx: Ctx, tasks: Task[]) {
   if (!ctx.fs.stat(DIR)) return [];
   const live = tasks.filter((t) => t.status !== "done" && t.status !== "dropped");

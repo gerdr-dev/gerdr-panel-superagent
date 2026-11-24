@@ -13,17 +13,42 @@ import { usePoll } from "../lib/visible";
 
 type Source = { on: string; title?: string; description?: string; addon?: string; canReply?: boolean; seen?: number; enabled: boolean; key?: string; allow?: string[]; deny?: string[]; inferred?: boolean; by?: string };
 /** One of the panel's own triggers (triggers/*.json): always on. */
-type Builtin = { id: string; on: string; name?: string; key?: string; off?: boolean };
+type Builtin = { id: string; on: string; name?: string; key?: string; fn?: string; off?: boolean };
+/** A trigger wait_for wrote for a conversation a worker waits on (user/triggers/follow-*.json, waits.followed). */
+type Followed = { id: string; on: string; key?: string; fn: string; name?: string; tasks: string[] };
+
+/**
+ * Where a trigger's events go, in words: every row says it, as "收进来" alone read as "to the secretary" for all of
+ * them (2026-11-24, the user asked what the session-status one was for: it only runs code, no AI). An fn not named
+ * here shows as itself.
+ */
+const DEST: Record<string, string> = {
+  "inbox.onEvent": "秘书判断是不是活、派给谁；已有任务在跟的对话里的后续，按「设置 → 任务对话里的后续」直接给那个 worker 或先给秘书",
+  "waits.onFollowed": "直接给在等这段对话的 worker，不经过秘书",
+  "waits.onState": "MR 的状态满足 worker 写的条件时，直接叫醒在等它的 worker，不经过秘书",
+  "tasks.sync": "不经过 AI：面板代码更新看板上的卡片，把等你的事放进收件箱",
+};
+
+function Dest({ fn }: { fn?: string }) {
+  if (!fn) return null;
+  return (
+    <p className="mt-1 text-[12px] text-muted-foreground">
+      → {DEST[fn] ?? "调用面板函数"} <span className="font-mono opacity-70">{fn}</span>
+    </p>
+  );
+}
 
 type TriggerInfo = { id: string; on: string; runs: number; last?: { startedAt: string; ok: boolean; error?: string } };
 
 export default function TriggersPage() {
   const [list, setList] = useState<Source[] | null>(null);
   const [own, setOwn] = useState<Builtin[]>([]);
+  const [follow, setFollow] = useState<Followed[]>([]);
   const [runs, setRuns] = useState<Record<string, TriggerInfo>>({});
   const [err, setErr] = useState("");
   const load = () => {
     run<Builtin[]>("inbox.builtin").then(setOwn, () => {});
+    run<Followed[]>("waits.followed").then(setFollow, () => {});
     run<Source[]>("inbox.sources").then(
       (l) => (setList(l), setErr("")),
       (e) => setErr(String(e.message || e)),
@@ -39,7 +64,7 @@ export default function TriggersPage() {
       <header>
         <h1 className="text-[22px] font-semibold tracking-tight">触发器</h1>
         <p className="mt-1 text-[13px] text-muted-foreground">
-          这个面板收哪些外面发生的事（私信、@ 你、MR、告警……），都在这一页。已有任务的对话里的后续直接交给那个任务，其余的由秘书判断是不是活、派给谁（每条去了哪，看「去向」）。
+          这个面板收哪些事（私信、@ 你、MR、告警、worker 的状态……），都在这一页；每条下面的「→」写着收进来的事交给谁：秘书、在等的 worker，还是只由面板代码处理（每条消息最后去了哪，看「去向」）。
           能选什么取决于装了哪些插件、有哪些事件来过；来源支持回复的，接了活会回到原来的对话里说一声（设置 → 回复对方）；之后要回什么由干活的 agent 自己判断、自己回。
         </p>
       </header>
@@ -55,6 +80,25 @@ export default function TriggersPage() {
           <h2 className="text-[13px] font-medium text-muted-foreground">面板自带：默认开着</h2>
           {own.map((b) => (
             <OwnRow key={b.id} b={b} info={runs[b.on]} onSaved={load} />
+          ))}
+        </section>
+      )}
+      {follow.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-[13px] font-medium text-muted-foreground">任务在等的对话：worker 用 wait_for 等的时候自动加上，不等了自动收掉</h2>
+          {follow.map((f) => (
+            <article key={f.id} className="rounded-xl border bg-card p-4 max-md:p-3">
+              <h3 className="flex items-center gap-2 text-[14px] font-medium">
+                <Zap className="size-3.5 text-brand" />
+                {f.name || f.on}
+              </h3>
+              <p className="mt-0.5 text-[12px] text-muted-foreground">
+                <span className="font-mono">{f.on}</span>
+                {f.key && <> · 只要 <span className="font-mono">{f.key}</span></>}
+                {f.tasks.length > 0 ? <> · 在等的：{f.tasks.join("、")}</> : <> · 已经没有任务在等，稍后收掉</>}
+              </p>
+              <Dest fn={f.fn} />
+            </article>
           ))}
         </section>
       )}
@@ -108,6 +152,7 @@ function OwnRow({ b, info, onSaved }: { b: Builtin; info?: TriggerInfo; onSaved:
               </span>
             )}
           </p>
+          <Dest fn={b.fn} />
         </div>
         <label className="flex shrink-0 cursor-pointer items-center gap-2 text-[13px]">
           {busy && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
@@ -157,6 +202,8 @@ function Row({ s, info, onSaved }: { s: Source; info?: TriggerInfo; onSaved: () 
             {s.seen ? <> · 最近一条 {since(s.seen)}前</> : null}
           </p>
           {s.description && <p className="mt-1 text-[12px] text-muted-foreground">{s.description}</p>}
+          {/* Every source picked here goes through inbox.onEvent (local/inbox.ts setSource) */}
+          <Dest fn="inbox.onEvent" />
         </div>
         {s.by ? (
           // Taken by one of the panel's own triggers already: a second one would take each event twice

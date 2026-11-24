@@ -48,7 +48,7 @@ function ours(ctx: Ctx): Record<string, Ours> {
   return out;
 }
 
-type Builtin = { id: string; on: string; name?: string; key?: string; off?: boolean };
+type Builtin = { id: string; on: string; name?: string; key?: string; fn?: string; off?: boolean };
 
 /**
  * The panel's own triggers (triggers/*.json, shipped with it, like mr.json): on unless this person switched one off.
@@ -66,7 +66,7 @@ export function builtin(input: unknown, ctx: Ctx): Builtin[] {
       const own = `${DIR}/${name}`;
       const mineT = ctx.fs.stat(own) ? JSON.parse(ctx.fs.read(own)) : null;
       const off = !!mineT && (!!mineT.off || !!mineT.input?.off);
-      if (t.on) out.push({ id: name.slice(0, -5), on: t.on, name: t.name, key: t.key, ...(off ? { off } : {}) });
+      if (t.on) out.push({ id: name.slice(0, -5), on: t.on, name: t.name, key: t.key, fn: t.fn, ...(off ? { off } : {}) });
     } catch {
       // a broken file is Gerdr's to report (gerdr panel triggers)
     }
