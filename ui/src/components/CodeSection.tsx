@@ -1,6 +1,6 @@
 import * as core from "@gerdr/core";
 import clsx from "clsx";
-import { Ban, Check, CheckCircle2, ChevronRight, Circle, CircleDashed, CircleDot, LayoutGrid, MessageSquare, Play, Plus, Settings, Undo2 } from "lucide-react";
+import { Ban, CheckCircle2, ChevronRight, Circle, CircleDashed, CircleDot, LayoutGrid, MessageSquare, Play, Plus, Settings } from "lucide-react";
 import { useMemo, useState } from "react";
 import { run } from "../lib/gerdr";
 import { WholeWindow } from "../lib/portal";
@@ -213,12 +213,10 @@ export function CodeSection() {
     if (t) items.push({ id: "drop", label: "放弃任务", icon: <Ban />, onSelect: () => void act("drop", { id: t.id }).catch((e) => toast?.error?.(String(e?.message ?? e))) } as any);
     return items;
   });
-  const taskRow = (t: Task, action: React.ReactNode) => <TaskRow key={t.id} t={t} pane={t.session ? paneOf.get(t.session) : undefined} current={!!t.session && cur === t.session} action={action} />;
-  const toReview = (t: Task) => (
-    <RowButton title="移到待验收" onClick={() => move(t, "review")}>
-      <Check className="size-3.5" />
-    </RowButton>
-  );
+  // No buttons on the rows for moving a task (there was a ✓ at the end of its line): every status is changed from the
+  // menus (the pane's ⋯, the row's right click) or by dragging, one way for all. The exception is 待办: a task not
+  // handed out has no conversation, so no pane and no menu, and its ▶ is the only way to start it on a phone
+  const taskRow = (t: Task, action?: React.ReactNode) => <TaskRow key={t.id} t={t} pane={t.session ? paneOf.get(t.session) : undefined} current={!!t.session && cur === t.session} action={action} />;
   const ownRow = (r: CodeRowInfo) => <CodeRow key={r.pane} pane={r.pane} where={base(r.cwd)} />;
 
   // One order for a group, tasks and the person's own conversations together (they aren't told apart): what's
@@ -227,23 +225,13 @@ export function CodeSection() {
   // order, workspace by workspace, which read as no order at all once the workspaces weren't shown.
   const at = (id?: string) => (id && byId[id] ? (byId[id].turn?.startedAt ?? byId[id].updatedAt ?? 0) : 0);
   const busy = (id?: string) => !!id && byId[id]?.status === "running";
-  const sorted = (ts: Task[], rs: CodeRowInfo[], action: (t: Task) => React.ReactNode) =>
+  const sorted = (ts: Task[], rs: CodeRowInfo[]) =>
     [
-      ...ts.map((t) => ({ run: busy(t.session) || t.live?.status === "running", at: Math.max(at(t.session), t.live?.turnStartedAt ?? 0) || t.updatedAt, el: taskRow(t, action(t)) })),
+      ...ts.map((t) => ({ run: busy(t.session) || t.live?.status === "running", at: Math.max(at(t.session), t.live?.turnStartedAt ?? 0) || t.updatedAt, el: taskRow(t) })),
       ...rs.map((r) => ({ run: busy(r.session), at: at(r.session), el: ownRow(r) })),
     ]
       .sort((a, b) => Number(b.run) - Number(a.run) || b.at - a.at)
       .map((x) => x.el);
-  const toDone = (t: Task) => (
-    <RowButton title="通过：移到已完成" onClick={() => move(t, "done")}>
-      <Check className="size-3.5" />
-    </RowButton>
-  );
-  const toRunning = (t: Task) => (
-    <RowButton title="打回：移回进行中" onClick={() => move(t, "running")}>
-      <Undo2 className="size-3.5" />
-    </RowButton>
-  );
 
   return (
     <div className="pt-1.5 pb-1" data-fusion-section>
@@ -281,10 +269,10 @@ export function CodeSection() {
           </span>
         </FoldTitle>
         {/* Shown with the group folded too: they are the reason to look */}
-        {sorted(youTasks, youOwn, toReview)}
+        {sorted(youTasks, youOwn)}
         {activeOpen && (
           <>
-            {sorted(activeTasks, activeOwn, toReview)}
+            {sorted(activeTasks, activeOwn)}
             {!you && !activeTasks.length && !activeOwn.length && <div className="py-1 pl-[26px] text-[12px] text-muted-foreground">没有进行中的</div>}
           </>
         )}
@@ -294,7 +282,7 @@ export function CodeSection() {
       <>
           <Drop to="review" onMove={onMove}>
             <FoldTitle open={reviewOpen} onClick={foldReview} icon={STATUS_ICON.review} label={`待验收 ${review.length + reviewOwn.length}`} />
-            {reviewOpen && sorted(review, reviewOwn, toDone)}
+            {reviewOpen && sorted(review, reviewOwn)}
           </Drop>
           <Drop to="todo" onMove={onMove}>
             <FoldTitle open={todoOpen} onClick={foldTodo} icon={STATUS_ICON.todo} label={`待办 ${todo.length}`} />
@@ -310,7 +298,7 @@ export function CodeSection() {
           </Drop>
           <Drop to="done" onMove={onMove}>
             <FoldTitle open={doneOpen} onClick={foldDone} icon={STATUS_ICON.done} label={`已完成 ${done.length + doneOwn.length}`} />
-            {doneOpen && sorted(done, doneOwn, toRunning)}
+            {doneOpen && sorted(done, doneOwn)}
           </Drop>
       </>
       {other.length > 0 && (
@@ -477,8 +465,7 @@ function lineOf(t: Task): string {
 function TaskRow({ t, pane, current, action }: { t: Task; pane?: CodeRowInfo; current: boolean; action?: React.ReactNode }) {
   const you = t.column === "you" && t.status === "running";
   const busy = t.live?.status === "running";
-  // Never empty: the line is also where the row's one move sits, and a row that grows on hover makes the list jump
-  const line = lineOf(t) || (t.status === "todo" ? "还没派出去" : t.status === "review" ? "等你验收" : t.status === "done" ? "已完成" : t.id);
+  const line = lineOf(t) || (t.status === "todo" ? "还没派出去" : "");
   return (
     <div className="group/task" title={`${t.id} ${t.title}${t.repo ? `\n${t.repo}` : ""}`}>
       {pane ? (
