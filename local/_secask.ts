@@ -66,7 +66,8 @@ export function secAsk(input: any, ctx: Ctx) {
       type: "task-step",
       ref: a.id,
       project,
-      kicker: kind === "choice" ? "秘书问你 · 不急，之后点「秘书」也能答" : kind === "none" ? "秘书请你做" : "秘书问你",
+      // 等你, as a worker's cards say (local/board.ts): whose it is, the conversation it's in says
+      kicker: "等你",
       title: a.title,
       body: a.steps || undefined,
       tone: kind === "none" ? "warn" : "info",

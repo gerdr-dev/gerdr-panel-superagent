@@ -237,7 +237,10 @@ export function ask_human(input: any, ctx: Ctx) {
             type: "task-step",
             ref: h.id,
             project: ctx.workspace.project,
-            kicker: `等你决定 · 不急，之后在任务面板上选也行`,
+            // One word on every card that needs the person, 等你 (2026-11-24): it was 等你决定 / 要你给 / 要你做 by the kind
+            // of thing asked, which the title and the controls under it already say, plus 「不急，之后在任务面板上选也行」
+            // on every card, which was noise
+            kicker: `等你`,
             title: h.title,
             body: h.steps || undefined,
             tone: "info",
@@ -247,7 +250,7 @@ export function ask_human(input: any, ctx: Ctx) {
             type: "task-step",
             ref: h.id,
             project: ctx.workspace.project,
-            kicker: `要你做${left}`,
+            kicker: `等你${left}`,
             title: h.title,
             body: `${h.steps ?? ""}${back}${h.handBack.kind === "secret" ? `\n\n做完在任务面板上 ${t.id} 的卡片里存密钥。` : ""}`,
             tone: "warn",
@@ -416,7 +419,7 @@ function questionCard(h: Ask, ctx: Ctx) {
       type: "task-step",
       ref,
       project: ctx.workspace.project,
-      kicker: `${choice ? "等你决定" : "要你给"} · 不急，之后在任务面板上答也行`,
+      kicker: `等你`,
       title: q.title,
       body: [q.steps, !choice && q.label ? `要交回：${q.label}` : ""].filter(Boolean).join("\n\n") || undefined,
       tone: "info",

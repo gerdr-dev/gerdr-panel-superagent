@@ -708,7 +708,7 @@ type SecAsk = { id: string; title: string; kind: string; at: number };
 /** The secretary's open questions as rows over its chat: each jumps to its card, ✕ ignores it (as the card's ✕). */
 function secItems(open: SecAsk[]): ChatItem[] {
   return open.map((a) => ({
-    text: `${a.kind === "none" ? "要你做" : "待你答"}：${a.title}`,
+    text: `等你：${a.title}`,
     jump: a.id,
     onDismiss: () => run("tasks.ignore", { id: a.id }),
     dismissTitle: "忽略：不答了（多半已经过时），秘书下一轮开头会知道",
@@ -725,18 +725,18 @@ function useLiveMain<T extends { id: string; status: string; waiting?: string }>
 let openChat: (session: string, task?: string) => void = () => {};
 
 /**
- * What its worker asked of the user and is still waiting for, one line each ("待你答：…"; no ids: the user found "t124"
+ * What its worker asked of the user and is still waiting for, one line each ("等你：…"; no ids: the user found "t124"
  * on a question of t123 one more thing to decode, 2026-11-16): under the drawer's title and on the card, so the board
  * says what it waits for without opening it. Each jumps to its card in the chat.
  */
 function userSteps(t: Task): ChatItem[] {
   return openAsks(t).flatMap((h) => {
     // Several questions in one ask: a row each (each has its card in the chat), still one thing on the board
-    if (h.questions) return unanswered(h).map((q) => ({ text: `待你答：${q.title}`, jump: `${h.id}#${q.id}` }));
+    if (h.questions) return unanswered(h).map((q) => ({ text: `等你：${q.title}`, jump: `${h.id}#${q.id}` }));
     const left = h.expiresAt ? (h.expiresAt > Date.now() ? `（还剩 ${Math.round((h.expiresAt - Date.now()) / 60000)} 分钟）` : "（已过期）") : "";
     // A secret is stored and an expired link redone on the board, not in the chat's card: those open the ask itself
     const board = h.handBack.kind === "secret" || (!!h.expiresAt && h.expiresAt < Date.now());
-    return [{ text: `${h.handBack.kind === "choice" ? "待决定" : "要你做"}：${h.title}${left}`, jump: h.id, ...(board ? { onClick: () => openAsk(h.id) } : {}) }];
+    return [{ text: `等你：${h.title}${left}`, jump: h.id, ...(board ? { onClick: () => openAsk(h.id) } : {}) }];
   });
 }
 
