@@ -63,6 +63,8 @@ const base = (p?: string) => (p ?? "").replace(/\/+$/, "").split("/").pop() ?? "
 
 type Main = { id: string; status: string; waiting?: string } | null;
 type Sess = { id: string; status: string; tags?: Record<string, string> };
+/** What the functions last answered, for the next mount to start from. */
+const last: { main: Main; asks: number; standing: Record<string, "review" | "done">; agents: AgentOpt[]; agent: string } = { main: null, asks: 0, standing: {}, agents: [], agent: "" };
 type Status = "todo" | "running" | "review" | "done";
 const LABEL: Record<Status, string> = { todo: "待办", running: "进行中", review: "待验收", done: "已完成" };
 const ICON: Record<"running" | "review" | "done", React.ReactNode> = { running: <CircleDashed />, review: <CircleDot />, done: <CheckCircle2 /> };
@@ -73,13 +75,19 @@ export function CodeSection() {
   const { tasks, act } = useTasks();
   const cur = useCodeSession();
   const rows = useCodeRows();
-  const [main, setMain] = useState<Main>(null);
-  const [asks, setAsks] = useState(0);
+  // From what was last known (see lib/tasks.ts lastTasks: this mounts anew with every opening of a phone's drawer)
+  const [main, setMain] = useState<Main>(last.main);
+  const [asks, setAsks] = useState(last.asks);
   // Which session is the secretary only changes with the log (pushed); its status is followed live below
   useRefresh(
     () =>
       run<{ main: Main; asks?: { open: unknown[] } }>("superagent.log", { limit: 1 }).then(
-        (r) => (setMain(r.main), setAsks(r.asks?.open?.length ?? 0)),
+        (r) => {
+          last.main = r.main;
+          last.asks = r.asks?.open?.length ?? 0;
+          setMain(last.main);
+          setAsks(last.asks);
+        },
         () => {},
       ),
     [usePanelChange("user/data")],
@@ -100,7 +108,9 @@ export function CodeSection() {
         );
 
   // Where the person's own conversations stand (local/own.ts); a move shows at once, the file follows
-  const [standing, setStanding] = useState<Record<string, "review" | "done">>({});
+  const [standing, setStanding0] = useState<Record<string, "review" | "done">>(last.standing);
+  const setStanding = (f: Record<string, "review" | "done"> | ((cur: Record<string, "review" | "done">) => Record<string, "review" | "done">)) =>
+    setStanding0((cur) => (last.standing = typeof f === "function" ? f(cur) : f));
   useRefresh(() => run<{ standing: Record<string, "review" | "done"> }>("own.get").then((r) => setStanding(r.standing), () => {}), [usePanelChange("user/data")], { poll: 30_000 });
   const moveOwn = (session: string, to: Status) => {
     if (to === "todo") return void toast?.error?.("已经开着的对话回不到待办");
@@ -145,7 +155,10 @@ export function CodeSection() {
   // they move one, 等你 while its agent waits on them. What isn't a conversation (a terminal, a file, a browser page)
   // has no standing: 其他.
   const isMain = (id?: string) => !!id && (id === main?.id || byId[id]?.tags?.superagent === "main");
-  const own = rows.filter((r) => (r.kind === "session" || r.kind === "new") && !(r.session && (taskOf.has(r.session) || isMain(r.session))));
+  // Before the tasks are known at all (the very first load), a worker's pane is told by its tag and waits for its
+  // task rather than show among the person's own and jump groups a second later
+  const unknownTask = (id: string) => tasks == null && !!byId[id]?.tags?.task;
+  const own = rows.filter((r) => (r.kind === "session" || r.kind === "new") && !(r.session && (taskOf.has(r.session) || isMain(r.session) || unknownTask(r.session))));
   const needs = (r: CodeRowInfo) => !!r.session && (byId[r.session]?.status === "waiting" || byId[r.session]?.status === "error");
   const stands = (r: CodeRowInfo) => (r.session ? standing[r.session] : undefined);
   const youOwn = own.filter((r) => needs(r) && stands(r) !== "done");
@@ -340,8 +353,10 @@ type AgentOpt = { id: string; name: string; default?: boolean };
  * A native select: the panel's own menus are portaled into its page, which isn't drawn while Code shows.
  */
 function AgentPick({ main, current }: { main?: string; current?: string }) {
-  const [agents, setAgents] = useState<AgentOpt[]>([]);
-  const [agent, setAgent] = useState("");
+  const [agents, setAgents0] = useState<AgentOpt[]>(last.agents);
+  const [agent, setAgent0] = useState(last.agent);
+  const setAgents = (a: AgentOpt[]) => setAgents0((last.agents = a));
+  const setAgent = (a: string) => setAgent0((last.agent = a));
   const [busy, setBusy] = useState(false);
   const changed = usePanelChange("user");
   useRefresh(() => run<{ settings: { router: { agent: string } } }>("settings.get").then((r) => setAgent(r.settings.router.agent ?? ""), () => {}), [changed], { fallback: 600_000, poll: 600_000 });

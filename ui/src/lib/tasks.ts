@@ -124,8 +124,19 @@ export type Task = {
  * shows — workers and the helpers they handed work to (pushed too). A slow fallback catches what isn't pushed (a
  * file an agent edited directly); an older Gerdr pushes nothing, and the board polls every 5 s as it used to.
  */
+/**
+ * What tasks.list last answered, kept for the next mount. The list is drawn inside Gerdr's own list, which a phone
+ * mounts anew every time its drawer opens: starting from nothing each time, the tasks came a second or two after
+ * the rows Gerdr already knows (tasks.list reads every worker's conversation), and until then a worker's pane was
+ * listed as one of the person's own. From the last answer, then refreshed as before.
+ */
+let lastTasks: Task[] | null = null;
+
 export function useTasks() {
-  const [tasks, setTasks] = useState<Task[] | null>(null);
+  const [tasks, setTasks] = useState<Task[] | null>(lastTasks);
+  useEffect(() => {
+    lastTasks = tasks;
+  }, [tasks]);
   // How many tasks are archived (local/_archive.ts): the 已完成 column offers them
   const [archived, setArchived] = useState(0);
   const [error, setError] = useState("");
