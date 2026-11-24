@@ -592,7 +592,7 @@ t123（PortAI 计费税率，portai 仓库）要在新后台 portai-console 加�
 | Source / Trigger / Thread / Channel | Gerdr 的事件（插件、轮询）/ 一个事件 / 事件的 `key` / 事件的 `reply` |
 | Gate（准入，代码判断） | 触发器文件里的 `input.allow`（「只收这些人」），按事件的 `actor` 比（`inbox.onEvent`） |
 | Eval + Main Session | 调度会话（`_main.ts`）：一直开着，只分派，消息一次 `superagent.decide` 给出一批决定，看板任务用看板的命令 |
-| Decision：accept / stop / ignore / unavailable | 接（建任务派出）/ 停 / 不接（带理由，可回一句）/ 没判断成；另加「并进」（attach） |
+| Decision：accept / stop / ignore / unavailable | 接（建任务派出）/ 停 / 不接（带理由，可回一句）/ 没判断成；另加「并进」（attach）、「等你」（wait：先问了用户） |
 | Ticket / Assignment | 任务 / 任务的 worker 会话（`sessions`） |
 | Subscription | 任务的 `threads`：这段对话里的后续直接交给它，不再评估 |
 | Disposition（去向） | `user/data/superagent.json` 的 `items`，界面「去向」 |
@@ -601,7 +601,8 @@ t123（PortAI 计费税率，portai 仓库）要在新后台 portai-console 加�
   它一卡住，后面的消息全堵着。忙的时候来的新东西用普通发送（不是立即发送），排到它下一个停顿，一批一起看。
 - **会话一直用、靠压缩**见上面「秘书」。用户的规则（仓库、模型、角色）在它的系统提示词文件里，变了就重写，下一条消息前面附一行让它重读。
 - **没给决定要看得出来**：它空闲了一阵、消息还挂着，就记成「没判断成」，任务退回待办（`sweep`，每次刷新看板时跑）。
-  理由写秘书那一轮说的第一段（多半是在问用户），不只写「没给决定」。用户答了以后秘书照样用 decide 给这条 cN 决定（accept 才带上来源，
+  理由写秘书那一轮说的第一段，不只写「没给决定」。先问用户才定得了的，秘书给 `wait`（reason 写问了什么）：
+  记成「等你」，看板上方提示去秘书那里答，不算没判断成；之后照样 decide。用户答了以后秘书照样用 decide 给这条 cN 决定（accept 才带上来源，
   对方的后续才进任务）；它已经自己 tasks.add 建了，就 attach 带 `told: true` 只挂上不再转一遍（2026-11-24，c623：秘书问完用户自己建了
   t277，消息一直挂着「没判断成」）。
   「去向」里能「重新判断」，不接 / 没收的也能，可以附一句意见（`hint`，跟消息和上次的决定一起给秘书，记在条目上）；在判断 / 没判断成的也能手动「关掉」（`superagent.dismiss`，记成没接，

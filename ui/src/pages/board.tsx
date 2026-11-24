@@ -631,10 +631,13 @@ function Alerts({ onLog }: { onLog: () => void }) {
   const day = Date.now() - 24 * 3600_000;
   const items = log?.items ?? [];
   const unavailable = items.filter((x) => x.state === "unavailable").length;
+  const waiting = items.filter((x) => x.state === "waiting").length;
   const observed = items.filter((x) => x.state === "observed" && x.at > day).length;
   const problems: { text: string; label: string; go: () => void }[] = [];
   if (m?.status === "waiting") problems.push({ text: `Superagent 在问你：${m.waiting ?? "去它的对话里看看"}`, label: "去回答", go: () => openChat(m.id) });
   if (m?.status === "error") problems.push({ text: "秘书的会话出错了：下一件事来时会换一个新的", label: "看看", go: () => openChat(m.id) });
+  // Answered in the secretary's chat, where it asked
+  if (waiting && log?.main) problems.push({ text: `${waiting} 条消息秘书在等你答`, label: "去回答", go: () => openChat(log.main!.id) });
   if (unavailable) problems.push({ text: `${unavailable} 条消息 Superagent 没给决定`, label: "去向", go: onLog });
   if (observed) problems.push({ text: `主动工作今天记了 ${observed} 条「本来会接」：看对不对，对的点照做`, label: "去向", go: onLog });
   if (!problems.length) return null;

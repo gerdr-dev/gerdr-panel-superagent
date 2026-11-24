@@ -9,12 +9,13 @@ import { secAsks } from "./_secask";
 
 /** task: on a reroute, an existing worker of the card kept for this part (it is told, not restarted). */
 type Part = { repo: string; agent?: string; model?: string; effort?: string; worktree?: boolean; title?: string; prompt?: string; task?: string };
-type Decision = { item: string; decision?: "accept" | "attach" | "stop" | "ignore"; title?: string; parts?: Part[]; task?: string; reason?: string; reply?: string; rule?: string; told?: boolean };
+type Decision = { item: string; decision?: "accept" | "attach" | "stop" | "ignore" | "wait"; title?: string; parts?: Part[]; task?: string; reason?: string; reply?: string; rule?: string; told?: boolean };
 
 /**
  * The main session's decisions on a batch, in one call: { decisions: [{ item, decision?, title?, parts?, task?,
  * reason?, reply? }] }. A board task (item tN) only needs parts. A message (item cN): accept (with parts) / attach
- * (task; told: true when the task already has the message, only linked) / stop (task, reason) / ignore (reason, reply?). Each is applied on its own; the ones that failed are
+ * (task; told: true when the task already has the message, only linked) / stop (task, reason) / ignore (reason, reply?) /
+ * wait (reason: what it asked the user; decided again once they answer). Each is applied on its own; the ones that failed are
  * reported together, so it fixes and resends only those.
  */
 export async function decide(input: { decisions: Decision[] }, ctx: Ctx) {
@@ -38,7 +39,7 @@ async function one(d: Decision, ctx: Ctx) {
   const it = findItem(state(ctx), d?.item ?? "");
   // Closed by the user from 去向 while it was being judged: nothing left to do, not an error for the secretary
   if (it.dismissed && it.state === "ignored") return { item: it.id, note: "用户已经手动关掉了这条，不用再处理" };
-  if (it.state !== "pending" && it.state !== "unavailable") throw new Error(`已经处理过了（${it.state}）`);
+  if (it.state !== "pending" && it.state !== "unavailable" && it.state !== "waiting") throw new Error(`已经处理过了（${it.state}）`);
   const e = it.event;
   const settle = (patch: Partial<Item>) =>
     updateState(ctx, (s) => Object.assign(findItem(s, it.id), { decidedAt: Date.now(), ...patch }));
@@ -78,6 +79,13 @@ async function one(d: Decision, ctx: Ctx) {
       answer(ctx, it, `好，${t.id}「${t.title}」停了。`);
       return { item: it.id, stopped: t.id };
     }
+    case "wait": {
+      // Asked the user first (2026-11-24, c623: "要不要建个任务估排期？"): its own state, not 没判断成, until a later
+      // decide settles it
+      if (!d.reason?.trim()) throw new Error("wait 要写 reason：问了用户什么");
+      settle({ state: "waiting", reason: d.reason.trim() });
+      return { item: it.id, waiting: true, note: "用户答了以后再 decide 这一条" };
+    }
     case "ignore": {
       if (!d.reason) throw new Error("ignore 要写 reason");
       settle({ state: "ignored", reason: d.reason });
@@ -85,7 +93,7 @@ async function one(d: Decision, ctx: Ctx) {
       return { item: it.id, ignored: true };
     }
     default:
-      throw new Error(`decision 是 accept / attach / stop / ignore 之一，不是「${d.decision ?? ""}」`);
+      throw new Error(`decision 是 accept / attach / stop / ignore / wait 之一，不是「${d.decision ?? ""}」`);
   }
 }
 
@@ -326,7 +334,7 @@ export function log(input: { limit?: number }, ctx: Ctx) {
 }
 
 /**
- * Closes events by hand: { ids } — pending (still being judged) or unavailable ones the user doesn't want handled.
+ * Closes events by hand: { ids } — pending (still being judged), waiting or unavailable ones the user doesn't want handled.
  * They become 没接 with the user as the reason, so they leave the board's alert and can still be judged again.
  */
 export function dismiss(input: { ids: string[] }, ctx: Ctx) {
@@ -334,7 +342,7 @@ export function dismiss(input: { ids: string[] }, ctx: Ctx) {
   updateState(ctx, (s) => {
     for (const id of ids) {
       const it = findItem(s, id);
-      if (it.state !== "pending" && it.state !== "unavailable") throw new Error(`${id} 已经处理过了（${it.state}）`);
+      if (it.state !== "pending" && it.state !== "unavailable" && it.state !== "waiting") throw new Error(`${id} 已经处理过了（${it.state}）`);
     }
     for (const id of ids) Object.assign(findItem(s, id), { state: "ignored", dismissed: true, reason: "你手动关掉了", decidedAt: Date.now() });
   });

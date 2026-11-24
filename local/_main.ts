@@ -72,13 +72,14 @@ export function contextLines(e: Ev, only?: (c: NonNullable<Ev["context"]>[number
 
 /**
  * One event and where it went (dsh's Disposition): filtered by the gate, delivered to subscribed tasks, or through
- * Eval: pending → accepted / attached / stopped / ignored, or unavailable (the main session gave no decision).
+ * Eval: pending → accepted / attached / stopped / ignored, waiting (the secretary asked the user first: decided
+ * once they answer), or unavailable (the main session gave no decision).
  */
 export type Item = {
   id: string;
   at: number;
   event: Ev;
-  state: "filtered" | "delivered" | "pending" | "accepted" | "attached" | "stopped" | "ignored" | "unavailable" | "observed";
+  state: "filtered" | "delivered" | "pending" | "accepted" | "attached" | "stopped" | "ignored" | "unavailable" | "observed" | "waiting";
   /**
    * Not addressed to the agent (the trigger says so: a channel message without @, an alert, an MR nobody follows):
    * dsh's inferred strength. Taken only under a rule from skills/…/proactive.md, and in observe mode only recorded.
@@ -359,7 +360,9 @@ async function brief(ctx: Ctx): Promise<string> {
         ? `- decide 的 accept 会替你建任务，但**不派出去**：放进任务面板的「待办」，用户看过、改好再派（他的设置）。parts 照常写，会成为卡片上的仓库和 agent；拆成几份就是几张卡。` +
           `记下这条消息的去向；回不回原对话、什么时候回，按他的设置自动处理，你不用另外回。\n\n`
         : `- decide 会替你建任务、派出去、记下这条消息的去向；回不回原对话按用户的设置自动处理。\n`) +
-      `- 一轮里没给决定的 [消息 cN]（比如先问了用户、等他补信息）一直挂在「去向」里，标着没判断成。用户答了以后照样用 superagent.decide 给这条 cN 决定：` +
+      `- 要先问用户才定得了的 [消息 cN]（排期、该谁做、缺信息）：问的同时给它 ${ex({ item: "c7", decision: "wait", reason: "问用户：要不要估排期、哪个仓库" })}，` +
+      `它在「去向」里标着「等你」，不会当成没判断成。一轮里什么决定都没给的，标着没判断成。` +
+      `两种都一样：用户答了以后照样用 superagent.decide 给这条 cN 决定：` +
       `accept 会建任务派出去，并记下它从哪个对话来（对方在那里的后续直接交给这个任务，回不回对方按用户的设置）；别另用 tasks.add / tasks.dispatch 建，那样这条消息一直挂着，对方的后续也到不了任务。` +
       `已经另建了，就用 attach 把 cN 并进那个任务，加 "told": true（它已经知道这条消息，不再转一遍）。\n` +
       `- 把消息和人对上已有的事：\`gerdr panel run memory.mid\`（中期记忆：agent 记下的眼下的事和人，加上各任务在等外面的什么；可带 '{"q":"词 词"}'），` +

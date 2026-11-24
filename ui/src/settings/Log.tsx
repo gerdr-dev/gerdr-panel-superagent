@@ -13,7 +13,7 @@ import { usePanelChange, useRefresh } from "../lib/visible";
 type Item = {
   id: string;
   at: number;
-  state: "filtered" | "delivered" | "pending" | "accepted" | "attached" | "stopped" | "ignored" | "unavailable" | "observed";
+  state: "filtered" | "delivered" | "pending" | "accepted" | "attached" | "stopped" | "ignored" | "unavailable" | "observed" | "waiting";
   reason?: string;
   inferred?: boolean;
   rule?: string;
@@ -26,6 +26,7 @@ type Item = {
 
 const STATE: Record<Item["state"], { label: string; tone: string }> = {
   pending: { label: "在判断", tone: "text-brand" },
+  waiting: { label: "等你", tone: "text-warn" },
   unavailable: { label: "没判断成", tone: "text-warn" },
   observed: { label: "本来会接", tone: "text-brand" },
   accepted: { label: "建了任务", tone: "text-ok" },
@@ -45,7 +46,7 @@ export default function Log({ onTask }: { onTask: (id: string) => void }) {
       (e) => setErr(String(e.message || e)),
     );
   useRefresh(load, [usePanelChange("user/data")], { poll: 10_000 });
-  const top = (x: Item) => x.state === "unavailable" || x.state === "observed";
+  const top = (x: Item) => x.state === "waiting" || x.state === "unavailable" || x.state === "observed";
   const first = (items ?? []).filter(top);
   const rest = (items ?? []).filter((x) => !top(x));
   return (
@@ -81,7 +82,7 @@ function Row({ x, onTask, onRetried }: { x: Item; onTask: (id: string) => void; 
   const e = x.event;
   const again = x.state === "ignored" || x.state === "filtered" || x.state === "unavailable";
   const doIt = x.state === "observed" && !!x.would;
-  const close = x.state === "pending" || x.state === "unavailable";
+  const close = x.state === "pending" || x.state === "unavailable" || x.state === "waiting";
   const call = async (fn: string, input: unknown) => {
     setBusy(true);
     setErr("");
@@ -126,7 +127,7 @@ function Row({ x, onTask, onRetried }: { x: Item; onTask: (id: string) => void; 
           会建「{x.would.title || "（标题取第一行）"}」，派到 {x.would.parts.map((p) => [p.repo.split("/").pop(), p.agent, p.model].filter(Boolean).join(" / ")).join("、")}
         </p>
       )}
-      {x.reason && <p className="text-[12px] text-muted-foreground">{x.state === "pending" ? "" : "理由："}{x.reason}</p>}
+      {x.reason && <p className="text-[12px] text-muted-foreground">{x.state === "pending" ? "" : x.state === "waiting" ? "秘书问你：" : "理由："}{x.reason}</p>}
       {x.hint && <p className="text-[12px] text-muted-foreground">你的意见：{x.hint}</p>}
       {x.handBacks?.map((h) => (
         <p key={h.task} className="text-[12px] text-muted-foreground">
