@@ -1,10 +1,10 @@
 import * as core from "@gerdr/core";
 import clsx from "clsx";
-import { Check, ChevronRight, MessageSquare, Play, Plus, Settings, Undo2 } from "lucide-react";
+import { Ban, Check, ChevronRight, Eye, MessageSquare, Play, Plus, Settings, Undo2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { run } from "../lib/gerdr";
 import { openAsks, type Task, useTasks } from "../lib/tasks";
-import { CodeRow, type CodeRowInfo, newCodeTab, openSettings, showInCode, useCodeRowDrop, useCodeRows, useCodeSession } from "../lib/view";
+import { CodeRow, type CodeRowInfo, newCodeTab, openSettings, showInCode, useCodeRowDrop, useCodeRowMenu, useCodeRows, useCodeSession } from "../lib/view";
 import { usePanelChange, useRefresh, useSessions } from "../lib/visible";
 
 // Code's whole list, drawn by this panel (lib/view.ts, layout.tsx; core CodeView list="replace"): not Code's
@@ -55,6 +55,8 @@ const base = (p?: string) => (p ?? "").replace(/\/+$/, "").split("/").pop() ?? "
 type Main = { id: string; status: string; waiting?: string } | null;
 type Sess = { id: string; status: string; tags?: Record<string, string> };
 type Status = "todo" | "running" | "review" | "done";
+const LABEL: Record<Status, string> = { todo: "待办", running: "进行中", review: "待验收", done: "已完成" };
+const ICON: Record<"running" | "review" | "done", React.ReactNode> = { running: <Undo2 />, review: <Eye />, done: <Check /> };
 /** A task row of ours being dragged (rows that are Code's own are dragged by Code: useCodeRowDrop). */
 const TASK_MIME = "text/x-gerdr-task";
 
@@ -88,6 +90,23 @@ export function CodeSection() {
           (e) => toast?.error?.(String(e?.message ?? e)),
         );
 
+  // Where the person's own conversations stand (local/own.ts); a move shows at once, the file follows
+  const [standing, setStanding] = useState<Record<string, "review" | "done">>({});
+  useRefresh(() => run<{ standing: Record<string, "review" | "done"> }>("own.get").then((r) => setStanding(r.standing), () => {}), [usePanelChange("user/data")], { poll: 30_000 });
+  const moveOwn = (session: string, to: Status) => {
+    if (to === "todo") return void toast?.error?.("已经开着的对话回不到待办");
+    setStanding((cur) => {
+      const next = { ...cur };
+      if (to === "running") delete next[session];
+      else next[session] = to;
+      return next;
+    });
+    run<{ standing: Record<string, "review" | "done"> }>("own.set", { session, status: to }).then(
+      (r) => setStanding(r.standing),
+      (e) => toast?.error?.(String(e?.message ?? e)),
+    );
+  };
+
   const [activeOpen, foldActive] = useFold("active", true);
   const [reviewOpen, foldReview] = useFold("review");
   const [todoOpen, foldTodo] = useFold("todo");
@@ -112,26 +131,41 @@ export function CodeSection() {
     .sort((a, b) => (b.doneAt ?? b.updatedAt) - (a.doneAt ?? a.updatedAt))
     .slice(0, 30);
 
-  // The rest of Code's panes: the person's own conversations (and ours no task has: a helper, an old secretary) stand
-  // where their agent does — waiting on the person, or simply open (进行中, until closed). What isn't a conversation
-  // (a terminal, a file, a browser page) has no standing: 其他.
+  // The rest of Code's panes: the person's own conversations (and ours no task has: a helper, an old secretary). In
+  // the same groups as the tasks and moved the same way, not told apart from them (the person's call): 进行中 until
+  // they move one, 等你 while its agent waits on them. What isn't a conversation (a terminal, a file, a browser page)
+  // has no standing: 其他.
   const isMain = (id?: string) => !!id && (id === main?.id || byId[id]?.tags?.superagent === "main");
   const own = rows.filter((r) => (r.kind === "session" || r.kind === "new") && !(r.session && (taskOf.has(r.session) || isMain(r.session))));
   const needs = (r: CodeRowInfo) => !!r.session && (byId[r.session]?.status === "waiting" || byId[r.session]?.status === "error");
-  const youOwn = own.filter(needs);
-  const activeOwn = own.filter((r) => !needs(r));
+  const stands = (r: CodeRowInfo) => (r.session ? standing[r.session] : undefined);
+  const youOwn = own.filter((r) => needs(r) && stands(r) !== "done");
+  const activeOwn = own.filter((r) => !stands(r) && !needs(r));
+  const reviewOwn = own.filter((r) => stands(r) === "review" && !needs(r));
+  const doneOwn = own.filter((r) => stands(r) === "done");
   const other = rows.filter((r) => r.kind !== "session" && r.kind !== "new");
   const you = youTasks.length + youOwn.length;
 
   const move = (t: Task, to: Status) => act("setStatus", { id: t.id, status: to }).catch((e) => toast?.error?.(String(e?.message ?? e)));
-  // A row dragged onto a group (Code's row: by its conversation; ours: by the task's id): the task takes that status.
-  // Only the person moves a task (DESIGN.md), and this is them doing it. Their own conversations aren't tasks: they
-  // stand where their agent does, there is nothing to move
+  // A row dragged onto a group (Code's row: by its conversation; ours: by the task's id), or 移到… in a menu: it takes
+  // that status. Only the person moves things (DESIGN.md), and this is them doing it. A task and a conversation of
+  // their own move alike; only where it's written differs
   const onMove = (to: Status, row: { session?: string; task?: string }) => {
     const t = row.task ? all.find((x) => x.id === row.task) : row.session ? taskOf.get(row.session) : undefined;
-    if (!t) return void toast?.error?.("这是你自己的对话，不是任务：它开着就在进行中。想让秘书跟着，先把它交给秘书");
-    if (t.status !== to) void move(t, to);
+    if (t) return void (t.status !== to && move(t, to));
+    if (row.session && !isMain(row.session)) moveOwn(row.session, to);
   };
+  // The same moves in the pane's ⋯ menu and the row's right-click menu: the only way on a phone (no hover, no drag)
+  useCodeRowMenu(({ session }) => {
+    if (!session || isMain(session)) return [];
+    const t = taskOf.get(session);
+    const at: Status = t ? (t.status as Status) : (standing[session] ?? "running");
+    const items = (["running", "review", "done"] as const)
+      .filter((to) => to !== at)
+      .map((to) => ({ id: `move-${to}`, label: `移到${LABEL[to]}`, icon: ICON[to], onSelect: () => onMove(to, { session }) }));
+    if (t) items.push({ id: "drop", label: "放弃任务", icon: <Ban />, onSelect: () => void act("drop", { id: t.id }).catch((e) => toast?.error?.(String(e?.message ?? e))) } as any);
+    return items;
+  });
   const taskRow = (t: Task, action: React.ReactNode) => <TaskRow key={t.id} t={t} pane={t.session ? paneOf.get(t.session) : undefined} current={!!t.session && cur === t.session} action={action} />;
   const toReview = (t: Task) => (
     <RowButton title="移到待验收" onClick={() => move(t, "review")}>
@@ -190,12 +224,11 @@ export function CodeSection() {
         )}
       </Drop>
 
-      {/* The task groups stay listed while there are tasks at all, empty ones too: each is where a row is dragged to */}
-      {all.length > 0 && (
-        <>
+      {/* Always listed, empty ones too: each is where a row is dragged to */}
+      <>
           <Drop to="review" onMove={onMove}>
             <FoldTitle open={reviewOpen} onClick={foldReview}>
-              待验收 {review.length}
+              待验收 {review.length + reviewOwn.length}
             </FoldTitle>
             {reviewOpen &&
               review.map((t) =>
@@ -206,6 +239,7 @@ export function CodeSection() {
                   </RowButton>,
                 ),
               )}
+            {reviewOpen && reviewOwn.map(ownRow)}
           </Drop>
           <Drop to="todo" onMove={onMove}>
             <FoldTitle open={todoOpen} onClick={foldTodo}>
@@ -223,8 +257,9 @@ export function CodeSection() {
           </Drop>
           <Drop to="done" onMove={onMove}>
             <FoldTitle open={doneOpen} onClick={foldDone}>
-              已完成 {done.length}
+              已完成 {done.length + doneOwn.length}
             </FoldTitle>
+            {doneOpen && doneOwn.map(ownRow)}
             {doneOpen &&
               done.map((t) =>
                 taskRow(
@@ -235,8 +270,7 @@ export function CodeSection() {
                 ),
               )}
           </Drop>
-        </>
-      )}
+      </>
       {other.length > 0 && (
         <>
           <FoldTitle open={otherOpen} onClick={foldOther}>
