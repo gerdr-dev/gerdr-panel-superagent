@@ -520,7 +520,7 @@ function lastLine(s: string) {
 export function followed(input: unknown, ctx: Ctx) {
   if (!ctx.fs.stat(DIR)) return [];
   const live = load(ctx).store.tasks.filter((t) => t.status !== "done" && t.status !== "dropped");
-  const out: { id: string; on: string; key?: string; fn: string; name?: string; tasks: string[] }[] = [];
+  const out: { id: string; on: string; key?: string; fn: string; name?: string; where?: string; tasks: { id: string; title: string }[] }[] = [];
   for (const f of ctx.fs.list(DIR)) {
     const name = f.path.split("/").pop() ?? "";
     if (f.dir || !name.startsWith(PREFIX) || !name.endsWith(".json")) continue;
@@ -528,8 +528,10 @@ export function followed(input: unknown, ctx: Ctx) {
       const t = JSON.parse(ctx.fs.read(f.path));
       if (t.fn !== FN && t.fn !== STATE_FN) continue;
       const source = t.source || String(t.on).split("/")[0];
-      const tasks = live.filter((x) => follows(x).some((th) => th.source === source && th.key === t.key)).map((x) => `${x.id}「${x.title}」`);
-      out.push({ id: name.slice(0, -5), on: t.on, key: t.key, fn: t.fn, name: t.name, tasks });
+      const waiting = live.filter((x) => follows(x).some((th) => th.source === source && th.key === t.key));
+      // The conversation in words, as wait_for wrote it for the card ("Slack 有人私聊我 · 石石 (Yang Lei)")
+      const where = waiting.flatMap((x) => x.waits ?? []).find((w) => w.on?.source === source && w.on?.key === t.key && w.where)?.where;
+      out.push({ id: name.slice(0, -5), on: t.on, key: t.key, fn: t.fn, name: t.name, where, tasks: waiting.map((x) => ({ id: x.id, title: x.title })) });
     } catch {
       // a broken file is Gerdr's to report
     }

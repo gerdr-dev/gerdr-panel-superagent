@@ -15,7 +15,7 @@ type Source = { on: string; title?: string; description?: string; addon?: string
 /** One of the panel's own triggers (triggers/*.json): always on. */
 type Builtin = { id: string; on: string; name?: string; key?: string; fn?: string; off?: boolean; fixed?: boolean };
 /** A trigger wait_for wrote for a conversation a worker waits on (user/triggers/follow-*.json, waits.followed). */
-type Followed = { id: string; on: string; key?: string; fn: string; name?: string; tasks: string[] };
+type Followed = { id: string; on: string; key?: string; fn: string; name?: string; where?: string; tasks: { id: string; title: string }[] };
 
 /**
  * Where a trigger's events go, in words: every row says it, as "收进来" alone read as "to the secretary" for all of
@@ -90,14 +90,17 @@ export default function TriggersPage() {
             <article key={f.id} className="rounded-xl border bg-card p-4 max-md:p-3">
               <h3 className="flex items-center gap-2 text-[14px] font-medium">
                 <Zap className="size-3.5 text-brand" />
-                {f.name || f.on}
+                {f.where || f.name || f.on}
               </h3>
               <p className="mt-0.5 text-[12px] text-muted-foreground">
                 <span className="font-mono">{f.on}</span>
                 {f.key && <> · 只要 <span className="font-mono">{f.key}</span></>}
-                {f.tasks.length > 0 ? <> · 在等的：{f.tasks.join("、")}</> : <> · 已经没有任务在等，稍后收掉</>}
               </p>
-              <Dest fn={f.fn} />
+              {/* Who gets it, by name: "the worker waiting on it" said nothing about which (2026-11-24) */}
+              <p className="mt-1 text-[12px] text-muted-foreground">
+                → {f.tasks.length > 0 ? <>发给 {f.tasks.map((t) => `${t.id}「${t.title}」`).join("、")}，不经过秘书</> : "已经没有任务在等，稍后收掉"}{" "}
+                <span className="font-mono opacity-70">{f.fn}</span>
+              </p>
             </article>
           ))}
         </section>
