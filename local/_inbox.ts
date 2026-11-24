@@ -31,7 +31,8 @@ export function waitingLines(tasks: Listed[]): Line[] {
     if (asks.length) {
       const h = asks[asks.length - 1];
       const left = (h.questions ?? []).filter((q) => !q.dropped && !q.answer);
-      const what = h.questions ? `待你答 ${left.length} 个问题` : h.handBack.kind === "choice" ? "待你决定" : "要你做";
+      // 等你, the one word (local/board.ts kicker); several questions say how many
+      const what = h.questions && left.length > 1 ? `等你 ${left.length}` : "等你";
       const more = asks.length > 1 ? `（还有 ${asks.length - 1} 项）` : "";
       const body = left.length > 1 ? left.map((q) => `· ${q.title}`).join("\n") : t.title;
       items.push({ id: t.id, title: `${t.id} ${what}：${cut(h.title, 80)}${more}`, body, session: t.session });
