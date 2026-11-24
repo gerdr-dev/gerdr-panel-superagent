@@ -21,6 +21,7 @@ type Core = {
   useCodeRows?: () => CodeRowInfo[];
   newCodeTab?: (opts?: { cwd?: string }) => void;
   closeCodeDrawer?: () => void;
+  useCodeDirs?: (dirs: { path: string; name?: string }[]) => void;
   useCodeRowMenu?: (fn: (row: { pane: string; session?: string }) => CodeMenuItem[]) => void;
   useCodeRowDrop?: (fn: (row: { pane: string; session?: string }) => void) => (el: HTMLElement | null) => void;
   showInCodeView?: (session: string) => void;
@@ -37,6 +38,8 @@ export const useCodeRowDrop: (fn: (row: { pane: string; session?: string }) => v
 export type CodeMenuItem = { id: string; label: string; icon?: ReactNode; disabled?: boolean; onSelect: () => void };
 /** Our items in a pane's ⋯ menu and its row's right-click menu (移到…). Without it (an older Gerdr): none there. */
 export const useCodeRowMenu: (fn: (row: { pane: string; session?: string }) => CodeMenuItem[]) => void = c.useCodeRowMenu ?? (() => {});
+/** The folders offered on Code's new-conversation page while we show: ours (设置 → 仓库), not Code's workspaces. */
+export const useCodeDirs: (dirs: { path: string; name?: string }[]) => void = c.useCodeDirs ?? (() => {});
 export const newCodeTab = (opts?: { cwd?: string }) => c.newCodeTab?.(opts);
 // All of it or nothing: the list is ours to draw (list="replace"), from Code's rows
 export const canHostCode = !!c.CodeView && !!c.showInCodeView && !!c.CodeRow && !!c.useCodeRows;

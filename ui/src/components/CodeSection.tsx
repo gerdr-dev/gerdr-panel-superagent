@@ -6,7 +6,7 @@ import { run } from "../lib/gerdr";
 import { WholeWindow } from "../lib/portal";
 import { Select } from "./ui/select";
 import { openAsks, type Task, useTasks } from "../lib/tasks";
-import { CodeRow, type CodeRowInfo, newCodeTab, openSettings, showInCode, useCodeRowDrop, useCodeRowMenu, useCodeRows, useCodeSession } from "../lib/view";
+import { CodeRow, type CodeRowInfo, newCodeTab, useCodeDirs, openSettings, showInCode, useCodeRowDrop, useCodeRowMenu, useCodeRows, useCodeSession } from "../lib/view";
 import { usePanelChange, useRefresh, useSessions } from "../lib/visible";
 
 // Code's whole list, drawn by this panel (lib/view.ts, layout.tsx; core CodeView list="replace"): not Code's
@@ -78,7 +78,7 @@ const base = (p?: string) => (p ?? "").replace(/\/+$/, "").split("/").pop() ?? "
 type Main = { id: string; status: string; waiting?: string } | null;
 type Sess = { id: string; status: string; updatedAt?: number; turn?: { startedAt?: number }; tags?: Record<string, string> };
 /** What the functions last answered, for the next mount to start from. */
-const last: { main: Main; asks: number; standing: Record<string, "review" | "done">; agents: AgentOpt[]; agent: string } = { main: null, asks: 0, standing: {}, agents: [], agent: "" };
+const last: { main: Main; asks: number; standing: Record<string, "review" | "done">; agents: AgentOpt[]; agent: string; repos: { path: string }[] } = { main: null, asks: 0, standing: {}, agents: [], agent: "", repos: [] };
 type Status = "todo" | "running" | "review" | "done";
 const LABEL: Record<Status, string> = { todo: "待办", running: "进行中", review: "待验收", done: "已完成" };
 const ICON: Record<"running" | "review" | "done", React.ReactNode> = { running: <CircleDashed />, review: <CircleDot />, done: <CheckCircle2 /> };
@@ -139,6 +139,13 @@ export function CodeSection() {
       (e) => toast?.error?.(String(e?.message ?? e)),
     );
   };
+
+  // The new-conversation page's quick picks are the repositories in 设置 → 仓库 (the person: that page should take them
+  // from here, not from Code's workspaces, which this panel doesn't show; Code mode keeps its own). The same list the
+  // secretary picks from, so a conversation started by hand lands where one it dispatched would
+  const [repos, setRepos] = useState<{ path: string }[]>(last.repos);
+  useRefresh(() => run<{ settings: { repos: { path: string }[] } }>("settings.get").then((r) => setRepos((last.repos = r.settings.repos ?? [])), () => {}), [usePanelChange("user")], { fallback: 600_000, poll: 600_000 });
+  useCodeDirs(repos.map((r) => ({ path: r.path, name: base(r.path) })));
 
   const [activeOpen, foldActive] = useFold("active", true);
   const [reviewOpen, foldReview] = useFold("review");
