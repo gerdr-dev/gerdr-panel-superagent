@@ -481,7 +481,9 @@ function TaskRow({ t, pane, current, action }: { t: Task; pane?: CodeRowInfo; cu
       )}
       {(line || action) && (
         // Starts where the titles do: the row's left padding + its icon + the gap (28px; a phone's icon is 16px: 30px)
-        <div className="group -mt-0.5 flex min-h-5 items-center gap-1 pr-1 pl-7 max-md:pl-[30px]">
+        // -mt / pb: it belongs to the row above. That row ends in padding (6px in a phone's drawer) and the next one
+        // starts with as much, so at the row's own distance the line sat nearer the row under it than its own
+        <div className="group -mt-1.5 flex items-center gap-1 pr-1 pb-2 pl-7 leading-4 max-md:pl-[30px]">
           <span className={clsx("min-w-0 flex-1 truncate text-[11px]", you ? "text-warn" : "text-muted-foreground")}>{line}</span>
           {action}
         </div>
