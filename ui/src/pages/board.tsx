@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowUp, Ban, Bot, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, Copy, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Plus, Search, Send, Settings, Undo2, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowUp, Ban, Bot, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, Copy, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Plus, Search, Send, Settings, Undo2, X } from "lucide-react";
 import { EditableTitle } from "../components/EditableTitle";
 import clsx from "clsx";
 import { type KeyboardEvent as ReactKeyEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -25,6 +25,7 @@ import { usePhone, useSwipePages } from "../lib/swipe";
 import { convo, parseConvo } from "../lib/convo";
 import { usePanelChange, useRefresh, useSessions } from "../lib/visible";
 import { useLocation } from "react-router";
+import { canHostCode, setView } from "../lib/view";
 import { createPortal } from "react-dom";
 import { usePortalContainer } from "../lib/portal";
 
@@ -475,6 +476,13 @@ export default function BoardPage() {
         {/* Left: the secretary's conversation (a drawer) and where outside messages went; right: settings, a new task.
             Until 2026-11-16 a 秘书 / 任务面板 switch sat here too, a second way into the same conversation */}
         <div className="flex shrink-0 items-center gap-1 max-md:gap-0">
+          {/* The board is the second view here: back to Code with the secretary's part in its list (lib/view.ts) */}
+          {canHostCode && (
+            <Button variant="ghost" size="sm" title="回到 Code：秘书和它派出去的任务在左边列表顶上" onClick={() => setView("code")}>
+              <ArrowLeft className="size-4" />
+              <span className="max-md:hidden">Code</span>
+            </Button>
+          )}
           <MainButton onOpen={(id) => (setOpen(""), setPeek({ session: id }))} onAsks={setSec} />
           <Button variant="ghost" size="sm" className={clsx(phoneMenu && "max-md:hidden")} title="外面来的每条消息去了哪：交给了哪个任务、为什么没接" onClick={() => setSettings("log")}>
             <Inbox className="size-4" />
