@@ -100,6 +100,7 @@ export function CodeSection() {
       <RowShell current={!!main && cur === main.id} onClick={openMain} title="和秘书说话：交给它的事、它怎么判断外面来的消息、派给了谁，都在这段对话里">
         <MessageSquare className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate">秘书</span>
+        <AgentPick main={main?.id} current={cur} />
         {asks > 0 ? (
           <span className="shrink-0 rounded-full bg-warn px-1.5 text-[10px] leading-4 font-semibold text-background tabular-nums">{asks} 个问题</span>
         ) : (
@@ -138,6 +139,58 @@ export function CodeSection() {
       )}
       <div className="mx-1.5 mt-1.5 border-b" />
     </div>
+  );
+}
+
+type AgentOpt = { id: string; name: string; default?: boolean };
+
+/**
+ * Which agent the secretary runs as, changed on its row: the same setting as 设置 → 谁派活 (settings.router.agent),
+ * here because in the Code view the settings are two clicks away in the board. Who a conversation runs as is fixed
+ * when it starts, so a change means a new conversation that carries the old one on (local/_main.ts); it is started
+ * right away when the secretary is idle, and shown in place of the old one if that was the pane in front. Model and
+ * effort go back to the new agent's defaults: they are names of the old agent's.
+ * A native select: the panel's own menus are portaled into its page, which isn't drawn while Code shows.
+ */
+function AgentPick({ main, current }: { main?: string; current?: string }) {
+  const [agents, setAgents] = useState<AgentOpt[]>([]);
+  const [agent, setAgent] = useState("");
+  const [busy, setBusy] = useState(false);
+  const changed = usePanelChange("user");
+  useRefresh(() => run<{ settings: { router: { agent: string } } }>("settings.get").then((r) => setAgent(r.settings.router.agent ?? ""), () => {}), [changed], { fallback: 600_000, poll: 600_000 });
+  // The list comes from Gerdr's own config (a few commands): once, not with every change of ours
+  useRefresh(() => run<AgentOpt[]>("settings.agents").then(setAgents, () => {}), [], { fallback: 600_000, poll: 600_000 });
+  if (!agents.length) return null;
+  const def = agents.find((a) => a.default);
+  const pick = async (id: string) => {
+    setBusy(true);
+    setAgent(id);
+    try {
+      await run("settings.set", { router: { agent: id, model: "", effort: "" } });
+      const r = await run<{ main: string }>("secretary.open", {});
+      if (main && current === main && r.main !== main) showInCode(r.main);
+    } catch (e: any) {
+      toast?.error?.(String(e?.message ?? e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <select
+      value={agent}
+      disabled={busy}
+      title="秘书用哪个 agent：换了之后新开一段对话接着聊（之前说的都带着）；秘书正忙时，等它这一轮结束后的下一条消息起生效"
+      className="max-w-[45%] shrink-0 cursor-pointer appearance-none truncate rounded-sm bg-transparent px-1 text-right text-[11px] text-muted-foreground outline-none hover:bg-muted hover:text-foreground disabled:opacity-50"
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => void pick(e.target.value)}
+    >
+      <option value="">{def ? `默认（${def.name}）` : "默认"}</option>
+      {agents.map((a) => (
+        <option key={a.id} value={a.id}>
+          {a.name}
+        </option>
+      ))}
+    </select>
   );
 }
 
