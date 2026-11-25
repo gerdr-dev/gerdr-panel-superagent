@@ -100,10 +100,11 @@ function resolve(ctx: Ctx, conv: string): { source: string; key: string; where: 
   const asMr = mrConversation(c);
   if (asMr) return asMr;
   const since = Date.now() - 30 * DAY;
-  // Slack (slack-me) keys a DM, group DM or small channel by its id and its threads as <channel>/<thread ts>; a channel
-  // you're only @-mentioned in, by thread alone (<channel>/<ts of the first message>). So a bare C… id matches only a
-  // small channel's top level: 2026-11-23 a worker gave one for the thread it was @-mentioned in and was told the
-  // channel didn't exist. A message link or the event's id names the thread itself.
+  // Slack (slack-me) keys a DM, group DM or small channel by its id and its threads as <channel>/<thread ts>; a big
+  // channel by thread (<channel>/<ts of the first message>: one you're @-mentioned or spoke in, slack-me 0.4 hears
+  // all of it), its top level by its id only for a while after you spoke there. So a bare C… id rarely matches: 2026-11-23 a
+  // worker gave one for the thread it was @-mentioned in and was told the channel didn't exist. A message link or the
+  // event's id names the thread itself.
   const keys: string[] = [c];
   const link = /\/archives\/([A-Z0-9]+)\/p(\d{10})(\d{6})/.exec(c);
   const evId = /^[\w-]+:([A-Z0-9]+):(\d+\.\d+)$/.exec(c);
@@ -136,9 +137,9 @@ function resolve(ctx: Ctx, conv: string): { source: string; key: string; where: 
   const chan = /^[CG][A-Z0-9]+$/.test(c) ? c : "";
   if (chan && ctx.events.list({ key: `${chan}/*`, since, limit: 1 }).length)
     throw new Error(
-      `「${c}」这个频道只有 @ 你的消息会进来，按线程算对话，单给频道 id 对不上：` +
-        `给那条消息的事件 id（slack-me:${c}:<ts>）或消息链接。注意同事在这里不 @ 你的回话叫不醒你；` +
-        `要等他回话，换成私信，或者让用户在 slack-me 插件设置里打开「小频道全收」（几个人的频道每句话都进来）`,
+      `「${c}」这个频道按线程算对话，单给频道 id 对不上：给那条消息的事件 id（slack-me:${c}:<ts>）或消息链接。` +
+        `用户（或你以他的身份）在那个线程里说过话、被 @ 过，同事之后不 @ 的回话也会进来；没参与过的线程叫不醒你，` +
+        `要等他回话就先在线程里回他一句，或者换成私信`,
     );
   throw new Error(
     `没找到「${c}」这个对话：最近 30 天没有它的消息进来（可能这个来源的插件没开，或者写的不是频道 / 私信 id）。` +
