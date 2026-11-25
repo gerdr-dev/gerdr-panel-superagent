@@ -225,8 +225,8 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   for (const r of rows) if (r.session && r.kind === "session" && !paneOf.has(r.session)) paneOf.set(r.session, r);
   const byRecent = (a: Task, b: Task) => b.updatedAt - a.updatedAt;
   const running = all.filter((t) => t.status === "running");
-  const youTasks = running.filter((t) => t.column === "you").sort(byRecent);
-  const activeTasks = running.filter((t) => t.column !== "you").sort(byRecent);
+  const youTasks = running.filter(needsPerson).sort(byRecent);
+  const activeTasks = running.filter((t) => !needsPerson(t)).sort(byRecent);
   const review = all.filter((t) => t.status === "review").sort(byRecent);
   const todo = all.filter((t) => t.status === "todo").sort(byRecent);
   // The ones not archived yet (local/_archive.ts moves old ones out): the newest few are enough here
@@ -307,7 +307,7 @@ export function Fusion({ children }: { children: React.ReactNode }) {
     if (!session || isMain(session)) return null;
     const t = taskOf.get(session);
     const at: Status = t ? (t.status as Status) : (standing[session] ?? "running");
-    const waits = at === "running" && (t ? t.column === "you" : byId[session]?.status === "waiting" || byId[session]?.status === "error");
+    const waits = at === "running" && (t ? needsPerson(t) : byId[session]?.status === "waiting" || byId[session]?.status === "error");
     const items = t
       ? taskItems(t)
       : (["running", "review", "done"] as const).filter((to) => to !== at).map((to) => ({ id: `move-${to}`, label: `移到${LABEL[to]}`, icon: ICON[to], onSelect: () => onMove(to, { session }) }));
@@ -555,6 +555,11 @@ function RowButton({ title, onClick, children }: { title: string; onClick: () =>
   );
 }
 
+/** What its worker wrote to a chat and holds for the person to send or not (local/outbox.ts). */
+const heldOut = (t: Task) => (t.outbox ?? []).filter((o) => o.state === "pending");
+/** The task waits on the person: its worker asked or stopped on them (tasks.list `column`), or holds a reply for them to send. */
+const needsPerson = (t: Task) => t.column === "you" || heldOut(t).length > 0;
+
 /** `text` without `title` at its start (and the punctuation that joined them); all of it when it doesn't start so. */
 function sameStart(text: string, title: string): string {
   const a = text.trim();
@@ -565,6 +570,10 @@ function sameStart(text: string, title: string): string {
 
 /** What the row says under its title: what it waits on the person for, else the newest line of its worker. */
 function lineOf(t: Task): string {
+  // A reply its worker wrote to someone outside, held for the person to send or not: theirs to act on first (they
+  // are waited for outside), and nothing said so in the list — the row looked like any task at work
+  const out = heldOut(t);
+  if (out.length) return `等你${out.length > 1 ? ` ${out.length}` : ""}：发不发给 ${out[0].where}`;
   if (t.column === "you") {
     // What waits on the person, counted as they would: an ask with several questions is that many things to
     // answer, not one (a card), and a step to do isn't a question. The worker's own title for the card isn't used
@@ -593,7 +602,7 @@ function lineOf(t: Task): string {
  * on the person for, or its worker's newest line, and the one move that makes sense from where it stands.
  */
 function TaskRow({ t, pane, current, action, agent, menu, onDetail }: { t: Task; pane?: CodeRowInfo; current: boolean; action?: React.ReactNode; agent?: string; menu: RowMenuItem[]; onDetail: () => void }) {
-  const you = t.column === "you" && t.status === "running";
+  const you = needsPerson(t) && t.status === "running";
   const busy = t.live?.status === "running";
   const line = lineOf(t) || (t.status === "todo" ? "还没派出去" : "");
   // The task's number leads its line: the secretary, the workers, 去向 and the cards all name tasks by it (t202), and
