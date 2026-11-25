@@ -22,7 +22,7 @@ export function askState(a: Ask, qid?: string) {
     const status = q.dropped || a.status === "dropped" ? "dropped" : q.answer ? "done" : "todo";
     // Answered while the ask's other questions aren't: nothing has gone to the worker yet (answerQuestion holds them
     // all). The card said 已处理 and the user waited for a worker that was never told (t93, 2026-11-25)
-    const rest = a.status === "open" && q.answer ? (a.questions ?? []).filter((x) => !x.dropped && !x.answer).map((x) => x.title) : [];
+    const rest = a.status === "open" && q.answer ? (a.questions ?? []).filter((x) => !x.dropped && !x.answer).map((x) => ({ ref: `${a.id}#${x.id}`, title: x.title })) : [];
     return { status, title: q.title, handedBack: q.answer, kind: q.kind, reason: q.dropped, ...(rest.length ? { rest } : {}) };
   }
   const back = a.handBack.kind === "secret" ? undefined : a.handedBack;

@@ -2,12 +2,13 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { X, Activity, AlarmClock, BookmarkPlus, Check, CircleCheck, CornerUpLeft, Eye, FileText, Hourglass, Link2, MessageSquare, Pencil, Send, SquareTerminal, Undo2, UserPlus, Users } from "lucide-react";
 import { DefaultCard, registerCard, type CardProps } from "@gerdr/core";
 import { run } from "./lib/gerdr";
+import { jumpInCode } from "./lib/view";
 import { boardFresh, cardState, onCardStates } from "./lib/cardstates";
 
 // Cards the board's panel tools put in a worker's chat (local/board.ts). Gerdr loads this file at start, so they're drawn
 // this way wherever the chat is shown: the board's drawer, or the worker's tab in Code.
 
-type Step = { status: string; handedBack?: string; title?: string; kind?: string; reason?: string; rest?: string[] };
+type Step = { status: string; handedBack?: string; title?: string; kind?: string; reason?: string; rest?: { ref: string; title: string }[] };
 
 // Where a card stands, without asking: the board's last tasks.list carries every card's state (lib/cardstates.ts),
 // so a card in a chat opened from the board draws its real state at once. Before this each card asked on mount and
@@ -141,7 +142,7 @@ function useUndoMs(board: string | undefined): number | undefined {
  * once it's done or taken back, the same card settled (green with the answer, or grey), keeping its height. Its state
  * comes from the board's list, else it asks every 30s while on screen.
  */
-export function TaskStep({ card }: CardProps) {
+export function TaskStep({ card, session }: CardProps) {
   const id = String(card.ref ?? "");
   // Which board it belongs to: one person can have this panel in several projects, each with its own a4. Not the page's
   // project — this runs in Gerdr's own page. Older cards only carried it in their answer button (choose.project);
@@ -184,7 +185,7 @@ export function TaskStep({ card }: CardProps) {
           value: done ? st.handedBack : undefined,
           dropped: !done,
           // Answered, but its ask has other questions open: held until they're answered, the worker not told yet
-          note: done && st.rest?.length ? `已记下，还没交给它：同一组还有「${st.rest.join("」「")}」没答，都答完才一起发` : done ? "已处理" : st.reason?.startsWith("你") ? st.reason : st.reason ? `已撤回：${st.reason}` : "已撤回",
+          note: done && st.rest?.length ? <Held rest={st.rest} session={session} /> : done ? "已处理" : st.reason?.startsWith("你") ? st.reason : st.reason ? `已撤回：${st.reason}` : "已撤回",
           action: changeable && (
             <button className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground" title="答错了？改成别的，worker 会收到新旧两个答案" onClick={() => setChanging(st.handedBack ?? "")}>
               <Pencil className="size-3" />
@@ -202,6 +203,24 @@ export function TaskStep({ card }: CardProps) {
       <DefaultCard card={card} undoMs={undoMs} />
       {board && st?.status === "todo" && <IgnoreButton id={id} board={board} onDone={refresh} />}
     </div>
+  );
+}
+
+/**
+ * The note of a question answered while others of its ask aren't: nothing went to the worker yet. Each one left is a
+ * link to its card in this chat (core jumpInCode loads older parts until it's found), so it can be answered there.
+ */
+function Held({ rest, session }: { rest: { ref: string; title: string }[]; session: string }) {
+  return (
+    <span>
+      已记下，还没交给它：同一组还有
+      {rest.map((q) => (
+        <button key={q.ref} className="mx-0.5 underline underline-offset-2 hover:text-foreground" title="跳到这个问题" onClick={() => jumpInCode(session, q.ref)}>
+          「{q.title}」
+        </button>
+      ))}
+      没答，都答完才一起发
+    </span>
   );
 }
 
