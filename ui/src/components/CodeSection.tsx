@@ -8,7 +8,7 @@ import { NewTaskDialog, TaskDetail } from "./TaskDetail";
 import { ImportDialog } from "./ImportDialog";
 import { RowMenu, type RowMenuItem } from "./RowMenu";
 import { openAsks, type Task, useTasks } from "../lib/tasks";
-import { CodeRow, type CodeRowInfo, closeCodeDrawer, newCodeTab, useCodeDirs, useCodeStart, useCodeOrder, useCodeNumber, openSettings, showInCode, useCodeRowDrop, useCodePaneTag, jumpInCode, useCodeRowMenu, useCodeRows, useCodeSession, type CodePaneTag } from "../lib/view";
+import { CodeRow, type CodeRowInfo, closeCodeDrawer, newCodeTab, useCodeDirs, useCodeStart, useCodeOrder, useCodeClosed, useCodeNumber, openSettings, showInCode, useCodeRowDrop, useCodePaneTag, jumpInCode, useCodeRowMenu, useCodeRows, useCodeSession, type CodePaneTag } from "../lib/view";
 import { usePanelChange, usePanelVisible, useRefresh, useSessions } from "../lib/visible";
 
 // Code's whole list, drawn by this panel (lib/view.ts, layout.tsx; core CodeView list="replace"): not Code's
@@ -216,6 +216,8 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   useCodeDirs(repos.map((r) => ({ path: r.path, name: base(r.path) })));
   // What the person starts themselves (Cmd+T, +, ⌘D, a fork) is a task from the start, like the secretary's (local/blank.ts)
   useCodeStart(async (o) => (await run<{ session: string }>("blank.run", o)).session);
+  // ⌘W on one of those never spoken to: it goes from the list (local/blank.ts closed); a task with work in it stays
+  useCodeClosed((session) => void run("blank.closed", { session }).catch(() => {}));
 
   const [activeOpen, foldActive] = useFold("active", true);
   const [reviewOpen, foldReview] = useFold("review");
