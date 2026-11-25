@@ -347,6 +347,29 @@ export function Fusion({ children }: { children: React.ReactNode }) {
         </button>
       </RowShell>
 
+      {/* 待办 first (the person, 2026-11-25): what hasn't been started is what to look at before what runs by itself */}
+      <Drop to="todo" onMove={onMove}>
+        <FoldTitle open={todoOpen} onClick={foldTodo} icon={STATUS_ICON.todo} label={`待办 ${todo.length}`}>
+          <span
+            role="button"
+            className="flex size-5 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
+            title="新任务：写清楚要做什么，选仓库和 agent；先放在待办，或者直接派出去"
+            onClick={(e) => (e.stopPropagation(), closeCodeDrawer(), setCreating(true))}
+          >
+            <Plus className="size-3.5" />
+          </span>
+        </FoldTitle>
+        {todoOpen &&
+          todo.map((t) =>
+            taskRow(
+              t,
+              <RowButton title="派出去：交给 agent 开始做" onClick={() => move(t, "running")}>
+                <Play className="size-3.5" />
+              </RowButton>,
+            ),
+          )}
+      </Drop>
+
       <Drop to="running" onMove={onMove}>
         <FoldTitle open={activeOpen} onClick={foldActive} icon={STATUS_ICON.running} label={`进行中 ${you + activeTasks.length + activeOwn.length}`}>
           {/* What waits on the person is in 进行中, first and in amber, not a group of its own: DESIGN.md, 2026-11-13
@@ -377,27 +400,6 @@ export function Fusion({ children }: { children: React.ReactNode }) {
           <Drop to="review" onMove={onMove}>
             <FoldTitle open={reviewOpen} onClick={foldReview} icon={STATUS_ICON.review} label={`待验收 ${review.length + reviewOwn.length}`} />
             {reviewOpen && sorted(review, reviewOwn)}
-          </Drop>
-          <Drop to="todo" onMove={onMove}>
-            <FoldTitle open={todoOpen} onClick={foldTodo} icon={STATUS_ICON.todo} label={`待办 ${todo.length}`}>
-              <span
-                role="button"
-                className="flex size-5 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
-                title="新任务：写清楚要做什么，选仓库和 agent；先放在待办，或者直接派出去"
-                onClick={(e) => (e.stopPropagation(), closeCodeDrawer(), setCreating(true))}
-              >
-                <Plus className="size-3.5" />
-              </span>
-            </FoldTitle>
-            {todoOpen &&
-              todo.map((t) =>
-                taskRow(
-                  t,
-                  <RowButton title="派出去：交给 agent 开始做" onClick={() => move(t, "running")}>
-                    <Play className="size-3.5" />
-                  </RowButton>,
-                ),
-              )}
           </Drop>
           <Drop to="done" onMove={onMove}>
             <FoldTitle open={doneOpen} onClick={foldDone} icon={STATUS_ICON.done} label={`已完成 ${done.length + doneOwn.length}`} />
