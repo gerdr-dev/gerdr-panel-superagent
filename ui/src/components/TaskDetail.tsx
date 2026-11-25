@@ -977,6 +977,9 @@ function Drawer({ t, byId, act, onClose, onGo }: { t: Task; byId: Record<string,
         className="w-full gap-0 sm:max-w-[520px]"
         onInteractOutside={(e) => {
           const el = e.target as Element | null;
+          // Over Code (this panel: TaskDetail below) a click anywhere outside closes it: there is no board under it
+          // whose other cards should stay clickable with it open. Its own menus and dialogs, opened over it, aren't outside
+          if (closeOutside) return void (el?.closest?.("[data-radix-popper-content-wrapper],[role=menu],[role=listbox],[role=dialog]") && e.preventDefault());
           if (!el?.closest?.("[data-gerdr-mount]") || el.closest("[data-task-card]")) e.preventDefault();
         }}
       >
@@ -1018,6 +1021,9 @@ function AskDrawer({ a, by, act, onClose, onGo }: { a: Ask; by: Task; act: Act; 
         className="w-full gap-0 sm:max-w-[520px]"
         onInteractOutside={(e) => {
           const el = e.target as Element | null;
+          // Over Code (this panel: TaskDetail below) a click anywhere outside closes it: there is no board under it
+          // whose other cards should stay clickable with it open. Its own menus and dialogs, opened over it, aren't outside
+          if (closeOutside) return void (el?.closest?.("[data-radix-popper-content-wrapper],[role=menu],[role=listbox],[role=dialog]") && e.preventDefault());
           if (!el?.closest?.("[data-gerdr-mount]") || el.closest("[data-task-card]")) e.preventDefault();
         }}
       >
@@ -2071,9 +2077,13 @@ function DragGhost({ x, y, w, children }: { x: number; y: number; w: number; chi
 
 void BoardPage;
 
+/** The task drawer closes on a click outside it (set by TaskDetail: the drawer is over Code, not over the board). */
+let closeOutside = false;
+
 /** A task's detail, as the board's card opened: for a task with no conversation yet (待办). `onSession`: a conversation it links to was picked. */
 export function TaskDetail({ t, byId, act, onClose, onGo, onSession }: { t: Task; byId: Record<string, Task>; act: Act; onClose: () => void; onGo: (id: string) => void; onSession: (session: string) => void }) {
   openChat = (session) => onSession(session);
+  closeOutside = true;
   return <Drawer t={t} byId={byId} act={act} onClose={onClose} onGo={onGo} />;
 }
 
