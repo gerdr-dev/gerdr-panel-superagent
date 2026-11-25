@@ -8,7 +8,7 @@
 
 import { load } from "./_store";
 import { workflow } from "./_config";
-import { compact, evaluate, followUp, record, sharers, state, subscribers } from "./_main";
+import { compact, evaluate, followUp, followWhy, record, routeOf, state } from "./_main";
 import { onAssignEvent } from "./assign";
 
 // Which events this person takes in is theirs: their trigger files live in user/triggers/ (Gerdr reads them beside the
@@ -187,26 +187,16 @@ export async function onEvent(input: { event: GerdrEvent; trigger?: string; allo
     return { item: it.id, assign: as };
   }
   const ev = compact(e);
-  const owners = subscribers(store.tasks, ev);
-  // 设置 → 任务对话里的后续: straight to the task's worker, or judged by the secretary first (it sees the tasks of this
-  // conversation, done ones too, and can attach it to one, pick an ended one up again, leave it, or make it new). A
-  // conversation that held more than one task is always judged: which one it is about is in the words, not the key.
-  // One whose tasks all ended is too (nothing goes straight to a finished task), whoever the sender
-  const known = sharers(store.tasks, ev);
-  // A task not handed out yet takes nothing straight either (2026-11-25): it has no worker to say "this isn't mine"
-  // (hand_back), so whatever came next in the conversation piled up in its card unread. A colleague's DM became t298
-  // in 待办, and his next ten messages, about another task that had only waited on that DM (so the conversation
-  // counted as one task's), were all added to t298 and reached nobody. The secretary reads them: more of the same
-  // request is attached to the card as before, the rest goes where it belongs
-  const unsent = owners.some((t) => !t.session);
-  if ((owners.length && (workflow(ctx).followUps === "secretary" || known.length > 1 || unsent)) || (!owners.length && known.length)) {
+  // A conversation some task is in: straight to the task(s) following it, or to the secretary (routeOf says which, and why)
+  const { owners, known, straight } = routeOf(ctx, store.tasks, ev);
+  if (!straight && known.length) {
     const it = record(ctx, ev, { state: "pending", sentAt: Date.now() });
     await evaluate(ctx, [it.id], store.tasks);
     return { item: it.id, pending: true, followUpOf: owners.map((t) => t.id) };
   }
   if (owners.length) {
     for (const t of owners) await followUp(ctx, t.id, ev);
-    const it = record(ctx, ev, { state: "delivered", tasks: owners.map((t) => t.id) });
+    const it = record(ctx, ev, { state: "delivered", tasks: owners.map((t) => t.id), via: owners.map((t) => ({ task: t.id, why: followWhy(t, ev) })) });
     return { item: it.id, delivered: it.tasks };
   }
   const allow = input.allow ?? [];

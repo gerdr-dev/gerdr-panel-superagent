@@ -93,6 +93,14 @@ export type Item = {
   tasks?: string[];
   /** Workers that gave a delivered message back (not their task's business), with why. */
   handBacks?: { task: string; reason: string; at: number }[];
+  /**
+   * Who it went straight to and why (that task followed the conversation: it started there or had it attached =
+   * thread; it was waiting on an answer there = wait). Kept because `tasks` is overwritten by a later decision: without
+   * it 去向 couldn't say how a message reached a task that then gave it back (c700, 2026-11-25).
+   */
+  via?: { task: string; why: "thread" | "wait" }[];
+  /** attach also made the task follow this conversation: what is said there next goes straight to it. */
+  linked?: boolean;
   sentAt?: number;
   decidedAt?: number;
   /** Closed by the user in 去向 (superagent.dismiss) instead of decided: a late decision on it is a no-op. */
@@ -262,6 +270,35 @@ export function sharers(tasks: Task[], e: { source: string; key?: string }): Tas
   return tasks.filter((t) => t.status !== "dropped" && follows(t).some((x) => x.source === e.source && x.key === e.key));
 }
 
+/** Why a task follows a conversation: started there / attached (thread), or only waiting on an answer there (wait). */
+export function followWhy(t: Task, e: { source: string; key?: string }): "thread" | "wait" {
+  return threadsOf(t).some((x) => x.source === e.source && x.key === e.key) ? "thread" : "wait";
+}
+
+/**
+ * Where the next message in a conversation goes (inbox.onEvent acts on it; 去向's 对话 list shows it): straight to the
+ * live tasks following it, or to the secretary, with why. One function so the list never says something the router
+ * doesn't do.
+ */
+export function routeOf(ctx: Ctx, tasks: Task[], e: { source: string; key?: string }): { owners: Task[]; known: Task[]; straight: boolean; why: string } {
+  const owners = subscribers(tasks, e);
+  const known = sharers(tasks, e);
+  // 设置 → 任务对话里的后续: straight to the task's worker, or judged by the secretary first (it sees the tasks of this
+  // conversation, done ones too, and can attach it to one, pick an ended one up again, leave it, or make it new). A
+  // conversation that held more than one task is always judged: which one it is about is in the words, not the key.
+  // One whose tasks all ended is too (nothing goes straight to a finished task), whoever the sender.
+  // A task not handed out yet takes nothing straight either (2026-11-25): it has no worker to say "this isn't mine"
+  // (hand_back), so whatever came next in the conversation piled up in its card unread. A colleague's DM became t298
+  // in 待办, and his next ten messages, about another task that had only waited on that DM (so the conversation
+  // counted as one task's), were all added to t298 and reached nobody. The secretary reads them: more of the same
+  // request is attached to the card as before, the rest goes where it belongs
+  if (!owners.length) return { owners, known, straight: false, why: known.length ? "跟过它的任务都结束了，先给秘书判断" : "没有任务跟着，给秘书判断" };
+  if (workflow(ctx).followUps === "secretary") return { owners, known, straight: false, why: "设置是任务对话里的后续先给秘书判断" };
+  if (known.length > 1) return { owners, known, straight: false, why: `这段对话里有 ${known.length} 个任务（${known.map((t) => t.id).join("、")}），说的是哪个要秘书看` };
+  if (owners.some((t) => !t.session)) return { owners, known, straight: false, why: "跟着它的任务还没派出去，没有 worker 能交回" };
+  return { owners, known, straight: true, why: "" };
+}
+
 function who(e: Ev) {
   return e.who || e.actor || "";
 }
@@ -355,7 +392,7 @@ async function brief(ctx: Ctx): Promise<string> {
     textOf(ctx, DISPATCH) || `判断规则（用户的 dispatch.md）不见了：只分派，不自己动手、不等待；拿不准就问用户。`,
     `## 外面来的消息 [消息 cN]：一条命令给出这一批的决定\n` +
       `gerdr panel run superagent.decide '${ex({ decisions: [{ item: "c3", decision: "accept", title: "十几个字的标题", parts: [{ repo: "/绝对路径" }] }, { item: "c4", decision: "ignore", reason: "道谢" }] })}'\n\n` +
-      `- attach：${ex({ item: "c5", decision: "attach", task: "t9" })}；stop：${ex({ item: "c6", decision: "stop", task: "t9", reason: "…" })}\n` +
+      `- attach：${ex({ item: "c5", decision: "attach", task: "t9", reason: "问的是 t9 那次建库" })}（reason 必填：为什么是这个任务，用户会在「去向」里看，也会回头问你；并进后这段对话之后的消息直接给 t9）；stop：${ex({ item: "c6", decision: "stop", task: "t9", reason: "…" })}\n` +
       (workflow(ctx).inboxWork === "review"
         ? `- decide 的 accept 会替你建任务，但**不派出去**：放进任务面板的「待办」，用户看过、改好再派（他的设置）。parts 照常写，会成为卡片上的仓库和 agent；拆成几份就是几张卡。` +
           `记下这条消息的去向；回不回原对话、什么时候回，按他的设置自动处理，你不用另外回。\n\n`
@@ -365,6 +402,8 @@ async function brief(ctx: Ctx): Promise<string> {
       `两种都一样：用户答了以后照样用 superagent.decide 给这条 cN 决定：` +
       `accept 会建任务派出去，并记下它从哪个对话来（对方在那里的后续直接交给这个任务，回不回对方按用户的设置）；别另用 tasks.add / tasks.dispatch 建，那样这条消息一直挂着，对方的后续也到不了任务。` +
       `已经另建了，就用 attach 把 cN 并进那个任务，加 "told": true（它已经知道这条消息，不再转一遍）。\n` +
+      `- 用户问某条消息为什么去了某处、某段对话的消息会给谁：别凭印象答，查记录：\`gerdr panel run superagent.log '{"q":"人名 关键词"}'\`（或 '{"id":"c700"}'：它怎么来的 via、谁交回 handBacks、谁定的 reason）；` +
+      `\`gerdr panel run superagent.threads '{"q":"人名"}'\`（哪些任务跟着哪段对话、下一条消息直接给谁还是给你）；跟错了就 superagent.unfollow '{"task":"tN","source":"…","key":"…"}'。\n` +
       `- 把消息和人对上已有的事：\`gerdr panel run memory.mid\`（中期记忆：agent 记下的眼下的事和人，加上各任务在等外面的什么；可带 '{"q":"词 词"}'），` +
       `\`gerdr panel run tasks.search '{"q":"词 词"}'\`（按人名、关键词找任务，含归档的）。什么时候查见判断规则；你知道了眼下的事（谁在等什么、谁在跟用户对接什么），用 note 工具记进中期记忆（没有这个工具就 gerdr panel run memory.note 同样的参数），怎么记见下面「中期记忆」。\n\n` +
       `## 任务面板上的任务 [任务 tN]：用任务面板的命令（和用户点按钮是同一套）\n` +

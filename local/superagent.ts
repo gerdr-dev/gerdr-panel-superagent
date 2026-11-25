@@ -3,7 +3,8 @@
 
 import { ackOrigin, add, dispatch, drop, edit, lastWords, say, start } from "./tasks";
 import { activity, find, load, memberName, members, note, update, type Task } from "./_store";
-import { evaluate, findItem, followUp, mainId, state, updateState, type Item } from "./_main";
+import { evaluate, findItem, follows, followUp, followWhy, mainId, placeOf, routeOf, state, threadsOf, updateState, type Item } from "./_main";
+import { waitingOn } from "./_waits";
 import { workflow } from "./_config";
 import { secAsks } from "./_secask";
 
@@ -59,16 +60,22 @@ async function one(d: Decision, ctx: Ctx) {
     }
     case "attach": {
       const t = receiver(live(ctx, d.task));
-      if (e.key)
+      // Why this task: the user asks "why did that message go there?" and the secretary, asked later, has no memory of
+      // it (c700 → t202, 2026-11-25: attached without a word, nobody could say why). 去向 shows it.
+      if (!d.reason?.trim()) throw new Error("attach 要写 reason：为什么是这个任务（消息里哪句话、和任务的哪件事对上）");
+      const linked =
+        !!e.key &&
         update(ctx, (s) => {
           const x = find(s, t.id);
           const th = x.threads ?? (x.origin?.key ? [{ source: x.origin.source, key: x.origin.key }] : []);
-          if (!th.some((y) => y.source === e.source && y.key === e.key)) x.threads = [...th, { source: e.source, key: e.key! }];
+          if (th.some((y) => y.source === e.source && y.key === e.key)) return false;
+          x.threads = [...th, { source: e.source, key: e.key! }];
+          return true;
         });
       // told: the task already has it (the secretary asked the user first, then made the task itself): only linked,
       // so the item stops hanging in 去向 and the sender's follow-ups reach the task
       if (!d.told) await followUp(ctx, t.id, e);
-      settle({ state: "attached", tasks: [t.id], reason: d.reason });
+      settle({ state: "attached", tasks: [t.id], reason: d.reason.trim(), linked: linked || undefined });
       return { item: it.id, tasks: [t.id] };
     }
     case "stop": {
@@ -318,15 +325,20 @@ function firstLine(text: string) {
   return [...line].length > 40 ? [...line].slice(0, 40).join("") + "…" : line;
 }
 
-/** For the page's 去向: every event and where it went, newest first, and the main session. { limit? } */
-export function log(input: { limit?: number }, ctx: Ctx) {
+/**
+ * For the page's 去向: every event and where it went, newest first, and the main session. { limit?, id?, q? }: id is
+ * one item (cN) whole, q keeps the items whose sender / text / place has every word — what the secretary runs when the
+ * user asks why a message went somewhere.
+ */
+export function log(input: { limit?: number; id?: string; q?: string }, ctx: Ctx) {
   const s = state(ctx);
+  if (input?.id) return { item: findItem(s, input.id) };
   const m = s.main ? ctx.sessions.get(s.main) : null;
   return {
     main: s.main ? { id: s.main, status: m?.status ?? "gone", waiting: m?.waiting } : null,
     // Its own questions to the user (_secask.ts): the 秘书 button counts the open ones, their cards read the states
     asks: secAsks(ctx),
-    items: s.items
+    items: (input?.q ? s.items.filter((it) => hasAll(it, input.q!)) : s.items)
       .slice(-(input?.limit ?? 200))
       .reverse()
       .map((it) => ({ ...it, event: { ...it.event, text: (it.event.text ?? "").slice(0, 600) } })),
@@ -362,4 +374,99 @@ export async function retry(input: { ids: string[]; hint?: string }, ctx: Ctx) {
   }
   await evaluate(ctx, ids, load(ctx).store.tasks, input?.hint);
   return { sent: ids };
+}
+
+function hasAll(it: Item, q: string) {
+  const e = it.event;
+  const hay = [e.who, e.actor, e.place, e.title, e.text, e.source, it.reason, ...(it.tasks ?? [])].filter(Boolean).join(" ").toLowerCase();
+  return q.toLowerCase().split(/\s+/).filter(Boolean).every((w) => hay.includes(w));
+}
+
+type Conv = {
+  source: string;
+  key: string;
+  /** "slack-me · 私聊 · Liber", from the newest message seen there; the key when none is in the log. */
+  place: string;
+  url?: string;
+  lastAt?: number;
+  /** The newest message there in 去向. */
+  last?: string;
+  tasks: { id: string; title: string; status: string; why: "thread" | "wait" }[];
+  /** Where the next message there goes: straight to these tasks, or the secretary (why). */
+  straight: boolean;
+  to: string[];
+  why: string;
+};
+
+/**
+ * 去向's 对话: every conversation some task follows (its threads, and those it waits on for now), which tasks, and where
+ * the next message there goes. This table is what sends a message past the secretary, and it was shown nowhere: the
+ * user couldn't see why a DM went to t229, or that it would go to t202 from then on (c700, 2026-11-25).
+ * { q? }: only conversations whose place / task has every word. Ended tasks are listed too (dropped ones aren't): a
+ * conversation they're in goes to the secretary, which sees them.
+ */
+export function threads(input: { q?: string }, ctx: Ctx) {
+  const tasks = load(ctx).store.tasks;
+  const s = state(ctx);
+  const convs = new Map<string, Conv>();
+  for (const t of tasks) {
+    if (t.status === "dropped") continue;
+    for (const c of follows(t)) {
+      const k = `${c.source}\u0000${c.key}`;
+      let v = convs.get(k);
+      if (!v) {
+        const seen = s.items.filter((x) => x.event.source === c.source && x.event.key === c.key).pop();
+        const ev = seen?.event ?? (t.origin?.source === c.source && t.origin?.key === c.key ? t.origin : undefined);
+        const r = routeOf(ctx, tasks, c);
+        v = {
+          source: c.source,
+          key: c.key,
+          place: ev ? placeOf(ev) || c.key : c.key,
+          url: ev?.url,
+          lastAt: seen?.at,
+          last: seen ? firstLine(seen.event.text || seen.event.title || "") : undefined,
+          tasks: [],
+          straight: r.straight,
+          to: r.straight ? r.owners.map((x) => x.id) : [],
+          why: r.why,
+        };
+        convs.set(k, v);
+      }
+      v.tasks.push({ id: t.id, title: t.title, status: t.status, why: followWhy(t, c) });
+    }
+  }
+  let out = [...convs.values()];
+  if (input?.q) {
+    const ws = input.q.toLowerCase().split(/\s+/).filter(Boolean);
+    out = out.filter((c) => {
+      const hay = [c.place, c.key, c.last, ...c.tasks.flatMap((t) => [t.id, t.title])].join(" ").toLowerCase();
+      return ws.every((w) => hay.includes(w));
+    });
+  }
+  // Where messages go past the secretary first, then the newest talk
+  out.sort((a, b) => Number(b.straight) - Number(a.straight) || (b.lastAt ?? 0) - (a.lastAt ?? 0));
+  return { conversations: out };
+}
+
+/**
+ * A task stops following a conversation: { task, source, key }. What is said there next goes to the secretary first
+ * (unless another task still follows it). A wait (it waits on an answer there) is the worker's own and stays: tell it
+ * (tasks.say) to take it back.
+ */
+export function unfollow(input: { task: string; source: string; key: string }, ctx: Ctx) {
+  const { task, source, key } = input ?? ({} as any);
+  if (!task || !source || !key) throw new Error(`要给 task、source、key：{"task":"t12","source":"slack-me","key":"…"}（gerdr panel run superagent.threads 里有）`);
+  const t = find(load(ctx).store, task);
+  const had = threadsOf(t).some((x) => x.source === source && x.key === key);
+  if (had)
+    update(ctx, (s) => {
+      const x = find(s, task);
+      x.threads = threadsOf(x).filter((y) => !(y.source === source && y.key === key));
+    });
+  const waits = waitingOn(t).some((x) => x.source === source && x.key === key);
+  if (!had && !waits) throw new Error(`${task} 没有跟着这段对话`);
+  return {
+    unfollowed: had,
+    note: waits ? `${task} 还在等这段对话里的回复（wait_for），等到之前那里的消息仍会给它；要它别等了用 tasks.say 告诉它` : `之后那里的消息先给秘书判断`,
+  };
 }
