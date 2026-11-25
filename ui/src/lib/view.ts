@@ -40,6 +40,8 @@ export type CodeMenuItem = { id: string; label: string; icon?: ReactNode; disabl
 export const useCodeRowMenu: (fn: (row: { pane: string; session?: string }) => CodeMenuItem[]) => void = c.useCodeRowMenu ?? (() => {});
 /** The folders offered on Code's new-conversation page while we show: ours (设置 → 仓库), not Code's workspaces. */
 export const useCodeDirs: (dirs: { path: string; name?: string }[]) => void = c.useCodeDirs ?? (() => {});
+/** Close a phone's drawer (Code's list), before showing what opens behind it. */
+export const closeCodeDrawer = () => c.closeCodeDrawer?.();
 export const newCodeTab = (opts?: { cwd?: string }) => c.newCodeTab?.(opts);
 // All of it or nothing: the list is ours to draw (list="replace"), from Code's rows
 export const canHostCode = !!c.CodeView && !!c.showInCodeView && !!c.CodeRow && !!c.useCodeRows;

@@ -1,11 +1,13 @@
 import * as core from "@gerdr/core";
 import clsx from "clsx";
 import { ArrowRightLeft, Ban, Bot, CheckCircle2, ChevronRight, Circle, CircleDashed, CircleDot, LayoutGrid, MessageSquare, Play, Plus, Settings } from "lucide-react";
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { run } from "../lib/gerdr";
+import { WholeWindow } from "../lib/portal";
+import { NewTaskDialog, TaskDetail } from "./TaskDetail";
 import { openAsks, type Task, useTasks } from "../lib/tasks";
-import { CodeRow, type CodeRowInfo, newCodeTab, useCodeDirs, openSettings, showInCode, useCodeRowDrop, useCodeRowMenu, useCodeRows, useCodeSession } from "../lib/view";
-import { usePanelChange, useRefresh, useSessions } from "../lib/visible";
+import { CodeRow, type CodeRowInfo, closeCodeDrawer, newCodeTab, useCodeDirs, openSettings, showInCode, useCodeRowDrop, useCodeRowMenu, useCodeRows, useCodeSession } from "../lib/view";
+import { usePanelChange, usePanelVisible, useRefresh, useSessions } from "../lib/visible";
 
 // Code's whole list, drawn by this panel (lib/view.ts, layout.tsx; core CodeView list="replace"): not Code's
 // workspaces but where each piece of work stands. The secretary first; then 等你, 进行中, 待验收, 待办 — the tasks the
@@ -273,7 +275,9 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   // No buttons on the rows for moving a task (there was a ✓ at the end of its line): every status is changed from the
   // menus (the pane's ⋯, the row's right click) or by dragging, one way for all. The exception is 待办: a task not
   // handed out has no conversation, so no pane and no menu, and its ▶ is the only way to start it on a phone
-  const taskRow = (t: Task, action?: React.ReactNode) => <TaskRow key={t.id} t={t} pane={t.session ? paneOf.get(t.session) : undefined} current={!!t.session && cur === t.session} action={action} />;
+  const taskRow = (t: Task, action?: React.ReactNode) => (
+    <TaskRow key={t.id} t={t} pane={t.session ? paneOf.get(t.session) : undefined} current={(!!t.session && cur === t.session) || detail === t.id} action={action} onDetail={() => openDetail(t.id)} />
+  );
   const ownRow = (r: CodeRowInfo) => <CodeRow key={r.pane} pane={r.pane} where={base(r.cwd)} />;
 
   // One order for a group, tasks and the person's own conversations together (they aren't told apart): what's
@@ -289,6 +293,29 @@ export function Fusion({ children }: { children: React.ReactNode }) {
     ]
       .sort((a, b) => Number(b.run) - Number(a.run) || b.at - a.at)
       .map((x) => x.el);
+
+  // A task not handed out has no conversation to open: its row opens the board's card for it (TaskDetail), over the
+  // whole window. Without it such a task could only be started as it was: no way to read what was asked, set its
+  // repository, answer whoever asked, or give it up (lost with the board, 2026-11-25)
+  const [detail, setDetail] = useState("");
+  const [creating, setCreating] = useState(false);
+  const detailTask = detail ? all.find((t) => t.id === detail) : undefined;
+  const byTask = useMemo(() => Object.fromEntries(all.map((t) => [t.id, t])), [tasks]);
+  const openDetail = (id: string) => (closeCodeDrawer(), setDetail(id));
+  // Handed out meanwhile (its ▶, or 派出去 in the card): the card gives way to its worker's conversation
+  useEffect(() => {
+    if (detailTask?.session && detailTask.status !== "todo") (setDetail(""), showInCode(detailTask.session));
+  }, [detailTask?.session, detailTask?.status]);
+  const panelShown = usePanelVisible();
+  useEffect(() => {
+    if (!panelShown) (setDetail(""), setCreating(false));
+  }, [panelShown]);
+  const overlays = (
+    <WholeWindow>
+      {detailTask && <TaskDetail t={detailTask} byId={byTask} act={act} onClose={() => setDetail("")} onGo={setDetail} onSession={(id) => (setDetail(""), showInCode(id))} />}
+      {creating && <NewTaskDialog act={act} onClose={() => setCreating(false)} />}
+    </WholeWindow>
+  );
 
   const list = (
     <div className="pt-1.5 pb-1" data-fusion-section>
@@ -350,7 +377,16 @@ export function Fusion({ children }: { children: React.ReactNode }) {
             {reviewOpen && sorted(review, reviewOwn)}
           </Drop>
           <Drop to="todo" onMove={onMove}>
-            <FoldTitle open={todoOpen} onClick={foldTodo} icon={STATUS_ICON.todo} label={`待办 ${todo.length}`} />
+            <FoldTitle open={todoOpen} onClick={foldTodo} icon={STATUS_ICON.todo} label={`待办 ${todo.length}`}>
+              <span
+                role="button"
+                className="flex size-5 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
+                title="新任务：写清楚要做什么，选仓库和 agent；先放在待办，或者直接派出去"
+                onClick={(e) => (e.stopPropagation(), closeCodeDrawer(), setCreating(true))}
+              >
+                <Plus className="size-3.5" />
+              </span>
+            </FoldTitle>
             {todoOpen &&
               todo.map((t) =>
                 taskRow(
@@ -374,7 +410,12 @@ export function Fusion({ children }: { children: React.ReactNode }) {
       )}
     </div>
   );
-  return <ListContext.Provider value={list}>{children}</ListContext.Provider>;
+  return (
+    <ListContext.Provider value={list}>
+      {children}
+      {overlays}
+    </ListContext.Provider>
+  );
 }
 
 /**
@@ -479,7 +520,7 @@ function lineOf(t: Task): string {
  * row), ours when it hasn't been opened yet (a click opens it). Under it, what Code's row can't say: what it waits
  * on the person for, or its worker's newest line, and the one move that makes sense from where it stands.
  */
-function TaskRow({ t, pane, current, action }: { t: Task; pane?: CodeRowInfo; current: boolean; action?: React.ReactNode }) {
+function TaskRow({ t, pane, current, action, onDetail }: { t: Task; pane?: CodeRowInfo; current: boolean; action?: React.ReactNode; onDetail: () => void }) {
   const you = t.column === "you" && t.status === "running";
   const busy = t.live?.status === "running";
   const line = lineOf(t) || (t.status === "todo" ? "还没派出去" : "");
@@ -490,7 +531,7 @@ function TaskRow({ t, pane, current, action }: { t: Task; pane?: CodeRowInfo; cu
       {pane ? (
         <CodeRow pane={pane.pane} where={base(t.repo)} />
       ) : (
-        <RowShell current={current} drag={t.id} onClick={() => t.session && showInCode(t.session)}>
+        <RowShell current={current} drag={t.id} onClick={() => (t.session ? showInCode(t.session) : onDetail())}>
           <span className="flex size-3.5 shrink-0 items-center justify-center max-md:size-4">
             <span className={clsx("size-2 rounded-full", you ? "bg-warn" : busy ? "animate-pulse bg-ok" : "bg-muted-foreground/40")} />
           </span>
