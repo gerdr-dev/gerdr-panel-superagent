@@ -7,7 +7,7 @@ import { WholeWindow } from "../lib/portal";
 import { NewTaskDialog, TaskDetail } from "./TaskDetail";
 import { RowMenu, type RowMenuItem } from "./RowMenu";
 import { openAsks, type Task, useTasks } from "../lib/tasks";
-import { CodeRow, type CodeRowInfo, closeCodeDrawer, newCodeTab, useCodeDirs, openSettings, showInCode, useCodeRowDrop, useCodeRowMenu, useCodeRows, useCodeSession } from "../lib/view";
+import { CodeRow, type CodeRowInfo, closeCodeDrawer, newCodeTab, useCodeDirs, openSettings, showInCode, useCodeRowDrop, useCodePaneTag, useCodeRowMenu, useCodeRows, useCodeSession } from "../lib/view";
 import { usePanelChange, usePanelVisible, useRefresh, useSessions } from "../lib/visible";
 
 // Code's whole list, drawn by this panel (lib/view.ts, layout.tsx; core CodeView list="replace"): not Code's
@@ -299,6 +299,25 @@ export function Fusion({ children }: { children: React.ReactNode }) {
     if (t) return taskItems(t);
     const at: Status = standing[session] ?? "running";
     return (["running", "review", "done"] as const).filter((to) => to !== at).map((to) => ({ id: `move-${to}`, label: `移到${LABEL[to]}`, icon: ICON[to], onSelect: () => onMove(to, { session }) }));
+  });
+  // After the pane's title: the task's number and where it stands, in the groups' own icons and colours, and a tap on
+  // it moves it. Two tasks side by side had the same title bar, and on a phone (the list in the drawer) an open
+  // conversation said nothing of its status. The person's own conversations get it too, without a number
+  useCodePaneTag(({ session }) => {
+    if (!session || isMain(session)) return null;
+    const t = taskOf.get(session);
+    const at: Status = t ? (t.status as Status) : (standing[session] ?? "running");
+    const waits = at === "running" && (t ? t.column === "you" : byId[session]?.status === "waiting" || byId[session]?.status === "error");
+    const items = t
+      ? taskItems(t)
+      : (["running", "review", "done"] as const).filter((to) => to !== at).map((to) => ({ id: `move-${to}`, label: `移到${LABEL[to]}`, icon: ICON[to], onSelect: () => onMove(to, { session }) }));
+    return {
+      label: [t?.id, waits ? "等你" : LABEL[at]].filter(Boolean).join(" · "),
+      icon: at === "todo" ? undefined : ICON[at],
+      tone: waits ? "warn" : at === "running" ? "brand" : at === "review" ? "ok" : undefined,
+      title: "这个对话在哪个状态：点一下移到别的",
+      items,
+    };
   });
   // No buttons on the rows for moving a task (there was a ✓ at the end of its line): every status is changed from the
   // menus (the pane's ⋯, the row's right click) or by dragging, one way for all. The exception is 待办: a task not
