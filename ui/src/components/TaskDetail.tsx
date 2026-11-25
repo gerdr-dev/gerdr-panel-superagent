@@ -977,9 +977,10 @@ function Drawer({ t, byId, act, onClose, onGo }: { t: Task; byId: Record<string,
         className="w-full gap-0 sm:max-w-[520px]"
         onInteractOutside={(e) => {
           const el = e.target as Element | null;
-          // Over Code (this panel: TaskDetail below) a click anywhere outside closes it: there is no board under it
-          // whose other cards should stay clickable with it open. Its own menus and dialogs, opened over it, aren't outside
-          if (closeOutside) return void (el?.closest?.("[data-radix-popper-content-wrapper],[role=menu],[role=listbox],[role=dialog]") && e.preventDefault());
+          // Over Code (this panel: TaskDetail below) a click anywhere outside closes it, but not one on another 待办 row
+          // (CodeSection's TaskRow, data-task-card): that switches it to the row's task, where closing first left it
+          // shut (2026-11-25). Its own menus and dialogs, opened over it, aren't outside either
+          if (closeOutside) return void (el?.closest?.("[data-radix-popper-content-wrapper],[role=menu],[role=listbox],[role=dialog],[data-task-card]") && e.preventDefault());
           if (!el?.closest?.("[data-gerdr-mount]") || el.closest("[data-task-card]")) e.preventDefault();
         }}
       >

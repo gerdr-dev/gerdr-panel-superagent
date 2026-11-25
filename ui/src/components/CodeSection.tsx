@@ -771,6 +771,9 @@ function TaskRow({
           "data-[state=open]:ring-1 data-[state=open]:ring-brand/60",
         )}
         title={`${t.id} ${t.title}${t.repo ? `\n${t.repo}` : ""}`}
+        // A task not handed out opens in TaskDetail's drawer: a click on another such row switches the drawer to it
+        // instead of counting as a click outside that closes it (TaskDetail.tsx Drawer)
+        data-task-card={t.session ? undefined : ""}
       >
         <RowShell current={current} drag={t.id} onClick={() => (t.session ? showInCode(t.session) : onDetail())}>
           {/* The agent's icon, as on Code's rows: with a dot here instead, the same kind of task had an icon or a dot by
