@@ -1,6 +1,7 @@
-// The board page. Shown whole only on a Gerdr without CodeView (pages/index.tsx); with CodeView the tasks are rows in
-// Code's list and only two parts of this show: a task's detail (Drawer: a card not handed out yet — what was asked
-// and by whom, repository and agent, 备注, 回复对方, hand it out, give it up) and the new-task form.
+// Superagent's board page (its pages/board.tsx), kept here whole for the parts this panel still shows: a task's detail
+// (Drawer: a card not handed out yet — what was asked and by whom, repository and agent, 备注, 回复对方, hand it out,
+// give it up) and the new-task form. The board itself (BoardPage) isn't drawn. Not cut down to those parts on
+// purpose: as the same file, Superagent's later changes to it merge in (git follows the rename).
 import { AlertTriangle, ArrowUp, Ban, Bot, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, Copy, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Plus, Search, Send, Settings, Undo2, X } from "lucide-react";
 import { EditableTitle } from "../components/EditableTitle";
 import clsx from "clsx";
@@ -195,7 +196,8 @@ function colOf(t: Task): Col {
 }
 
 
-export function BoardPage() {
+// Not used in this panel (no board); kept whole so Superagent's changes to this file still merge
+function BoardPage() {
   const { tasks, archived, error, act } = useTasks();
   const [archive, setArchive] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -2072,6 +2074,8 @@ function DragGhost({ x, y, w, children }: { x: number; y: number; w: number; chi
     </div>
   );
 }
+
+void BoardPage;
 
 /** The task drawer closes on a click outside it (set by TaskDetail: the drawer is over Code, not over the board). */
 let closeOutside = false;
