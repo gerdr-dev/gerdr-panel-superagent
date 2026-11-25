@@ -225,7 +225,9 @@ export function Fusion({ children }: { children: React.ReactNode }) {
 
   const [activeOpen, foldActive] = useFold("active", true);
   const [reviewOpen, foldReview] = useFold("review");
-  const [todoOpen, foldTodo] = useFold("todo");
+  // Open by default (the person, 2026-11-25): a message the secretary just put in 待办 is what to look at next, and a
+  // folded group hid it. Folding it still sticks (localStorage)
+  const [todoOpen, foldTodo] = useFold("todo", true);
   const [doneOpen, foldDone] = useFold("done");
   const [otherOpen, foldOther] = useFold("other", true);
 
