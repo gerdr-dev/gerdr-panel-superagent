@@ -407,6 +407,7 @@ export function Fusion({ children }: { children: React.ReactNode }) {
       current={(!!t.session && cur === t.session) || detail === t.id}
       action={action}
       agent={(t.session && byId[t.session]?.agent) || t.agent}
+      running={busy(t.session) || t.live?.status === "running"}
       where={repoLabel(t.repo)}
       menu={taskItems(t)}
       onDetail={() => openDetail(t.id)}
@@ -731,6 +732,7 @@ function TaskRow({
   current,
   action,
   agent,
+  running,
   where,
   menu,
   onDetail,
@@ -740,12 +742,14 @@ function TaskRow({
   current: boolean;
   action?: React.ReactNode;
   agent?: string;
+  /** Its worker's turn is running: Gerdr's own session status (t.live, read by the panel's backend, lags it) */
+  running: boolean;
   where: React.ReactNode;
   menu: RowMenuItem[];
   onDetail: () => void;
 }) {
   const you = needsPerson(t) && t.status === "running";
-  const busy = t.live?.status === "running";
+  const busy = running;
   const line = lineOf(t) || (t.status === "todo" ? "还没派出去" : "");
   // ⌘N's number while ⌘ is held, in the icon's place (as Code's rows; CodeRow numbers itself)
   const nth = useCodeNumber(t.session);
