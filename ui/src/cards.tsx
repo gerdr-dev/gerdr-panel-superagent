@@ -7,7 +7,7 @@ import { boardFresh, cardState, onCardStates } from "./lib/cardstates";
 // Cards the board's panel tools put in a worker's chat (local/board.ts). Gerdr loads this file at start, so they're drawn
 // this way wherever the chat is shown: the board's drawer, or the worker's tab in Code.
 
-type Step = { status: string; handedBack?: string; title?: string; kind?: string; reason?: string };
+type Step = { status: string; handedBack?: string; title?: string; kind?: string; reason?: string; rest?: string[] };
 
 // Where a card stands, without asking: the board's last tasks.list carries every card's state (lib/cardstates.ts),
 // so a card in a chat opened from the board draws its real state at once. Before this each card asked on mount and
@@ -149,7 +149,7 @@ export function TaskStep({ card }: CardProps) {
   const c = card as { project?: string; choose?: { project?: string } };
   const board = c.project ?? c.choose?.project;
   const undoMs = useUndoMs(board);
-  const [st, refresh] = useCardStatus<Step>(board, id ? `step:${id}` : null, () => run<Step>("tasks.status", { id }, { project: board }), (v) => v.status === "done" || v.status === "dropped", 30000);
+  const [st, refresh] = useCardStatus<Step>(board, id ? `step:${id}` : null, () => run<Step>("tasks.status", { id }, { project: board }), (v) => (v.status === "done" && !v.rest?.length) || v.status === "dropped", 30000);
   // Changing an answer already sent: the built-in card again, its pick going to tasks.reanswer (with its few seconds
   // of undo too). The card's own undo only covers the seconds before a pick is sent.
   const [changing, setChanging] = useState<string | false>(false); // the answer it had when the change was opened
@@ -183,7 +183,8 @@ export function TaskStep({ card }: CardProps) {
         done={{
           value: done ? st.handedBack : undefined,
           dropped: !done,
-          note: done ? "已处理" : st.reason?.startsWith("你") ? st.reason : st.reason ? `已撤回：${st.reason}` : "已撤回",
+          // Answered, but its ask has other questions open: held until they're answered, the worker not told yet
+          note: done && st.rest?.length ? `已记下，还没交给它：同一组还有「${st.rest.join("」「")}」没答，都答完才一起发` : done ? "已处理" : st.reason?.startsWith("你") ? st.reason : st.reason ? `已撤回：${st.reason}` : "已撤回",
           action: changeable && (
             <button className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground" title="答错了？改成别的，worker 会收到新旧两个答案" onClick={() => setChanging(st.handedBack ?? "")}>
               <Pencil className="size-3" />
