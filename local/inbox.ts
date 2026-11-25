@@ -193,7 +193,13 @@ export async function onEvent(input: { event: GerdrEvent; trigger?: string; allo
   // conversation that held more than one task is always judged: which one it is about is in the words, not the key.
   // One whose tasks all ended is too (nothing goes straight to a finished task), whoever the sender
   const known = sharers(store.tasks, ev);
-  if ((owners.length && (workflow(ctx).followUps === "secretary" || known.length > 1)) || (!owners.length && known.length)) {
+  // A task not handed out yet takes nothing straight either (2026-11-25): it has no worker to say "this isn't mine"
+  // (hand_back), so whatever came next in the conversation piled up in its card unread. A colleague's DM became t298
+  // in 待办, and his next ten messages, about another task that had only waited on that DM (so the conversation
+  // counted as one task's), were all added to t298 and reached nobody. The secretary reads them: more of the same
+  // request is attached to the card as before, the rest goes where it belongs
+  const unsent = owners.some((t) => !t.session);
+  if ((owners.length && (workflow(ctx).followUps === "secretary" || known.length > 1 || unsent)) || (!owners.length && known.length)) {
     const it = record(ctx, ev, { state: "pending", sentAt: Date.now() });
     await evaluate(ctx, [it.id], store.tasks);
     return { item: it.id, pending: true, followUpOf: owners.map((t) => t.id) };
