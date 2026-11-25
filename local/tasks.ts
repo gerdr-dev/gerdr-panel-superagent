@@ -351,6 +351,9 @@ function stopWhy(t: Task, sess: any, s?: Store) {
   }
   if (sess?.stopReason && sess.stopReason !== "end_turn") return `这一轮没正常结束（${sess.stopReason}）`;
   if (!sess) return "对话关掉了";
+  // Never had a turn: a conversation the person opened themselves (local/blank.ts, a fork) starts quiet and waits for
+  // their first message; it hasn't stopped anything (the row said 停下了 the moment it was opened, 2026-11-25)
+  if (!sess.stopReason && !String(sess.reply ?? "").trim() && !sess.personSaid) return "还没开始，等你说第一句";
   if (s && repliedLast(s, t)) return "回了你的话，等你接着说";
   return "停下了";
 }
