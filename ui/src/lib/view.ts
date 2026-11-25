@@ -24,7 +24,7 @@ type Core = {
   useCodePaneTag?: (fn: (row: { pane: string; session?: string }) => CodePaneTag | CodePaneTag[] | null) => void;
   jumpInCode?: (session: string, ref: string) => void;
   useCodeDirs?: (dirs: { path: string; name?: string }[]) => void;
-  useCodeStart?: (fn: (o: { agent: string; cwd: string }) => Promise<string>) => void;
+  useCodeStart?: (fn: (o: { agent: string; cwd: string; mode?: string; continueFrom?: string }) => Promise<string>) => void;
   useCodeRowMenu?: (fn: (row: { pane: string; session?: string }) => CodeMenuItem[]) => void;
   useCodeRowDrop?: (fn: (row: { pane: string; session?: string }) => void) => (el: HTMLElement | null) => void;
   showInCodeView?: (session: string, replace?: string) => void;
@@ -44,10 +44,10 @@ export const useCodeRowMenu: (fn: (row: { pane: string; session?: string }) => C
 /** The folders offered on Code's new-conversation page while we show: ours (设置 → 仓库), not Code's workspaces. */
 export const useCodeDirs: (dirs: { path: string; name?: string }[]) => void = c.useCodeDirs ?? (() => {});
 /**
- * Conversations started on Code's new-conversation page (Cmd+T, 进行中's +) start as ours: a task's worker. Without it
- * (an older Gerdr) they stay Code's, and show here only once imported.
+ * Conversations started in Code while we show (Cmd+T, 进行中's +, ⌘D, a fork) start as ours: a task's worker. Without
+ * it (an older Gerdr) they stay Code's, and show here only once imported.
  */
-export const useCodeStart: (fn: (o: { agent: string; cwd: string }) => Promise<string>) => void = c.useCodeStart ?? (() => {});
+export const useCodeStart: (fn: (o: { agent: string; cwd: string; mode?: string; continueFrom?: string }) => Promise<string>) => void = c.useCodeStart ?? (() => {});
 /** Close a phone's drawer (Code's list), before showing what opens behind it. */
 export const closeCodeDrawer = () => c.closeCodeDrawer?.();
 export type CodePaneTag = { label: string; icon?: ReactNode; tone?: "warn" | "ok" | "brand"; title?: string; items?: CodeMenuItem[] };

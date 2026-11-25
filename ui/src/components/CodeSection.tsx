@@ -214,8 +214,8 @@ export function Fusion({ children }: { children: React.ReactNode }) {
     }
   };
   useCodeDirs(repos.map((r) => ({ path: r.path, name: base(r.path) })));
-  // What the person opens themselves (Cmd+T, +) is a task from the start, like the secretary's (local/blank.ts)
-  useCodeStart(async ({ agent, cwd }) => (await run<{ session: string }>("blank.run", { agent, cwd })).session);
+  // What the person starts themselves (Cmd+T, +, ⌘D, a fork) is a task from the start, like the secretary's (local/blank.ts)
+  useCodeStart(async (o) => (await run<{ session: string }>("blank.run", o)).session);
 
   const [activeOpen, foldActive] = useFold("active", true);
   const [reviewOpen, foldReview] = useFold("review");
