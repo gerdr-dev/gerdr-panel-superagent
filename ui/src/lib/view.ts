@@ -21,7 +21,8 @@ type Core = {
   useCodeRows?: () => CodeRowInfo[];
   newCodeTab?: (opts?: { cwd?: string }) => void;
   closeCodeDrawer?: () => void;
-  useCodePaneTag?: (fn: (row: { pane: string; session?: string }) => CodePaneTag | null) => void;
+  useCodePaneTag?: (fn: (row: { pane: string; session?: string }) => CodePaneTag | CodePaneTag[] | null) => void;
+  jumpInCode?: (session: string, ref: string) => void;
   useCodeDirs?: (dirs: { path: string; name?: string }[]) => void;
   useCodeRowMenu?: (fn: (row: { pane: string; session?: string }) => CodeMenuItem[]) => void;
   useCodeRowDrop?: (fn: (row: { pane: string; session?: string }) => void) => (el: HTMLElement | null) => void;
@@ -45,7 +46,9 @@ export const useCodeDirs: (dirs: { path: string; name?: string }[]) => void = c.
 export const closeCodeDrawer = () => c.closeCodeDrawer?.();
 export type CodePaneTag = { label: string; icon?: ReactNode; tone?: "warn" | "ok" | "brand"; title?: string; items?: CodeMenuItem[] };
 /** A tag after a pane's title (a task's number and status, tapped to move it). Without it (an older Gerdr): none. */
-export const useCodePaneTag: (fn: (row: { pane: string; session?: string }) => CodePaneTag | null) => void = c.useCodePaneTag ?? (() => {});
+export const useCodePaneTag: (fn: (row: { pane: string; session?: string }) => CodePaneTag | CodePaneTag[] | null) => void = c.useCodePaneTag ?? (() => {});
+/** Show a conversation in Code scrolled to one of its cards (a question waiting on the person). An older Gerdr: just shows it. */
+export const jumpInCode = (session: string, ref: string) => (c.jumpInCode ? c.jumpInCode(session, ref) : c.showInCodeView?.(session));
 export const newCodeTab = (opts?: { cwd?: string }) => c.newCodeTab?.(opts);
 // All of it or nothing: the list is ours to draw (list="replace"), from Code's rows
 export const canHostCode = !!c.CodeView && !!c.showInCodeView && !!c.CodeRow && !!c.useCodeRows;

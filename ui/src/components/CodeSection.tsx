@@ -8,7 +8,7 @@ import { NewTaskDialog, TaskDetail } from "./TaskDetail";
 import { ImportDialog } from "./ImportDialog";
 import { RowMenu, type RowMenuItem } from "./RowMenu";
 import { openAsks, type Task, useTasks } from "../lib/tasks";
-import { CodeRow, type CodeRowInfo, closeCodeDrawer, newCodeTab, useCodeDirs, openSettings, showInCode, useCodeRowDrop, useCodePaneTag, useCodeRowMenu, useCodeRows, useCodeSession } from "../lib/view";
+import { CodeRow, type CodeRowInfo, closeCodeDrawer, newCodeTab, useCodeDirs, openSettings, showInCode, useCodeRowDrop, useCodePaneTag, jumpInCode, useCodeRowMenu, useCodeRows, useCodeSession, type CodePaneTag } from "../lib/view";
 import { usePanelChange, usePanelVisible, useRefresh, useSessions } from "../lib/visible";
 
 // Code's whole list, drawn by this panel (lib/view.ts, layout.tsx; core CodeView list="replace"): not Code's
@@ -331,18 +331,30 @@ export function Fusion({ children }: { children: React.ReactNode }) {
       return byId[session]?.tags?.panel
         ? null
         : { label: "不是任务", title: "这个对话是 Code 里的，不在这个面板的任务里", items: [{ id: "import", label: "导入为任务…", icon: <Download />, onSelect: () => setImporting(true) }] };
-    const at: Status = t ? (t.status as Status) : (standing[session] ?? "running");
-    const waits = at === "running" && (t ? needsPerson(t) : byId[session]?.status === "waiting" || byId[session]?.status === "error");
-    const items = t
-      ? taskItems(t)
-      : (["running", "review", "done"] as const).filter((to) => to !== at).map((to) => ({ id: `move-${to}`, label: `移到${LABEL[to]}`, icon: ICON[to], onSelect: () => onMove(to, { session }) }));
-    return {
-      label: [t?.id, waits ? "等你" : LABEL[at]].filter(Boolean).join(" · "),
+    const at = t.status as Status;
+    // Where it stands and what waits on the person are two tags (the person, 2026-11-25): 等你 read as a status of its
+    // own, and tapping it gave the moves, when what one wants from it is the question it means
+    const status: CodePaneTag = {
+      label: `${t.id} · ${LABEL[at]}`,
       icon: at === "todo" ? undefined : ICON[at],
-      tone: waits ? "warn" : at === "running" ? "brand" : at === "review" ? "ok" : undefined,
-      title: "这个对话在哪个状态：点一下移到别的",
-      items,
+      tone: at === "running" ? "brand" : at === "review" ? "ok" : undefined,
+      title: "这个任务在哪个状态：点一下移到别的",
+      items: taskItems(t),
     };
+    if (at !== "running") return status;
+    const things = waitingOn(t);
+    const live = byId[session]?.status;
+    // Waiting on an approval or stopped on an error: no card to go to, the conversation itself shows it
+    if (!things.length && !needsPerson(t) && live !== "waiting") return status;
+    const wait: CodePaneTag = {
+      label: things.length > 1 ? `等你 ${things.length}` : "等你",
+      tone: "warn",
+      title: "在等你的事：点一条跳过去",
+      items: things.length
+        ? things.map((x, i) => ({ id: `wait-${i}`, label: x.label, onSelect: () => jumpInCode(session, x.ref) }))
+        : [{ id: "wait-0", label: (t.live?.status === "error" && t.live.error) || t.live?.waiting || "等你审批", onSelect: () => showInCode(session) }],
+    };
+    return [status, wait];
   });
   // No buttons on the rows for moving a task (there was a ✓ at the end of its line): every status is changed from the
   // menus (the pane's ⋯, the row's right click) or by dragging, one way for all. The exception is 待办: a task not
@@ -598,6 +610,21 @@ function RowButton({ title, onClick, children }: { title: string; onClick: () =>
 const heldOut = (t: Task) => (t.outbox ?? []).filter((o) => o.state === "pending");
 /** The task waits on the person: its worker asked or stopped on them (tasks.list `column`), or holds a reply for them to send. */
 const needsPerson = (t: Task) => t.column === "you" || heldOut(t).length > 0;
+
+/**
+ * Each thing in a task that waits on the person, with the card it is in the chat (a tool result's gerdrCard.ref, as
+ * the board's drawer jumps to): a question of an ask with several is one each, a reply held to send is one.
+ */
+function waitingOn(t: Task): { label: string; ref: string }[] {
+  const out: { label: string; ref: string }[] = [];
+  for (const a of openAsks(t)) {
+    const qs = (a.questions ?? []).filter((q) => !q.answer && !q.dropped && !q.skipped);
+    if (a.handBack.kind === "questions" && qs.length) for (const q of qs) out.push({ label: q.title, ref: `${a.id}#${q.id}` });
+    else out.push({ label: a.title, ref: a.id });
+  }
+  for (const o of heldOut(t)) out.push({ label: `待发给 ${o.where.split(" · ").pop()}`, ref: `${t.id}~${o.id}` });
+  return out;
+}
 
 /** `text` without `title` at its start (and the punctuation that joined them); all of it when it doesn't start so. */
 function sameStart(text: string, title: string): string {
