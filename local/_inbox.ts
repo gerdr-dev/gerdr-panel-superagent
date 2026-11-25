@@ -1,6 +1,7 @@
 import type { Task } from "./_store";
 
-// What on the board waits on the user, in Gerdr's inbox (ctx.inbox.set): on every device and as a phone notification,
+// What on the board waits on the user, in Gerdr's inbox (ctx.inbox.set) — what's under 等你, and what came in from
+// outside and sits in 待办 —: on every device and as a phone notification,
 // so a task asking something isn't seen only by someone who happens to open the board. One item per task under 等你,
 // said the way its chat's line says it. Left out on purpose: a worker's approval or error, which Gerdr's inbox already
 // has from the session itself (a second item would say the same twice).
@@ -23,6 +24,14 @@ type Line = { id: string; title: string; body?: string; session?: string };
 export function waitingLines(tasks: Listed[]): Line[] {
   const items: Line[] = [];
   for (const t of tasks) {
+    // Work the secretary took in from outside and left in 待办 for the user to look at and send out (设置 → 外面来的消息:
+    // 放进待办): it waits on them too (the person, 2026-11-25), and without a notification it sat unseen while they
+    // were elsewhere. Only what came from outside: a to-do the user wrote down themselves is no news to them
+    if (t.status === "todo" && !t.session && t.origin) {
+      const who = t.origin.title?.split(/[:：]/)[0]?.trim();
+      items.push({ id: t.id, title: `${t.id} 待办：${cut(t.title, 80)}`, body: who ? `${who}${t.origin.source ? `（${t.origin.source}）` : ""}` : t.title });
+      continue;
+    }
     if (t.column !== "you") continue;
     // What its worker asked of the user (its asks): opening it goes to the task's chat, where the ask's card is.
     // Named by the task (t113), the card the user knows; one question: the body is the task's title, not the question
