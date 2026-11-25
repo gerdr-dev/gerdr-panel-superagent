@@ -31,7 +31,13 @@ export function SettingsSheet({ tab, onTab, onClose, onTask }: { tab: SettingsTa
   return (
     <Sheet open onOpenChange={(o) => !o && onClose()}>
       {/* pt: it reaches the window's top (layout.tsx WholeWindow), clear of a phone's status bar / notch */}
-      <SheetContent showCloseButton={false} aria-describedby={undefined} className="w-full gap-0 pt-[env(safe-area-inset-top)] sm:max-w-5xl">
+      <SheetContent
+        showCloseButton={false}
+        aria-describedby={undefined}
+        // ⌘S saves the page here (Settings, 流程, 记忆): Gerdr leaves keys named so to what has focus inside (its ⌘S is
+        // "stash a draft", which took the key and stopped it before the page's save heard it)
+        data-own-keys="meta+s ctrl+s"
+        className="w-full gap-0 pt-[env(safe-area-inset-top)] sm:max-w-5xl">
         <SheetTitle className="sr-only">Superagent</SheetTitle>
       <header className="flex items-center gap-1 border-b px-3 py-2">
         {/* On a phone the tabs don't fit beside the name: the name goes and the tabs scroll sideways, each on one line */}

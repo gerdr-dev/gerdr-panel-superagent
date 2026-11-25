@@ -306,18 +306,21 @@ function Repos({ repos, onChange }: { repos: Repo[]; onChange: (r: Repo[]) => vo
       {repos.map((r, i) => (
         // The folder's name leads (the full paths mostly share their start, so a cut-off path showed the same few words
         // on every row); the full path sits under it, wrapped rather than cut
-        <div key={r.path} className="space-y-1.5 rounded-lg border bg-background p-2.5">
-          <div className="flex items-center gap-2">
-            <RepoColor value={r.color} onChange={(color) => at(i, { color })} />
-            <span className="min-w-0 flex-1 truncate text-[13px] font-medium" style={r.color ? { color: r.color } : undefined} title={r.path}>
-              {r.path.replace(/\/+$/, "").split("/").pop() || r.path}
-            </span>
-            <Button variant="ghost" size="icon" className="-my-1 shrink-0" aria-label={`去掉 ${r.path}`} onClick={() => onChange(repos.filter((_, j) => j !== i))}>
-              <X className="size-3.5" />
-            </Button>
+        // The colour in a column of its own, so the name, the path and the note all start on one line under each other
+        <div key={r.path} className="flex gap-2.5 rounded-lg border bg-background p-2.5">
+          <RepoColor value={r.color} onChange={(color) => at(i, { color })} />
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <div className="flex h-5 items-center gap-2">
+              <span className="min-w-0 flex-1 truncate text-[13px] font-medium" style={r.color ? { color: r.color } : undefined} title={r.path}>
+                {r.path.replace(/\/+$/, "").split("/").pop() || r.path}
+              </span>
+              <Button variant="ghost" size="icon" className="-my-1 shrink-0" aria-label={`去掉 ${r.path}`} onClick={() => onChange(repos.filter((_, j) => j !== i))}>
+                <X className="size-3.5" />
+              </Button>
+            </div>
+            <p className="-mt-1 break-all font-mono text-[11px] text-muted-foreground">{r.path}</p>
+            <input className={input} value={r.note ?? ""} placeholder="说明：比如「行情服务的后端」" onChange={(e) => at(i, { note: e.target.value })} />
           </div>
-          <p className="-mt-1 break-all font-mono text-[11px] text-muted-foreground">{r.path}</p>
-          <input className={input} value={r.note ?? ""} placeholder="说明：比如「行情服务的后端」" onChange={(e) => at(i, { note: e.target.value })} />
         </div>
       ))}
       <div className="flex items-start gap-1.5">
@@ -372,14 +375,15 @@ function RepoColor({ value, onChange }: { value?: string; onChange: (c: string |
               />
             ))}
           </div>
+          {/* Lined up with the swatches above: no inset of its own, a hover that changes the text only */}
           <div className="flex items-center gap-2 text-[12px]">
-            <label className="flex flex-1 cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 hover:bg-accent">
+            <label className="flex flex-1 cursor-pointer items-center gap-2 py-1 text-muted-foreground hover:text-foreground">
               {/* The system's picker: any colour, kept as #rrggbb */}
-              <input type="color" className="size-5 cursor-pointer rounded border-0 bg-transparent p-0" value={value ?? "#8b8d98"} onChange={(e) => onChange(e.target.value)} />
+              <input type="color" className="size-5 shrink-0 cursor-pointer rounded-full border-0 bg-transparent p-0 [&::-webkit-color-swatch]:rounded-full [&::-webkit-color-swatch]:border-0 [&::-webkit-color-swatch-wrapper]:p-0" value={value ?? "#8b8d98"} onChange={(e) => onChange(e.target.value)} />
               自定义
             </label>
             {value && (
-              <button type="button" className="rounded-md px-1.5 py-1 text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => (onChange(undefined), setOpen(false))}>
+              <button type="button" className="py-1 text-muted-foreground hover:text-foreground" onClick={() => (onChange(undefined), setOpen(false))}>
                 不要颜色
               </button>
             )}
