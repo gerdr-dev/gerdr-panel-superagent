@@ -413,7 +413,7 @@ export function noteIgnored(ctx: Ctx, session: string | undefined, a: { id: stri
   const note = (ctx.sessions as any).note;
   if (!session || typeof note !== "function") return false;
   try {
-    note(session, `ignored:${a.id}`, ignoredText([a]), { fold: `[任务面板] 用户忽略了你问的「${cutTitle(a.title)}」` });
+    note(session, `ignored:${a.id}`, ignoredText([a]), { fold: `你忽略了「${cutTitle(a.title)}」` });
     return true;
   } catch {
     return false;

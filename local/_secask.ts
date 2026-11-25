@@ -147,5 +147,5 @@ export async function secretaryIgnored(ctx: Ctx) {
   if (!s.main || !(s.asks ?? []).some((a) => a.closedByUser && !a.told)) return;
   if (ctx.sessions.get(s.main)?.status !== "running") return;
   const lead = secIgnoredLead(ctx);
-  if (lead) await ctx.sessions.send(s.main, lead, { now: true, fold: "[任务面板] 用户忽略了你问的问题" } as any).catch(() => {});
+  if (lead) await ctx.sessions.send(s.main, lead, { now: true, fold: "你忽略了秘书问的问题" } as any).catch(() => {});
 }

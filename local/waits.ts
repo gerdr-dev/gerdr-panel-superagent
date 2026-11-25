@@ -441,6 +441,7 @@ export async function tick(input: unknown, ctx: Ctx) {
         : "";
       await wake(ctx, t.id, {
         how: "到点了，回来看",
+        fold: `[任务面板] 到点了，回来看：${cutLine(w.what, 50)}`,
         text: `[任务面板] 到时间了，回来看一下（任务 ${t.id}）：${w.what}。${late}`,
         // That wait_for ends (all its items): it looks again and waits again if it must. Others stay open
         ends: (x) => x.since === w.since && isOutside(x),

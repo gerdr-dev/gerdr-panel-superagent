@@ -12,7 +12,7 @@ import { activity, find, ignoredLead, update, type Task } from "./_store";
 import { endWaits, open, type Wait } from "./_waits";
 
 export type Wake = {
-  /** What came, in a few words: "石石 回复了", "到点了", "你答了：用方案 B". */
+  /** What came, in a few words, said to the user (the default fold line): "石石 回复了", "你答了：用方案 B". */
   how: string;
   /** The message for the worker. */
   text: string;
@@ -31,8 +31,10 @@ export type Wake = {
   feedFiles?: { path: string; name?: string }[];
   /**
    * The one line the worker's chat shows instead of the message (Gerdr's send fold): the board's prompt to it is
-   * long and mostly instructions, and what came already shows as the chat's wait card. Default "[任务面板] <how>";
-   * false: shown whole.
+   * long and mostly instructions, and what came already shows as the chat's wait card. Default: `how` as it is, for
+   * what the user did (你答了：…): the row's look already says it isn't typed, and a 「[任务面板]」 in front of the
+   * user's own answer read as if the panel had answered (2026-11-25). What the panel says on its own (到点了, 等到了, a
+   * reminder) passes its own fold starting with 「[任务面板]」. false: shown whole.
    */
   fold?: string | false;
 };
@@ -65,7 +67,7 @@ export async function wake(ctx: Ctx, id: string, m: Wake): Promise<Task> {
     x.updatedAt = now;
     return x;
   });
-  const fold = m.fold === false ? undefined : m.fold || `[任务面板] ${cutLine(m.how, 80)}`;
+  const fold = m.fold === false ? undefined : m.fold || cutLine(m.how, 80);
   // fold false: shown whole (Gerdr folds a message from code by default)
   if (t.session) await ctx.sessions.send(t.session, lead ? `${lead}\n\n${m.text}` : m.text, { now: true, attachments: m.files, ...(m.fold === false ? { show: true } : { fold }) } as any);
   return t;

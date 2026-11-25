@@ -15,7 +15,7 @@
 
 import { find, load, update, note, type Task } from "./_store";
 import { add, drop, start } from "./tasks";
-import { wake } from "./_wake";
+import { cutLine, wake } from "./_wake";
 import { addWait, endWaits } from "./_waits";
 import { compact } from "./_main";
 
@@ -103,7 +103,7 @@ async function onUpdate(ctx: Ctx, mine: Task[], u: { state?: string; text?: stri
           x.updatedAt = Date.now();
         });
         if (t.session)
-          await wake(ctx, t.id, { how: "对方打回了", text: `[任务面板] 发起人没通过：\n\n${text}\n\n照这个改，改完在回复里说改了什么。` });
+          await wake(ctx, t.id, { how: "对方打回了", fold: `发起人没通过：${cutLine(text, 60)}`, text: `[任务面板] 发起人没通过：\n\n${text}\n\n照这个改，改完在回复里说改了什么。` });
         break;
       case "dropped":
         if (t.status !== "done") await drop({ id: t.id, reason: `对方不要了${text ? `：${text}` : ""}` }, ctx);

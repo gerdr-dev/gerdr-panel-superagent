@@ -155,7 +155,7 @@ export async function list(input: unknown, ctx: Ctx) {
     return s;
   });
   // Into the turn it is in: now, so it hears it before it acts on the question (the board's own messages carry it first)
-  for (const n of ignored) await ctx.sessions.send(n.session, n.text, { now: true, fold: "[任务面板] 用户忽略了你问的问题" } as any).catch(() => {});
+  for (const n of ignored) await ctx.sessions.send(n.session, n.text, { now: true, fold: "你忽略了它问的问题" } as any).catch(() => {});
   await secretaryIgnored(ctx);
   for (const n of nudge) {
     await ctx.sessions
@@ -902,7 +902,7 @@ export async function complete(input: { id: string; value?: string }, ctx: Ctx) 
       : `你请用户做的「${h.title}」（${h.id}）他做完了。${back}\n先按你说的方式核验${h.verify ? `（${h.verify}）` : ""}，没问题再继续；核验不过就用 ask_human 再问一次，说明哪里不对。`;
   // Its wait on h ended in the write above (_waits.ts sync); this only tells the worker, the one way every wake goes
   const woke = t.session && t.status !== "dropped";
-  if (woke) await wake(ctx, t.id, { how: h.handBack.kind === "choice" ? `你答了：${h.handedBack}` : "你做完了", text });
+  if (woke) await wake(ctx, t.id, { how: h.handBack.kind === "choice" ? `你答了：${h.handedBack}` : `你做完了「${h.title}」`, text });
   return { ask: h, task: t.id, woke: woke ? [t.id] : [] };
 }
 
@@ -960,7 +960,7 @@ export async function refreshAsk(input: { id: string }, ctx: Ctx) {
   const ids = qs.length ? qs.map((q) => `${h.id}#${q.id}「${q.title}」`).join("、") : `${h.id}「${h.title}」`;
   update(ctx, (s) => Object.assign(findAsk(s, h.id).a, { refreshing: Date.now() }));
   await wake(ctx, w.id, {
-    how: "你请它更新问题",
+    how: `你请它按最新情况更新「${h.title}」`,
     text:
       `[任务面板] 用户请你把还在问他的 ${ids} 按现在的情况更新：这些是在你们后来的对话之前问的。\n` +
       `- 还要问但问法变了：ask_human 带 replaces（写上旧的 id）重新问，写清现在的情况和选项；\n` +
@@ -1499,7 +1499,8 @@ async function deliver(ctx: Ctx, t: Task, h: Ask) {
     (skipped.length ? `\n用户说不用答了（已经过时，别再按它们做）：${skipped.map((q) => `「${q.title}」`).join("、")}` : "") +
     `\n照这些接着做。`;
   // Folded to one line that carries the answers: shown whole, the panel's wrapping (你问的问题…照这些接着做) read as a
-  // message the user typed themselves (2026-11-25); the line's 「[任务面板] 你答了…」 says it came from the panel
+  // message the user typed themselves (2026-11-25); the folded row's own look says it came from the panel, so the line
+  // is just 「你答了：…」 (a 「[任务面板]」 in front made the user's answer read as the panel's)
   const how = asked(h).length ? `你答了：${asked(h).map((q) => q.answer).join("；")}` : `你说「${h.title}」都不用答了`;
   await wake(ctx, t.id, { how, text }).catch(() => {});
 }
