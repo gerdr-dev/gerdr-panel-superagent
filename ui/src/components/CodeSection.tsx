@@ -8,7 +8,7 @@ import { NewTaskDialog, TaskDetail } from "./TaskDetail";
 import { ImportDialog } from "./ImportDialog";
 import { RowMenu, type RowMenuItem } from "./RowMenu";
 import { openAsks, type Task, useTasks } from "../lib/tasks";
-import { CodeRow, type CodeRowInfo, closeCodeDrawer, newCodeTab, useCodeDirs, useCodeStart, useCodeOrder, useCodeClosed, useCodeNumber, openSettings, showInCode, useCodeRowDrop, useCodePaneTag, jumpInCode, useCodeRowMenu, useCodeRows, useCodeSession, type CodePaneTag } from "../lib/view";
+import { CodeRow, type CodeRowInfo, closeCodeDrawer, newCodeTab, useCodeDirs, useCodeStart, useCodeOrder, useCodeNumber, openSettings, showInCode, useCodeRowDrop, useCodePaneTag, jumpInCode, useCodeRowMenu, useCodeRows, useCodeSession, type CodePaneTag } from "../lib/view";
 import { usePanelChange, usePanelVisible, useRefresh, useSessions } from "../lib/visible";
 
 // Code's whole list, drawn by this panel (lib/view.ts, layout.tsx; core CodeView list="replace"): not Code's
@@ -216,8 +216,6 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   useCodeDirs(repos.map((r) => ({ path: r.path, name: base(r.path) })));
   // What the person starts themselves (Cmd+T, +, ⌘D, a fork) is a task from the start, like the secretary's (local/blank.ts)
   useCodeStart(async (o) => (await run<{ session: string }>("blank.run", o)).session);
-  // ⌘W on one of those never spoken to: it goes from the list (local/blank.ts closed); a task with work in it stays
-  useCodeClosed((session) => void run("blank.closed", { session }).catch(() => {}));
 
   const [activeOpen, foldActive] = useFold("active", true);
   const [reviewOpen, foldReview] = useFold("review");
@@ -232,7 +230,14 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   const paneOf = new Map<string, CodeRowInfo>();
   for (const r of rows) if (r.session && r.kind === "session" && !paneOf.has(r.session)) paneOf.set(r.session, r);
   const byRecent = (a: Task, b: Task) => b.updatedAt - a.updatedAt;
-  const running = all.filter((t) => t.status === "running");
+  // A task opened here (⌘T) and not spoken to yet is listed only while it's on screen: ⌘W takes it away (Gerdr's
+  // hosted close) and ⇧⌘T brings it back as the same task. It was deleted on close, so ⇧⌘T brought back a
+  // conversation that was no task any more (2026-11-25)
+  const untouched = (t: Task) => {
+    const s = (t as { blank?: boolean }).blank && t.session ? byId[t.session] : undefined;
+    return !!s && !(s as { lastSeq?: number }).lastSeq && !s.title;
+  };
+  const running = all.filter((t) => t.status === "running" && !(untouched(t) && !paneOf.has(t.session!)));
   const youTasks = running.filter(needsPerson).sort(byRecent);
   const activeTasks = running.filter((t) => !needsPerson(t)).sort(byRecent);
   const review = all.filter((t) => t.status === "review").sort(byRecent);

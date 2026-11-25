@@ -25,7 +25,6 @@ type Core = {
   jumpInCode?: (session: string, ref: string) => void;
   useCodeDirs?: (dirs: { path: string; name?: string }[]) => void;
   useCodeOrder?: (sessions: string[]) => void;
-  useCodeClosed?: (fn: (session: string) => void) => void;
   useCodeNumber?: (session?: string) => number | undefined;
   useCodeStart?: (fn: (o: { agent: string; cwd: string; mode?: string; continueFrom?: string }) => Promise<string>) => void;
   useCodeRowMenu?: (fn: (row: { pane: string; session?: string }) => CodeMenuItem[]) => void;
@@ -56,8 +55,6 @@ export const useCodeStart: (fn: (o: { agent: string; cwd: string; mode?: string;
  * instead of Code's tabs and workspaces. An older Gerdr: Code's keys as they were.
  */
 export const useCodeOrder: (sessions: string[]) => void = c.useCodeOrder ?? (() => {});
-/** Told when the person closes a conversation's pane. An older Gerdr: never. */
-export const useCodeClosed: (fn: (session: string) => void) => void = c.useCodeClosed ?? (() => {});
 /** The ⌘N number for a row we draw ourselves, while ⌘ is held (Code's rows number themselves). */
 export const useCodeNumber: (session?: string) => number | undefined = c.useCodeNumber ?? (() => undefined);
 /** Close a phone's drawer (Code's list), before showing what opens behind it. */

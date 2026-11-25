@@ -6,7 +6,6 @@
 // waits for the person's first message.
 
 import { add, drop, start } from "./tasks";
-import { load, update } from "./_store";
 
 /** { cwd, agent?, mode?, continueFrom? } → { task, session }: the worker Code shows. */
 export async function run(input: { cwd: string; agent?: string; mode?: string; continueFrom?: string }, ctx: Ctx) {
@@ -35,25 +34,3 @@ export async function run(input: { cwd: string; agent?: string; mode?: string; c
   }
 }
 
-/**
- * The person closed the pane of a conversation (core useCodeClosed). A task opened here (blank) that nobody spoke to
- * goes away whole, as an empty tab would (the person, 2026-11-25: ⌘W on one moved on but left it in the list). One
- * with anything said in it stays: closing its pane isn't giving the work up. { session } → { removed? }.
- */
-export function closed(input: { session: string }, ctx: Ctx) {
-  const id = String(input?.session ?? "");
-  const t = load(ctx).store.tasks.find((x) => x.session === id);
-  if (!t || !(t as any).blank || t.status !== "running") return {};
-  let said: { role: string }[] | null | undefined;
-  try {
-    said = (ctx.sessions as any).read?.(id, { last: 20 });
-  } catch {
-    return {};
-  }
-  // Can't tell (a Gerdr without read): keep it
-  if (!Array.isArray(said) || said.some((x) => x.role === "user")) return {};
-  update(ctx, (s) => {
-    s.tasks = s.tasks.filter((x) => x.id !== t.id);
-  });
-  return { removed: t.id };
-}
