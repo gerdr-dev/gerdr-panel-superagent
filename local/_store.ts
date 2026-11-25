@@ -398,8 +398,13 @@ export function ignoredLead(t: Task): string {
 }
 
 /** What an agent is told about its questions the user ignored. */
-export function ignoredText(asks: { id: string; title: string }[]): string {
-  return `[任务面板] 用户忽略了你问的${asks.map((a) => `「${a.title}」（${a.id}）`).join("、")}：多半已经过时了。别等它，也别原样再问；还需要的话按现在的情况重新 ask_human。`;
+export function ignoredText(asks: { id: string; title: string }[], waiting: string[] = []): string {
+  // The secretary's messages put on wait for an ignored question (decide's wait + ask): closed along with it, or they
+  // hang in 去向 as 等你 with no card left to answer (2026-11-25, the user: "忽略后提醒秘书一起关掉")
+  const also = waiting.length
+    ? `在等它的消息 ${waiting.join("、")} 一起关掉：superagent.decide 给它们 ignore（reason 写「用户忽略了这个问题」）；其中有还必须处理的，按现在的情况重新 ask_human 再 wait。`
+    : "";
+  return `[任务面板] 用户忽略了你问的${asks.map((a) => `「${a.title}」（${a.id}）`).join("、")}：多半已经过时了。别等它，也别原样再问；还需要的话按现在的情况重新 ask_human。${also}`;
 }
 
 /**
@@ -409,11 +414,11 @@ export function ignoredText(asks: { id: string; title: string }[]): string {
  * as a second one, starting a turn of its own when the first had ended (2026-11-24). false on a Gerdr without notes:
  * the caller leaves it untold, for ignoredLead / secIgnoredLead.
  */
-export function noteIgnored(ctx: Ctx, session: string | undefined, a: { id: string; title: string }): boolean {
+export function noteIgnored(ctx: Ctx, session: string | undefined, a: { id: string; title: string }, waiting: string[] = []): boolean {
   const note = (ctx.sessions as any).note;
   if (!session || typeof note !== "function") return false;
   try {
-    note(session, `ignored:${a.id}`, ignoredText([a]), { fold: `你忽略了「${cutTitle(a.title)}」` });
+    note(session, `ignored:${a.id}`, ignoredText([a], waiting), { fold: `你忽略了「${cutTitle(a.title)}」` });
     return true;
   } catch {
     return false;

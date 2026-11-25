@@ -137,7 +137,8 @@ export function closeSec(input: { id: string }, ctx: Ctx) {
     const a = findSec(x.asks, String(input?.id ?? ""));
     if (a.status !== "open") throw new Error(`「${a.title}」已经不在等你了`);
     // Said with the secretary's next message, whoever sends it (noteIgnored); untold only on a Gerdr without notes
-    Object.assign(a, { status: "dropped", closedByUser: true, told: noteIgnored(ctx, x.main, a), doneAt: Date.now() });
+    const waiting = (x.items ?? []).filter((y) => y.state === "waiting" && y.ask === a.id).map((y) => y.id);
+    Object.assign(a, { status: "dropped", closedByUser: true, told: noteIgnored(ctx, x.main, a, waiting), doneAt: Date.now() });
     return a;
   });
   return { closed: a.id };

@@ -19,7 +19,7 @@ import { forRouter } from "./memory";
 import { allAgents } from "./_agents";
 import { textOf } from "./playbooks";
 import { DATA } from "./_user";
-import { activity, draftOf, find, load as loadTasks, note, update as updateTasks, type Task } from "./_store";
+import { activity, draftOf, find, ignoredText, load as loadTasks, note, update as updateTasks, type Task } from "./_store";
 import { cutLine, wake } from "./_wake";
 import { waitingOn } from "./_waits";
 import { draftLines, pendingFor } from "./_outbox";
@@ -559,12 +559,13 @@ export async function toMain(ctx: Ctx, blocks: string[], why: Why = "route", att
 
 /** The secretary's questions the user ignored (the card's ✕) it hasn't heard of, as a line; marks them told. "" if none. */
 export function secIgnoredLead(ctx: Ctx): string {
-  const closed = updateState(ctx, (x) => {
+  const { closed, waiting } = updateState(ctx, (x) => {
     const c = (x.asks ?? []).filter((a) => a.closedByUser && !a.told);
     for (const a of c) a.told = true;
-    return c;
+    const ids = new Set(c.map((a) => a.id));
+    return { closed: c, waiting: x.items.filter((y) => y.state === "waiting" && y.ask && ids.has(y.ask)).map((y) => y.id) };
   });
-  return closed.length ? `[任务面板] 用户忽略了你问的${closed.map((a) => `「${a.title}」（${a.id}）`).join("、")}：多半已经过时了。别等它，也别原样再问；还需要的话按现在的情况重新 ask_human。` : "";
+  return closed.length ? ignoredText(closed, waiting) : "";
 }
 
 const abs = (ctx: Ctx, p: string) => `${ctx.workspace.dir}/${p}`;
