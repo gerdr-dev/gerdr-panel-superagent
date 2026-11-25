@@ -277,7 +277,7 @@ function Path({ x, onTask }: { x: Item; onTask: (id: string) => void }) {
       key: `via-${v.task}`,
       body: (
         <>
-          直接给 <TaskChip id={v.task} onTask={onTask} />：{v.why === "wait" ? "它在等这段对话里的回复" : v.why === "thread" ? "它跟着这段对话（从这里建的，或之前并进过）" : "它跟着这段对话（那时还没记是哪种）"}，不经过秘书
+          直接给 <TaskChip id={v.task} onTask={onTask} />：{v.why === "wait" ? "它在等这段对话里的回复" : v.why === "thread" ? "它跟着这段对话（从这里建的，或之前并进过）" : "它跟着这段对话，或在等那里的回复（那时还没记是哪种）"}，不经过秘书
         </>
       ),
     });
