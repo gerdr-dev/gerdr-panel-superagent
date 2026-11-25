@@ -79,9 +79,10 @@ const base = (p?: string) => (p ?? "").replace(/\/+$/, "").split("/").pop() ?? "
 type Main = { id: string; status: string; waiting?: string } | null;
 type Sess = { id: string; status: string; agent?: string; title?: string; cwd?: string; updatedAt?: number; turn?: { startedAt?: number }; tags?: Record<string, string> };
 /** What the functions last answered, for the next mount to start from. */
-const last: { main: Main; asks: number; standing: Record<string, "review" | "done">; agents: AgentOpt[]; agent: string; repos: { path: string; color?: string }[] } = {
+const last: { main: Main; asks: number; secOpen: { id: string; title: string }[]; standing: Record<string, "review" | "done">; agents: AgentOpt[]; agent: string; repos: { path: string; color?: string }[] } = {
   main: null,
   asks: 0,
+  secOpen: [],
   standing: {},
   agents: [],
   agent: "",
@@ -116,15 +117,19 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   // From what was last known (see lib/tasks.ts lastTasks: this mounts anew with every opening of a phone's drawer)
   const [main, setMain] = useState<Main>(last.main);
   const [asks, setAsks] = useState(last.asks);
+  // What the secretary asks of the person, one by one: its pane's 等你 lists them and jumps to each card
+  const [secOpen, setSecOpen] = useState(last.secOpen);
   // Which session is the secretary only changes with the log (pushed); its status is followed live below
   useRefresh(
     () =>
-      run<{ main: Main; asks?: { open: unknown[] } }>("superagent.log", { limit: 1 }).then(
+      run<{ main: Main; asks?: { open: { id: string; title: string }[] } }>("superagent.log", { limit: 1 }).then(
         (r) => {
           last.main = r.main;
           last.asks = r.asks?.open?.length ?? 0;
+          last.secOpen = r.asks?.open ?? [];
           setMain(last.main);
           setAsks(last.asks);
+          setSecOpen(last.secOpen);
         },
         () => {},
       ),
@@ -348,7 +353,18 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   // it moves it. Two tasks side by side had the same title bar, and on a phone (the list in the drawer) an open
   // conversation said nothing of its status. The person's own conversations get it too, without a number
   useCodePaneTag(({ session }) => {
-    if (!session || isMain(session)) return null;
+    if (!session) return null;
+    // The secretary's: no status (it isn't a task), but what it asks of the person, as on a task (it had none: 等你 2
+    // on its row in the list, nothing in its own title bar)
+    if (isMain(session))
+      return secOpen.length
+        ? {
+            label: secOpen.length > 1 ? `等你 ${secOpen.length}` : "等你",
+            tone: "warn",
+            title: "秘书在等你的事：点一条跳过去",
+            items: secOpen.map((a) => ({ id: `sec-${a.id}`, label: a.title, onSelect: () => jumpInCode(session, a.id) })),
+          }
+        : null;
     const t = taskOf.get(session);
     // Not ours: it says so, and the tap brings it in
     if (!t)
