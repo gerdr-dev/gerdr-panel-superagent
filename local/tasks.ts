@@ -634,7 +634,7 @@ export function remarkOf(t: Task) {
 }
 
 export async function start(
-  input: { id: string; prompt?: string; repo?: string; agent?: string; model?: string; effort?: string; worktree?: boolean; mode?: string; reply?: string; /** A conversation its worker carries on (local/import.ts): its chat comes along, and nothing is sent to it now */ continueFrom?: string },
+  input: { id: string; prompt?: string; repo?: string; agent?: string; model?: string; effort?: string; worktree?: boolean; mode?: string; reply?: string; /** A conversation its worker carries on (local/import.ts): its chat comes along, and nothing is sent to it now */ continueFrom?: string; /** Nothing sent: the person types the first message themselves (local/blank.ts) */ quiet?: boolean },
   ctx: Ctx,
 ) {
   // reply: the card's 回复对方 box, kept on the task until it's out (it may go to the secretary for a repository first);
@@ -689,7 +689,7 @@ export async function start(
     // tools). A report would only have the panel's agent repeat the worker's reply to nobody, a turn each time.
   } as any);
   // Carried on from a conversation the person had (import): it has said nothing new yet, and they speak next
-  if (!input.continueFrom)
+  if (!input.continueFrom && !input.quiet)
     await ctx.sessions.send(sess.id, (prompt || "看附件，照里面的做。") + remarkOf(t), {
       attachments: (t.attachments ?? []).map((a) => a.path),
       show: true,
