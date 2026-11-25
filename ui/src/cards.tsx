@@ -4,6 +4,7 @@ import { DefaultCard, registerCard, type CardProps } from "@gerdr/core";
 import { run } from "./lib/gerdr";
 import { jumpInCode } from "./lib/view";
 import { boardFresh, cardState, onCardStates } from "./lib/cardstates";
+import { Md } from "./lib/markdown";
 
 // Cards the board's panel tools put in a worker's chat (local/board.ts). Gerdr loads this file at start, so they're drawn
 // this way wherever the chat is shown: the board's drawer, or the worker's tab in Code.
@@ -431,6 +432,29 @@ function TaskWait({ card }: CardProps) {
 
 registerCard("task-wait", TaskWait);
 
+/**
+ * A reply's words as Markdown, for reading them in the card. A reply is written line by line for a chat, where every
+ * line break shows; Markdown would join them into one paragraph, so each kept line ends in a hard break. Slack text
+ * is Slack's own mrkdwn: *bold* (Markdown's italic), ~strike~ and • bullets, turned into their Markdown forms.
+ * Only for showing: what is sent stays as written.
+ */
+function replyMd(text: string, slack: boolean): string {
+  let fence = false;
+  // Code lines (the fences too) are left alone: no hard breaks, no mrkdwn
+  const code: boolean[] = [];
+  const lines = text.split("\n").map((l, i) => {
+    const edge = /^\s*```/.test(l);
+    code[i] = fence || edge;
+    if (edge) fence = !fence;
+    if (code[i] || !slack) return l;
+    return l
+      .replace(/^(\s*)[•◦▪]\s*/, (_, ind: string) => `${"  ".repeat(Math.ceil(ind.length / 2))}- `)
+      .replace(/(^|[^*\w])\*(?!\s)([^*\n]+?)\*(?![*\w])/g, "$1**$2**")
+      .replace(/(^|[^~\w])~(?!\s)([^~\n]+?)~(?![~\w])/g, "$1~~$2~~");
+  });
+  return lines.map((l, i) => (code[i] || !l.trim() || !lines[i + 1]?.trim() || code[i + 1] ? l : `${l}  `)).join("\n");
+}
+
 type Out = { state: "pending" | "sent" | "skipped" | "withdrawn" | "missing"; text?: string; where?: string; doneAt?: number; edited?: boolean; reason?: string };
 
 /**
@@ -448,8 +472,10 @@ function TaskOutgoing({ card }: CardProps) {
     (v) => v.state !== "pending",
     30000,
   );
-  // The words are an input from the start, filled with what the worker wrote: edit them in place, then send
+  // The words are drawn as Markdown (Slack's *bold* and • lists read as they will in Slack); 编辑 turns them into a
+  // box filled with what the worker wrote, to change before sending
   const [draft, setDraft] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState("");
   const [err, setErr] = useState("");
   const box = useRef<HTMLTextAreaElement>(null);
@@ -463,13 +489,14 @@ function TaskOutgoing({ card }: CardProps) {
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight + 2}px`;
-  }, [value, st?.state]);
+  }, [value, st?.state, editing]);
   const act = async (fn: "send" | "skip") => {
     setBusy(fn);
     setErr("");
     try {
       await run(`outbox.${fn}`, fn === "send" ? { ref: c.ref, text: value } : { ref: c.ref }, { project: c.project });
       setDraft(null);
+      setEditing(false);
       await get();
     } catch (e) {
       setErr(String((e as Error)?.message ?? e));
@@ -502,23 +529,29 @@ function TaskOutgoing({ card }: CardProps) {
           {c.task ? ` · ${c.task}` : ""}
         </span>
       </div>
-      {/* The box stays a textarea once it's over (read-only), so its size is the same as when it could be edited */}
-      <textarea
-        ref={box}
-        rows={2}
-        readOnly={over}
-        className={`w-full resize-none overflow-hidden rounded-md border bg-background px-2 py-1.5 text-[13px] leading-relaxed outline-none focus:ring-1 focus:ring-brand ${over ? "text-muted-foreground" : ""} ${over && !sent ? "line-through" : ""}`}
-        value={value}
-        disabled={!!busy}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          // ⌘/Ctrl+Enter sends, like the chat's own box with a modifier; a plain Enter is a new line
-          if (!over && e.key === "Enter" && (e.metaKey || e.ctrlKey) && value.trim() && !busy) {
-            e.preventDefault();
-            void act("send");
-          }
-        }}
-      />
+      {editing && !over ? (
+        <textarea
+          ref={box}
+          rows={2}
+          autoFocus
+          className="w-full resize-none overflow-hidden rounded-md border bg-background px-2 py-1.5 text-[13px] leading-relaxed outline-none focus:ring-1 focus:ring-brand"
+          value={value}
+          disabled={!!busy}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            // ⌘/Ctrl+Enter sends, like the chat's own box with a modifier; a plain Enter is a new line
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && value.trim() && !busy) {
+              e.preventDefault();
+              void act("send");
+            }
+          }}
+        />
+      ) : (
+        // The same frame as the box, so 编辑 doesn't move the text around
+        <div className={`rounded-md border bg-background px-2 py-1.5 leading-relaxed ${over ? "text-muted-foreground" : ""} ${over && !sent ? "line-through" : ""}`}>
+          <Md>{replyMd(value, /slack/i.test(where))}</Md>
+        </div>
+      )}
       {over ? (
         // The buttons' row, at their height (py-1 and a border, as the buttons have): where it ended instead
         <div className="flex items-center gap-2 border border-transparent py-1 text-[12px] text-muted-foreground">
@@ -534,13 +567,19 @@ function TaskOutgoing({ card }: CardProps) {
           <button className="rounded-md border px-2.5 py-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50" disabled={!!busy} onClick={() => act("skip")}>
             不发
           </button>
+          {!editing && (
+            <button className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50" disabled={!!busy} onClick={() => setEditing(true)}>
+              <Pencil className="size-3" />
+              编辑
+            </button>
+          )}
           {edited && (
             <button className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-muted-foreground hover:bg-accent hover:text-foreground" disabled={!!busy} onClick={() => setDraft(null)}>
               <Undo2 className="size-3" />
               恢复原文
             </button>
           )}
-          <span className="ml-auto text-muted-foreground/70">⌘↵ 发送</span>
+          {editing && <span className="ml-auto text-muted-foreground/70">⌘↵ 发送</span>}
           {err && <span className="w-full text-bad">{err}</span>}
         </div>
       )}
