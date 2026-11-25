@@ -63,7 +63,9 @@ export function ImportDialog({ repos, sessions, onClose, onDone }: { repos: Impo
               <Line key={r.path} on={r.have || pickRepos.has(r.path)} disabled={r.have} onClick={() => toggle(pickRepos, setPickRepos, r.path)} title={r.path}>
                 <Folder className="size-3.5 shrink-0 text-muted-foreground" />
                 <span className="min-w-0 flex-1 truncate">{r.name}</span>
-                <span className="max-w-[55%] shrink-0 truncate font-mono text-[11px] text-muted-foreground">{r.have ? "已有" : r.path}</span>
+                {/* The path even when it's already there: two workspaces often share a folder name (work, ui…) */}
+                <span className="max-w-[55%] shrink-0 truncate font-mono text-[11px] text-muted-foreground" style={{ direction: "rtl" }}>{"\u200e" + r.path}</span>
+                {r.have && <span className="shrink-0 text-[11px] text-muted-foreground">已有</span>}
               </Line>
             ))}
           </Section>
