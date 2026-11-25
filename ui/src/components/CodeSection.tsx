@@ -5,6 +5,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { run } from "../lib/gerdr";
 import { WholeWindow } from "../lib/portal";
 import { NewTaskDialog, TaskDetail } from "./TaskDetail";
+import { RowMenu, type RowMenuItem } from "./RowMenu";
 import { openAsks, type Task, useTasks } from "../lib/tasks";
 import { CodeRow, type CodeRowInfo, closeCodeDrawer, newCodeTab, useCodeDirs, openSettings, showInCode, useCodeRowDrop, useCodeRowMenu, useCodeRows, useCodeSession } from "../lib/view";
 import { usePanelChange, usePanelVisible, useRefresh, useSessions } from "../lib/visible";
@@ -60,10 +61,7 @@ const STATUS_ICON: Record<Status, React.ReactNode> = {
 function FoldTitle({ open, onClick, icon, label, children }: { open: boolean; onClick: () => void; icon: React.ReactNode; label: React.ReactNode; children?: React.ReactNode }) {
   const arrow = <ChevronRight className={clsx("size-3 shrink-0 transition-transform", open && "rotate-90")} />;
   return (
-    <button
-      className="flex h-7 w-full items-center gap-2 rounded-md pr-1 pl-1.5 text-[11px] font-medium text-muted-foreground select-none hover:bg-accent/60 hover:text-foreground max-md:h-9"
-      onClick={onClick}
-    >
+    <button className="flex h-7 w-full items-center gap-2 rounded-md pr-1 pl-1.5 text-[11px] font-medium text-muted-foreground select-none hover:bg-accent/60 hover:text-foreground max-md:h-9" onClick={onClick}>
       <span className="flex size-3.5 shrink-0 items-center justify-center max-md:size-4">{icon}</span>
       <span className="flex min-w-0 items-center gap-1">
         {label}
@@ -79,7 +77,14 @@ const base = (p?: string) => (p ?? "").replace(/\/+$/, "").split("/").pop() ?? "
 type Main = { id: string; status: string; waiting?: string } | null;
 type Sess = { id: string; status: string; agent?: string; updatedAt?: number; turn?: { startedAt?: number }; tags?: Record<string, string> };
 /** What the functions last answered, for the next mount to start from. */
-const last: { main: Main; asks: number; standing: Record<string, "review" | "done">; agents: AgentOpt[]; agent: string; repos: { path: string }[] } = { main: null, asks: 0, standing: {}, agents: [], agent: "", repos: [] };
+const last: { main: Main; asks: number; standing: Record<string, "review" | "done">; agents: AgentOpt[]; agent: string; repos: { path: string }[] } = {
+  main: null,
+  asks: 0,
+  standing: {},
+  agents: [],
+  agent: "",
+  repos: [],
+};
 type Status = "todo" | "running" | "review" | "done";
 const LABEL: Record<Status, string> = { todo: "待办", running: "进行中", review: "待验收", done: "已完成" };
 const ICON: Record<"running" | "review" | "done", React.ReactNode> = { running: <CircleDashed />, review: <CircleDot />, done: <CheckCircle2 /> };
@@ -142,7 +147,15 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   const [standing, setStanding0] = useState<Record<string, "review" | "done">>(last.standing);
   const setStanding = (f: Record<string, "review" | "done"> | ((cur: Record<string, "review" | "done">) => Record<string, "review" | "done">)) =>
     setStanding0((cur) => (last.standing = typeof f === "function" ? f(cur) : f));
-  useRefresh(() => run<{ standing: Record<string, "review" | "done"> }>("own.get").then((r) => setStanding(r.standing), () => {}), [usePanelChange("user/data")], { poll: 30_000 });
+  useRefresh(
+    () =>
+      run<{ standing: Record<string, "review" | "done"> }>("own.get").then(
+        (r) => setStanding(r.standing),
+        () => {},
+      ),
+    [usePanelChange("user/data")],
+    { poll: 30_000 },
+  );
   const moveOwn = (session: string, to: Status) => {
     if (to === "todo") return void toast?.error?.("已经开着的对话回不到待办");
     setStanding((cur) => {
@@ -174,7 +187,15 @@ export function Fusion({ children }: { children: React.ReactNode }) {
     { fallback: 600_000, poll: 600_000 },
   );
   // The list comes from Gerdr's own config (a few commands): once, not with every change of ours
-  useRefresh(() => run<AgentOpt[]>("settings.agents").then((a) => setAgents((last.agents = a)), () => {}), [], { fallback: 600_000, poll: 600_000 });
+  useRefresh(
+    () =>
+      run<AgentOpt[]>("settings.agents").then(
+        (a) => setAgents((last.agents = a)),
+        () => {},
+      ),
+    [],
+    { fallback: 600_000, poll: 600_000 },
+  );
   // Who a conversation runs as is fixed when it starts, so a change means a new conversation that carries the old
   // one on (local/_main.ts): started right away when the secretary is idle, and shown in place of the old one when
   // that was the pane in front. Model and effort go back to the new agent's defaults: they are names of the old one's
@@ -245,6 +266,14 @@ export function Fusion({ children }: { children: React.ReactNode }) {
     if (t) return void (t.status !== to && move(t, to));
     if (row.session && !isMain(row.session)) moveOwn(row.session, to);
   };
+  // A task's menu items, the same wherever its menu is: Code's (its pane's ⋯, its row's right click) or our own row's
+  // when its conversation has no pane. 待办 → 进行中 is handing it out
+  const taskItems = (t: Task) => [
+    ...(["running", "review", "done"] as const)
+      .filter((to) => to !== t.status && (t.session || to === "running"))
+      .map((to) => ({ id: `move-${to}`, label: t.status === "todo" ? "派出去" : `移到${LABEL[to]}`, icon: ICON[to], onSelect: () => onMove(to, { task: t.id }) })),
+    { id: "drop", label: "放弃任务", icon: <Ban />, danger: true, onSelect: () => void act("drop", { id: t.id }).catch((e) => toast?.error?.(String(e?.message ?? e))) },
+  ];
   // The same moves in the pane's ⋯ menu and the row's right-click menu: the only way on a phone (no hover, no drag)
   useCodeRowMenu(({ session }) => {
     // The secretary's own conversation: which agent it runs as. Here, in its pane's ⋯ menu, rather than a dropdown on
@@ -267,18 +296,24 @@ export function Fusion({ children }: { children: React.ReactNode }) {
     }
     if (!session) return [];
     const t = taskOf.get(session);
-    const at: Status = t ? (t.status as Status) : (standing[session] ?? "running");
-    const items = (["running", "review", "done"] as const)
-      .filter((to) => to !== at)
-      .map((to) => ({ id: `move-${to}`, label: `移到${LABEL[to]}`, icon: ICON[to], onSelect: () => onMove(to, { session }) }));
-    if (t) items.push({ id: "drop", label: "放弃任务", icon: <Ban />, onSelect: () => void act("drop", { id: t.id }).catch((e) => toast?.error?.(String(e?.message ?? e))) } as any);
-    return items;
+    if (t) return taskItems(t);
+    const at: Status = standing[session] ?? "running";
+    return (["running", "review", "done"] as const).filter((to) => to !== at).map((to) => ({ id: `move-${to}`, label: `移到${LABEL[to]}`, icon: ICON[to], onSelect: () => onMove(to, { session }) }));
   });
   // No buttons on the rows for moving a task (there was a ✓ at the end of its line): every status is changed from the
   // menus (the pane's ⋯, the row's right click) or by dragging, one way for all. The exception is 待办: a task not
   // handed out has no conversation, so no pane and no menu, and its ▶ is the only way to start it on a phone
   const taskRow = (t: Task, action?: React.ReactNode) => (
-    <TaskRow key={t.id} t={t} pane={t.session ? paneOf.get(t.session) : undefined} current={(!!t.session && cur === t.session) || detail === t.id} action={action} agent={(t.session && byId[t.session]?.agent) || t.agent} onDetail={() => openDetail(t.id)} />
+    <TaskRow
+      key={t.id}
+      t={t}
+      pane={t.session ? paneOf.get(t.session) : undefined}
+      current={(!!t.session && cur === t.session) || detail === t.id}
+      action={action}
+      agent={(t.session && byId[t.session]?.agent) || t.agent}
+      menu={taskItems(t)}
+      onDetail={() => openDetail(t.id)}
+    />
   );
   const ownRow = (r: CodeRowInfo) => <CodeRow key={r.pane} pane={r.pane} where={base(r.cwd)} />;
 
@@ -397,14 +432,14 @@ export function Fusion({ children }: { children: React.ReactNode }) {
 
       {/* Always listed, empty ones too: each is where a row is dragged to */}
       <>
-          <Drop to="review" onMove={onMove}>
-            <FoldTitle open={reviewOpen} onClick={foldReview} icon={STATUS_ICON.review} label={`待验收 ${review.length + reviewOwn.length}`} />
-            {reviewOpen && sorted(review, reviewOwn)}
-          </Drop>
-          <Drop to="done" onMove={onMove}>
-            <FoldTitle open={doneOpen} onClick={foldDone} icon={STATUS_ICON.done} label={`已完成 ${done.length + doneOwn.length}`} />
-            {doneOpen && sorted(done, doneOwn)}
-          </Drop>
+        <Drop to="review" onMove={onMove}>
+          <FoldTitle open={reviewOpen} onClick={foldReview} icon={STATUS_ICON.review} label={`待验收 ${review.length + reviewOwn.length}`} />
+          {reviewOpen && sorted(review, reviewOwn)}
+        </Drop>
+        <Drop to="done" onMove={onMove}>
+          <FoldTitle open={doneOpen} onClick={foldDone} icon={STATUS_ICON.done} label={`已完成 ${done.length + doneOwn.length}`} />
+          {doneOpen && sorted(done, doneOwn)}
+        </Drop>
       </>
       {other.length > 0 && (
         <>
@@ -452,7 +487,19 @@ function Drop({ to, onMove, children }: { to: Status; onMove: (to: Status, row: 
 
 type AgentOpt = { id: string; name: string; default?: boolean };
 
-function RowShell({ current, onClick, title, drag, children }: { current?: boolean; onClick: () => void; title?: string; /** A task's id: the row can be dragged onto a group */ drag?: string; children: React.ReactNode }) {
+function RowShell({
+  current,
+  onClick,
+  title,
+  drag,
+  children,
+}: {
+  current?: boolean;
+  onClick: () => void;
+  title?: string;
+  /** A task's id: the row can be dragged onto a group */ drag?: string;
+  children: React.ReactNode;
+}) {
   return (
     <div
       role="button"
@@ -526,7 +573,7 @@ function lineOf(t: Task): string {
  * row), ours when it hasn't been opened yet (a click opens it). Under it, what Code's row can't say: what it waits
  * on the person for, or its worker's newest line, and the one move that makes sense from where it stands.
  */
-function TaskRow({ t, pane, current, action, agent, onDetail }: { t: Task; pane?: CodeRowInfo; current: boolean; action?: React.ReactNode; agent?: string; onDetail: () => void }) {
+function TaskRow({ t, pane, current, action, agent, menu, onDetail }: { t: Task; pane?: CodeRowInfo; current: boolean; action?: React.ReactNode; agent?: string; menu: RowMenuItem[]; onDetail: () => void }) {
   const you = t.column === "you" && t.status === "running";
   const busy = t.live?.status === "running";
   const line = lineOf(t) || (t.status === "todo" ? "还没派出去" : "");
@@ -537,7 +584,11 @@ function TaskRow({ t, pane, current, action, agent, onDetail }: { t: Task; pane?
   if (pane) return <CodeRow pane={pane.pane} where={base(t.repo)} below={line ? text : undefined} />;
   return (
     // No pane (not handed out, or its conversation isn't open): a row of ours, the line included in the one block
-    <div className={clsx("group/task rounded-md [&>div:first-child]:bg-transparent [&>div:first-child]:hover:bg-transparent", current ? "bg-accent" : "hover:bg-accent/60")} title={`${t.id} ${t.title}${t.repo ? `\n${t.repo}` : ""}`}>
+    <RowMenu items={menu}>
+      <div
+        className={clsx("group/task rounded-md [&>div:first-child]:bg-transparent [&>div:first-child]:hover:bg-transparent", current ? "bg-accent" : "hover:bg-accent/60", "data-[state=open]:ring-1 data-[state=open]:ring-brand/60")}
+        title={`${t.id} ${t.title}${t.repo ? `\n${t.repo}` : ""}`}
+      >
         <RowShell current={current} drag={t.id} onClick={() => (t.session ? showInCode(t.session) : onDetail())}>
           {/* The agent's icon, as on Code's rows: with a dot here instead, the same kind of task had an icon or a dot by
               whether its conversation happened to be open in a pane, which says nothing to the person. A dot only
@@ -545,23 +596,24 @@ function TaskRow({ t, pane, current, action, agent, onDetail }: { t: Task; pane?
           {agent && AgentIcon ? (
             <AgentIcon agent={agent} className="size-3.5 shrink-0 max-md:size-4" />
           ) : (
-          <span className="flex size-3.5 shrink-0 items-center justify-center max-md:size-4">
-            <span className={clsx("size-2 rounded-full", you ? "bg-warn" : busy ? "animate-pulse bg-ok" : "bg-muted-foreground/40")} />
-          </span>
+            <span className="flex size-3.5 shrink-0 items-center justify-center max-md:size-4">
+              <span className={clsx("size-2 rounded-full", you ? "bg-warn" : busy ? "animate-pulse bg-ok" : "bg-muted-foreground/40")} />
+            </span>
           )}
           <span className={clsx("min-w-0 flex-1 truncate", you && "font-medium")}>{t.title}</span>
           {t.repo && <span className="max-w-[40%] shrink-0 truncate text-[11px] text-muted-foreground">{base(t.repo)}</span>}
         </RowShell>
-      {(line || action) && (
-        // Starts where the titles do: the row's left padding + its icon + the gap (28px; a phone's icon is 16px: 30px)
-        // -mt / pb: it belongs to the row above. That row ends in padding (6px in a phone's drawer) and the next one
-        // starts with as much, so at the row's own distance the line sat nearer the row under it than its own
-        // The pull-up is for a phone's roomier row (it ends in 6px of padding); a desktop's row has none to make up for
-        <div className="flex cursor-default items-center gap-1 pr-2 pb-1 pl-7 leading-4 max-md:-mt-1.5 max-md:pb-1.5 max-md:pl-[30px]" onClick={() => (t.session ? showInCode(t.session) : onDetail())}>
-          <span className={clsx("min-w-0 flex-1 truncate text-[11px]", you ? "text-warn" : "text-muted-foreground")}>{line}</span>
-          {action}
-        </div>
-      )}
-    </div>
+        {(line || action) && (
+          // Starts where the titles do: the row's left padding + its icon + the gap (28px; a phone's icon is 16px: 30px)
+          // -mt / pb: it belongs to the row above. That row ends in padding (6px in a phone's drawer) and the next one
+          // starts with as much, so at the row's own distance the line sat nearer the row under it than its own
+          // The pull-up is for a phone's roomier row (it ends in 6px of padding); a desktop's row has none to make up for
+          <div className="flex cursor-default items-center gap-1 pr-2 pb-1 pl-7 leading-4 max-md:-mt-1.5 max-md:pb-1.5 max-md:pl-[30px]" onClick={() => (t.session ? showInCode(t.session) : onDetail())}>
+            <span className={clsx("min-w-0 flex-1 truncate text-[11px]", you ? "text-warn" : "text-muted-foreground")}>{line}</span>
+            {action}
+          </div>
+        )}
+      </div>
+    </RowMenu>
   );
 }
