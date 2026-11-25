@@ -9,7 +9,8 @@
 
 import { workflow } from "./_config";
 import { set as setSettings } from "./settings";
-import { add, start } from "./tasks";
+import { allAgents } from "./_agents";
+import { add, drop, start } from "./tasks";
 
 const base = (p: string) => p.replace(/\/+$/, "").split("/").pop() || p;
 
@@ -25,6 +26,7 @@ export async function run(input: { repos?: string[]; sessions?: string[] }, ctx:
     setSettings({ repos: [...have, ...fresh.map((path) => ({ path }))] }, ctx);
     out.repos = fresh;
   }
+  const known = new Set((input?.sessions?.length ? await allAgents(ctx) : []).map((a) => a.id));
   for (const id of input?.sessions ?? []) {
     try {
       const s = ctx.sessions.get(id);
@@ -33,8 +35,17 @@ export async function run(input: { repos?: string[]; sessions?: string[] }, ctx:
       if (s.status === "running" || s.status === "starting") throw new Error("还在跑：等它这一轮停下再导入");
       if (s.status === "waiting") throw new Error("它在等你审批 / 回答：先在 Code 里处理掉再导入");
       const title = s.title || base(s.cwd);
-      const t = await add({ title, prompt: `接着 Code 里的对话「${title}」做（从 Code 导入的，之前的内容都在上面）。`, repo: s.cwd, agent: s.agent } as any, ctx);
-      const started: any = await start({ id: t.id, agent: s.agent, continueFrom: id }, ctx);
+      // The agent it ran on, when that one still exists (a role since removed: the workers' default carries it on)
+      const agent = known.has(s.agent) ? s.agent : undefined;
+      const t = await add({ title, prompt: `接着 Code 里的对话「${title}」做（从 Code 导入的，之前的内容都在上面）。`, repo: s.cwd, ...(agent ? { agent } : {}) } as any, ctx);
+      let started: any;
+      try {
+        started = await start({ id: t.id, ...(agent ? { agent } : {}), continueFrom: id }, ctx);
+      } catch (e) {
+        // No worker came of it: no card left behind for a conversation that is still where it was
+        await drop({ id: t.id }, ctx).catch(() => {});
+        throw e;
+      }
       // The original goes off the screen (its tab closes); it is kept and can be reopened from Code's history
       await ctx.sessions.close(id).catch(() => {});
       out.tasks.push({ session: id, task: t.id, worker: started?.session });
