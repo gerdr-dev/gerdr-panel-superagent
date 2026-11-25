@@ -441,7 +441,7 @@ export async function tick(input: unknown, ctx: Ctx) {
         : "";
       await wake(ctx, t.id, {
         how: "到点了，回来看",
-        fold: `[任务面板] 到点了，回来看：${cutLine(w.what, 50)}`,
+        fold: `[面板] 到点了，回来看：${cutLine(w.what, 50)}`,
         text: `[任务面板] 到时间了，回来看一下（任务 ${t.id}）：${w.what}。${late}`,
         // That wait_for ends (all its items): it looks again and waits again if it must. Others stay open
         ends: (x) => x.since === w.since && isOutside(x),
@@ -490,7 +490,7 @@ async function runChecks(ctx: Ctx): Promise<string[]> {
       try {
         await wake(ctx, t.id, {
           how,
-          fold: code === 0 ? `[任务面板] 等到了「${cutLine(w.what, 30)}」：${cutLine(last.out || "exit 0", 50)}` : `[任务面板] 检查命令连着 3 次出错：${cutLine(w.what, 30)}`,
+          fold: code === 0 ? `[面板] 等到了「${cutLine(w.what, 30)}」：${cutLine(last.out || "exit 0", 50)}` : `[面板] 检查命令连着 3 次出错：${cutLine(w.what, 30)}`,
           text:
             code === 0
               ? `[任务面板] 你等的「${w.what}」检查到了（任务 ${t.id}）。检查命令的输出：\n\n${tail || "（没有输出）"}`

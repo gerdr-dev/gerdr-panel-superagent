@@ -160,7 +160,7 @@ export async function list(input: unknown, ctx: Ctx) {
   for (const n of nudge) {
     await ctx.sessions
       .send(n.session, `[任务面板] 你把活派出去了，但没有等它（任务 ${n.id}）：${n.out.join("；")}。照 task.md「等别人」用 wait_for 等它（带超时），然后结束这一轮。`, {
-        fold: "[任务面板] 提醒：派出去的活要用 wait_for 等着",
+        fold: "[面板] 提醒：派出去的活要用 wait_for 等着",
       } as any)
       .catch(() => {});
   }

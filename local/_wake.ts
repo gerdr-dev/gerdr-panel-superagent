@@ -34,7 +34,7 @@ export type Wake = {
    * long and mostly instructions, and what came already shows as the chat's wait card. Default: `how` as it is, for
    * what the user did (你答了：…): the row's look already says it isn't typed, and a 「[任务面板]」 in front of the
    * user's own answer read as if the panel had answered (2026-11-25). What the panel says on its own (到点了, 等到了, a
-   * reminder) passes its own fold starting with 「[任务面板]」. false: shown whole.
+   * reminder) passes its own fold starting with 「[面板]」. false: shown whole.
    */
   fold?: string | false;
 };

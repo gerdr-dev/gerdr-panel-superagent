@@ -551,7 +551,7 @@ export async function toMain(ctx: Ctx, blocks: string[], why: Why = "route", att
   const { id, changed, hash: h } = await ensureMain(ctx, body, attachments, fold);
   if (id.fresh) return id.id;
   // The rules changed: a line of its own, folded, so it doesn't sit on top of what the user wrote
-  if (changed) await ctx.sessions.send(id.id, `[任务面板] 你的规则有更新：重读一遍 ${abs(ctx, SYSTEM)}，以它为准。`, { fold: "[任务面板] 规则有更新" } as any);
+  if (changed) await ctx.sessions.send(id.id, `[任务面板] 你的规则有更新：重读一遍 ${abs(ctx, SYSTEM)}，以它为准。`, { fold: "[面板] 规则有更新" } as any);
   await ctx.sessions.send(id.id, body, { ...(attachments?.length ? { attachments } : {}), ...(fold ? { fold } : fold === false ? { show: true } : {}) } as any);
   if (changed) updateState(ctx, (x) => void (x.brief = h));
   return id.id;
