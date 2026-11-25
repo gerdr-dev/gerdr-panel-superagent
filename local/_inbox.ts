@@ -29,7 +29,7 @@ export function waitingLines(tasks: Listed[]): Line[] {
     // were elsewhere. Only what came from outside: a to-do the user wrote down themselves is no news to them
     if (t.status === "todo" && !t.session && t.origin) {
       const who = t.origin.title?.split(/[:：]/)[0]?.trim();
-      items.push({ id: t.id, title: `${t.id} 待办：${cut(t.title, 80)}`, body: who ? `${who}${t.origin.source ? `（${t.origin.source}）` : ""}` : t.title });
+      items.push({ id: t.id, title: `${t.id} 待办：${cut(t.title, 80)}`, body: who ? `来自 ${who}` : t.title });
       continue;
     }
     // A reply its worker wrote and holds for the user to send or not (设置 → 回复对方 = review; _outbox.ts): the list
