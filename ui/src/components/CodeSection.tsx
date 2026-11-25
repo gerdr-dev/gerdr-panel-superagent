@@ -755,14 +755,14 @@ function TaskRow({
   const nth = useCodeNumber(t.session);
   // The task's number leads its line: the secretary, the workers, 去向 and the cards all name tasks by it (t202), and
   // with the board gone nothing showed which row that was (the person, 2026-11-25: 「很多地方还在说编号…还是显示出来吧」)
-  // While its worker runs the line shimmers like 思考中 (as it did on the board's cards), near the foreground colour
-  // with the light sweep so it stays readable (.shimmer-light in index.css); one waiting on the person stays amber
+  // While its worker runs the line shimmers like 思考中 (as it did on the board's cards); one waiting on the person
+  // stays amber. Gerdr's own .gerdr-shimmer (@gerdr/chat), not our .shimmer: this line is drawn inside Code's list,
+  // outside the panel's area, and the panel's index.css is scoped to that area (uisite scopeCSS), so .shimmer never
+  // reached it. The mask is dimmed to 75%, not its 45%: a whole line of text, not a short label, has to stay readable
   const text = (
     <span
-      className={clsx(
-        "block truncate text-[11px]",
-        you ? "text-warn" : busy ? "shimmer shimmer-light text-foreground/85" : "text-muted-foreground",
-      )}
+      className={clsx("block truncate text-[11px]", you ? "text-warn" : busy ? "gerdr-shimmer" : "text-muted-foreground")}
+      style={busy && !you ? ({ "--gerdr-shimmer-mask": "linear-gradient(90deg, rgb(0 0 0 / 0.75) calc(50% - 40px), #000 50%, rgb(0 0 0 / 0.75) calc(50% + 40px))" } as React.CSSProperties) : undefined}
     >
       <span className="mr-1.5 font-mono text-[10.5px] text-muted-foreground">{t.id}</span>
       {line}
