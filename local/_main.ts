@@ -485,7 +485,7 @@ function talkText(ctx: Ctx) {
       `问了就先不派，这一轮到此为止，他的回答会是他的下一条消息。\n` +
       `- **仓库拿不准就先问，不要先派了再说明**（包括这件事不属于仓库列表里的任何一个）：带上你的建议问他，怎么挑、怎么建议见「怎么派」。\n` +
       `- **worker 要用户回答的问题**（secretary.status 里带着问题、选项和交答案的命令）：任务列表里标着「等你」，他能点开去答，也可以对你说。` +
-      `你问他的时候说清要他决定什么、为什么要紧、有哪几个选项，他答了，你用给出的命令替他交（一个问题一条命令），再告诉他交了。密钥不经过对话：让他在任务面板上那张卡里填。\n` +
+      `你问他的时候说清要他决定什么、为什么要紧、有哪几个选项，他答了，你用给出的命令替他交（一个问题一条命令），再告诉他交了。密钥不经过对话：让他打开那个任务，点标题栏上的「等你」里那一项，在弹出的框里填。\n` +
       `- 改这个面板本身（设置、流程、触发器、定时任务、页面）不归你：告诉用户去面板右边的面板助手那里说。\n` +
       `- 这段对话一直用下去，长了会被压缩：早先的聊天变成一段摘要，细节会丢。要长期记住的事当场记下 —— 用户交代的活建成任务，` +
       `他的偏好和规矩用 \`remember\` 记进记忆，做事方式写进流程（skill）。只留在聊天里的，压缩之后就只剩个大概。`,
@@ -669,7 +669,7 @@ export function askText(t: any): string {
     const k = h.handBack?.kind;
     if (k === "choice") lines.push(`    要用户选：${h.title}${opts(h.handBack.options)} → tasks.complete ${ex({ id: h.id, value: "选的那项" })}`);
     else if (k === "value") lines.push(`    要用户给：${h.handBack.label ?? h.title} → tasks.complete ${ex({ id: h.id, value: "…" })}`);
-    else if (k === "secret") lines.push(`    要用户交一个密钥（${h.handBack.label ?? h.handBack.name ?? ""}）：不能经过对话，请他在任务面板上 ${t.id} 的卡片里填`);
+    else if (k === "secret") lines.push(`    要用户交一个密钥（${h.handBack.label ?? h.handBack.name ?? ""}）：不能经过对话，请他打开 ${t.id}，点标题栏上的「等你」里那一项，在弹出的框里填`);
     else lines.push(`    要用户亲手做：${h.title}${h.steps ? `\n    ${h.steps.replace(/\n/g, "\n    ")}` : ""}\n    他说做完了 → tasks.complete ${ex({ id: h.id })}`);
   }
   return lines.join("\n");

@@ -223,7 +223,7 @@ export function ask_human(input: any, ctx: Ctx) {
     }
     if (decision) h.urgent = false; // a decision can wait: no warning mark, it just sits under 等你
     // gerdrCard: Gerdr draws this result as a card in the chat, so the user sees the step where they are too
-    const back = h.handBack.kind === "secret" ? `\n\n做完要交回：密钥「${h.handBack.label || h.handBack.name}」（在任务面板上存，不经过对话）` : h.handBack.kind === "value" ? `\n\n做完要交回：${h.handBack.label || "一个值"}` : "";
+    const back = h.handBack.kind === "secret" ? `\n\n做完要交回：密钥「${h.handBack.label || h.handBack.name}」（点对话标题栏上的「等你」里这一项存，不经过对话）` : h.handBack.kind === "value" ? `\n\n做完要交回：${h.handBack.label || "一个值"}` : "";
     const left = h.expiresAt ? `（${Math.round((h.expiresAt - Date.now()) / 60000)} 分钟内有效）` : "";
     return {
       id: h.id,
@@ -252,7 +252,7 @@ export function ask_human(input: any, ctx: Ctx) {
             project: ctx.workspace.project,
             kicker: `等你${left}`,
             title: h.title,
-            body: `${h.steps ?? ""}${back}${h.handBack.kind === "secret" ? `\n\n做完在任务面板上 ${t.id} 的卡片里存密钥。` : ""}`,
+            body: `${h.steps ?? ""}${back}${h.handBack.kind === "secret" ? `\n\n做完点对话标题栏上的「等你」里这一项，在弹出的框里存密钥。` : ""}`,
             tone: "warn",
             choose:
               h.handBack.kind === "secret"

@@ -2087,6 +2087,18 @@ export function TaskDetail({ t, byId, act, onClose, onGo, onSession }: { t: Task
   return <Drawer t={t} byId={byId} act={act} onClose={onClose} onGo={onGo} />;
 }
 
+/**
+ * An ask's own panel (AskDrawer), over Code: for what the chat's card can't take, a secret to store through Gerdr's
+ * password box or an expired link to redo. The board opened it from the task's 等你 line; with the board gone the
+ * pane's 等你 opens it (CodeSection), or a secret had nowhere to be handed back (2026-11-25). `onGo`: a task or an
+ * ask it links to was picked.
+ */
+export function AskDialog({ id, tasks, act, onClose, onGo }: { id: string; tasks: Task[]; act: Act; onClose: () => void; onGo: (id: string) => void }) {
+  closeOutside = true;
+  const f = findAsk(tasks, id);
+  return f ? <AskDrawer a={f.a} by={f.t} act={act} onClose={onClose} onGo={onGo} /> : null;
+}
+
 /** The new-task form (what to do, repository, agent, attachments; kept in 待办 or handed out at once). */
 export function NewTaskDialog({ act, onClose }: { act: Act; onClose: () => void }) {
   return <NewTask act={act} onClose={onClose} />;

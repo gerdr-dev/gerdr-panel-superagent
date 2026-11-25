@@ -5,7 +5,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import { run } from "../lib/gerdr";
 import { colorOf } from "../lib/repoColor";
 import { WholeWindow } from "../lib/portal";
-import { NewTaskDialog, TaskDetail } from "./TaskDetail";
+import { AskDialog, NewTaskDialog, TaskDetail } from "./TaskDetail";
 import { ImportDialog } from "./ImportDialog";
 import { RowMenu, type RowMenuItem } from "./RowMenu";
 import { openAsks, type Task, useTasks } from "../lib/tasks";
@@ -391,7 +391,7 @@ export function Fusion({ children }: { children: React.ReactNode }) {
       tone: "warn",
       title: "在等你的事：点一条跳过去",
       items: things.length
-        ? things.map((x, i) => ({ id: `wait-${i}`, label: x.label, onSelect: () => jumpInCode(session, x.ref) }))
+        ? things.map((x, i) => ({ id: `wait-${i}`, label: x.label, onSelect: () => (x.own ? openAsk(x.own) : jumpInCode(session, x.ref)) }))
         : [{ id: "wait-0", label: (t.live?.status === "error" && t.live.error) || t.live?.waiting || "等你审批", onSelect: () => showInCode(session) }],
     };
     return [status, wait];
@@ -441,6 +441,9 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   // whole window. Without it such a task could only be started as it was: no way to read what was asked, set its
   // repository, answer whoever asked, or give it up (lost with the board, 2026-11-25)
   const [detail, setDetail] = useState("");
+  // An ask the chat's card can't take (a secret, an expired link): its own panel, from the pane's 等你 (waitingOn)
+  const [ask, setAsk] = useState("");
+  const openAsk = (id: string) => (closeCodeDrawer(), setDetail(""), setAsk(id));
   const [creating, setCreating] = useState(false);
   const detailTask = detail ? all.find((t) => t.id === detail) : undefined;
   const byTask = useMemo(() => Object.fromEntries(all.map((t) => [t.id, t])), [tasks]);
@@ -451,11 +454,12 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   }, [detailTask?.session, detailTask?.status]);
   const panelShown = usePanelVisible();
   useEffect(() => {
-    if (!panelShown) (setDetail(""), setCreating(false), setImporting(false));
+    if (!panelShown) (setDetail(""), setAsk(""), setCreating(false), setImporting(false));
   }, [panelShown]);
   const overlays = (
     <WholeWindow>
       {detailTask && <TaskDetail t={detailTask} byId={byTask} act={act} onClose={() => setDetail("")} onGo={setDetail} onSession={(id) => (setDetail(""), showInCode(id))} />}
+      {ask && <AskDialog id={ask} tasks={all} act={act} onClose={() => setAsk("")} onGo={(id) => (/^a\d/.test(id) ? openAsk(id) : (setAsk(""), setDetail(id)))} />}
       {creating && <NewTaskDialog act={act} onClose={() => setCreating(false)} />}
       {importing && <ImportDialog repos={importRepos} sessions={importSessions} onClose={() => setImporting(false)} onDone={(w) => (setImporting(false), w && showInCode(w))} />}
     </WholeWindow>
@@ -666,12 +670,13 @@ const needsPerson = (t: Task) => t.column === "you" || heldOut(t).length > 0;
  * Each thing in a task that waits on the person, with the card it is in the chat (a tool result's gerdrCard.ref, as
  * the board's drawer jumps to): a question of an ask with several is one each, a reply held to send is one.
  */
-function waitingOn(t: Task): { label: string; ref: string }[] {
-  const out: { label: string; ref: string }[] = [];
+function waitingOn(t: Task): { label: string; ref: string; own?: string }[] {
+  const out: { label: string; ref: string; own?: string }[] = [];
   for (const a of openAsks(t)) {
     const qs = (a.questions ?? []).filter((q) => !q.answer && !q.dropped && !q.skipped);
     if (a.handBack.kind === "questions" && qs.length) for (const q of qs) out.push({ label: q.title, ref: `${a.id}#${q.id}` });
-    else out.push({ label: a.title, ref: a.id });
+    // A secret is stored, and an expired link redone, in the ask's own panel (AskDialog), not in the chat's card
+    else out.push({ label: a.title, ref: a.id, ...(a.handBack.kind === "secret" || (!!a.expiresAt && a.expiresAt < Date.now()) ? { own: a.id } : {}) });
   }
   for (const o of heldOut(t)) out.push({ label: `待发给 ${o.where.split(" · ").pop()}`, ref: `${t.id}~${o.id}` });
   return out;
