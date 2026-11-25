@@ -77,7 +77,9 @@ export type Settings = {
   undoSeconds: number;
 };
 
-export const ACK_TEXT = "收到，建了任务 {id}「{title}」，有结果会在这里说。";
+// Just "收到。" (the person, 2026-11-25): the task number and title meant nothing to whoever asked, and the result comes
+// back in the same conversation anyway. {id} / {title} still work for whoever wants them.
+export const ACK_TEXT = "收到。";
 
 export const DEFAULTS: Settings = {
   router: { agent: "", model: "", effort: "", mode: "" },
