@@ -577,16 +577,27 @@ function TaskRow({ t, pane, current, action, agent, menu, onDetail }: { t: Task;
   const you = t.column === "you" && t.status === "running";
   const busy = t.live?.status === "running";
   const line = lineOf(t) || (t.status === "todo" ? "还没派出去" : "");
-  const text = <span className={clsx("block truncate text-[11px]", you ? "text-warn" : "text-muted-foreground")}>{line}</span>;
+  // The task's number leads its line: the secretary, the workers, 去向 and the cards all name tasks by it (t202), and
+  // with the board gone nothing showed which row that was (the person, 2026-11-25: 「很多地方还在说编号…还是显示出来吧」)
+  const text = (
+    <span className={clsx("block truncate text-[11px]", you ? "text-warn" : "text-muted-foreground")}>
+      <span className="mr-1.5 font-mono text-[10.5px] text-muted-foreground">{t.id}</span>
+      {line}
+    </span>
+  );
   // Its conversation has a pane: Code's own row with our line inside it (core CodeRow `below`), so the whole of it is
   // one item — hovered, clicked, right-clicked and dragged as one. The line used to be a box of ours under Code's
   // row, patched to look like part of it: the menu and the drag still only took on the title
-  if (pane) return <CodeRow pane={pane.pane} where={base(t.repo)} below={line ? text : undefined} />;
+  if (pane) return <CodeRow pane={pane.pane} where={base(t.repo)} below={text} />;
   return (
     // No pane (not handed out, or its conversation isn't open): a row of ours, the line included in the one block
     <RowMenu items={menu}>
       <div
-        className={clsx("group/task rounded-md [&>div:first-child]:bg-transparent [&>div:first-child]:hover:bg-transparent", current ? "bg-accent" : "hover:bg-accent/60", "data-[state=open]:ring-1 data-[state=open]:ring-brand/60")}
+        className={clsx(
+          "group/task rounded-md [&>div:first-child]:bg-transparent [&>div:first-child]:hover:bg-transparent",
+          current ? "bg-accent" : "hover:bg-accent/60",
+          "data-[state=open]:ring-1 data-[state=open]:ring-brand/60",
+        )}
         title={`${t.id} ${t.title}${t.repo ? `\n${t.repo}` : ""}`}
       >
         <RowShell current={current} drag={t.id} onClick={() => (t.session ? showInCode(t.session) : onDetail())}>
@@ -603,16 +614,16 @@ function TaskRow({ t, pane, current, action, agent, menu, onDetail }: { t: Task;
           <span className={clsx("min-w-0 flex-1 truncate", you && "font-medium")}>{t.title}</span>
           {t.repo && <span className="max-w-[40%] shrink-0 truncate text-[11px] text-muted-foreground">{base(t.repo)}</span>}
         </RowShell>
-        {(line || action) && (
+        {
           // Starts where the titles do: the row's left padding + its icon + the gap (28px; a phone's icon is 16px: 30px)
           // -mt / pb: it belongs to the row above. That row ends in padding (6px in a phone's drawer) and the next one
           // starts with as much, so at the row's own distance the line sat nearer the row under it than its own
           // The pull-up is for a phone's roomier row (it ends in 6px of padding); a desktop's row has none to make up for
           <div className="flex cursor-default items-center gap-1 pr-2 pb-1 pl-7 leading-4 max-md:-mt-1.5 max-md:pb-1.5 max-md:pl-[30px]" onClick={() => (t.session ? showInCode(t.session) : onDetail())}>
-            <span className={clsx("min-w-0 flex-1 truncate text-[11px]", you ? "text-warn" : "text-muted-foreground")}>{line}</span>
+            <span className="min-w-0 flex-1">{text}</span>
             {action}
           </div>
-        )}
+        }
       </div>
     </RowMenu>
   );
