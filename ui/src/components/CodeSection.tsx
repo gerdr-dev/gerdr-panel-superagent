@@ -565,7 +565,7 @@ function lineOf(t: Task): string {
     if (t.live?.status === "error") return t.live.error || "出错了";
     if (t.stopWhy) return t.stopWhy;
   }
-  return (t.latest || t.summary || (t.status === "todo" ? t.prompt : "") || "").split("\n")[0];
+  return (t.latest || t.summary || (t.status === "todo" ? t.prompt : "") || (t.status === "running" ? t.stopWhy : "") || "").split("\n")[0];
 }
 
 /**
