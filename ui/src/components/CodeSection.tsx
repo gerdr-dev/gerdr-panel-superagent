@@ -756,16 +756,38 @@ function TaskRow({
   // The task's number leads its line: the secretary, the workers, 去向 and the cards all name tasks by it (t202), and
   // with the board gone nothing showed which row that was (the person, 2026-11-25: 「很多地方还在说编号…还是显示出来吧」)
   // While its worker runs the line shimmers like 思考中 (as it did on the board's cards); one waiting on the person
-  // stays amber. Gerdr's own .gerdr-shimmer (@gerdr/chat), not our .shimmer: this line is drawn inside Code's list,
-  // outside the panel's area, and the panel's index.css is scoped to that area (uisite scopeCSS), so .shimmer never
-  // reached it. The mask is dimmed to 75%, not its 45%: a whole line of text, not a short label, has to stay readable
-  const text = (
-    <span
-      className={clsx("block truncate text-[11px]", you ? "text-warn" : busy ? "gerdr-shimmer" : "text-muted-foreground")}
-      style={busy && !you ? ({ "--gerdr-shimmer-mask": "linear-gradient(90deg, rgb(0 0 0 / 0.75) calc(50% - 40px), #000 50%, rgb(0 0 0 / 0.75) calc(50% + 40px))" } as React.CSSProperties) : undefined}
-    >
-      <span className="mr-1.5 font-mono text-[10.5px] text-muted-foreground">{t.id}</span>
+  // stays amber. The line keeps the idle rows' muted colour and a copy of it in the foreground colour lies on top,
+  // masked to the moving band only: dimming a foreground line with the mask (as .gerdr-shimmer does) left it brighter
+  // than the idle rows beside it (the person, 2026-11-25). The band is Gerdr's .gerdr-shimmer (@gerdr/chat) with its
+  // mask swapped for one that hides everything off the band; not our .shimmer: this line is drawn in Code's list,
+  // outside the panel's area, and the panel's index.css is scoped to that area (uisite scopeCSS), so it never reached it
+  const words = (
+    <>
+      <span className="mr-1.5 font-mono text-[10.5px]">{t.id}</span>
       {line}
+    </>
+  );
+  const sweep = busy && !you;
+  const text = (
+    <span className={clsx("block truncate text-[11px]", you ? "text-warn" : "text-muted-foreground", sweep && "relative")}>
+      {/* the id stays muted on an amber line too */}
+      {you ? (
+        <>
+          <span className="mr-1.5 font-mono text-[10.5px] text-muted-foreground">{t.id}</span>
+          {line}
+        </>
+      ) : (
+        words
+      )}
+      {sweep && (
+        <span
+          aria-hidden
+          className="gerdr-shimmer pointer-events-none absolute inset-0 truncate"
+          style={{ "--gerdr-shimmer-mask": "linear-gradient(90deg, transparent calc(50% - 40px), #000 50%, transparent calc(50% + 40px))" } as React.CSSProperties}
+        >
+          {words}
+        </span>
+      )}
     </span>
   );
   // Its conversation has a pane: Code's own row with our line inside it (core CodeRow `below`), so the whole of it is
