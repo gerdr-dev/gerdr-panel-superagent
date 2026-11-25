@@ -18,6 +18,7 @@ import { usePanelChange, usePanelVisible, useRefresh, useSessions } from "../lib
 // A task's group is its status, which only the person changes (DESIGN.md). Their own conversations have none: one is
 // 进行中 while its tab is open and 等你 while its agent waits on them (an approval, an error); closing it ends it.
 
+const AgentIcon = (core as unknown as { AgentIcon?: (p: { agent: string; className?: string }) => React.ReactNode }).AgentIcon;
 const toast = (core as unknown as { toast?: { error?: (m: string) => unknown } }).toast;
 
 /** A folded group of rows, open or not, per device. */
@@ -76,7 +77,7 @@ function FoldTitle({ open, onClick, icon, label, children }: { open: boolean; on
 const base = (p?: string) => (p ?? "").replace(/\/+$/, "").split("/").pop() ?? "";
 
 type Main = { id: string; status: string; waiting?: string } | null;
-type Sess = { id: string; status: string; updatedAt?: number; turn?: { startedAt?: number }; tags?: Record<string, string> };
+type Sess = { id: string; status: string; agent?: string; updatedAt?: number; turn?: { startedAt?: number }; tags?: Record<string, string> };
 /** What the functions last answered, for the next mount to start from. */
 const last: { main: Main; asks: number; standing: Record<string, "review" | "done">; agents: AgentOpt[]; agent: string; repos: { path: string }[] } = { main: null, asks: 0, standing: {}, agents: [], agent: "", repos: [] };
 type Status = "todo" | "running" | "review" | "done";
@@ -125,7 +126,8 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   // The conversations in Code's panes, and the secretary: what each is doing now
   const open = new Set(rows.map((r) => r.session).filter(Boolean) as string[]);
   const openKey = [...open].sort().join(",");
-  const live = useSessions((s) => open.has(s.id) || s.id === main?.id) as Sess[];
+  // …and every worker's, pane or not: which agent it is (its row's icon)
+  const live = useSessions((s) => open.has(s.id) || s.id === main?.id || !!s.tags?.task) as Sess[];
   const byId = useMemo(() => Object.fromEntries(live.map((s) => [s.id, s])), [live, openKey]);
   const status = main && main.status !== "gone" ? (byId[main.id]?.status ?? main.status) : "";
   const openMain = () =>
@@ -276,7 +278,7 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   // menus (the pane's ⋯, the row's right click) or by dragging, one way for all. The exception is 待办: a task not
   // handed out has no conversation, so no pane and no menu, and its ▶ is the only way to start it on a phone
   const taskRow = (t: Task, action?: React.ReactNode) => (
-    <TaskRow key={t.id} t={t} pane={t.session ? paneOf.get(t.session) : undefined} current={(!!t.session && cur === t.session) || detail === t.id} action={action} onDetail={() => openDetail(t.id)} />
+    <TaskRow key={t.id} t={t} pane={t.session ? paneOf.get(t.session) : undefined} current={(!!t.session && cur === t.session) || detail === t.id} action={action} agent={(t.session && byId[t.session]?.agent) || t.agent} onDetail={() => openDetail(t.id)} />
   );
   const ownRow = (r: CodeRowInfo) => <CodeRow key={r.pane} pane={r.pane} where={base(r.cwd)} />;
 
@@ -522,7 +524,7 @@ function lineOf(t: Task): string {
  * row), ours when it hasn't been opened yet (a click opens it). Under it, what Code's row can't say: what it waits
  * on the person for, or its worker's newest line, and the one move that makes sense from where it stands.
  */
-function TaskRow({ t, pane, current, action, onDetail }: { t: Task; pane?: CodeRowInfo; current: boolean; action?: React.ReactNode; onDetail: () => void }) {
+function TaskRow({ t, pane, current, action, agent, onDetail }: { t: Task; pane?: CodeRowInfo; current: boolean; action?: React.ReactNode; agent?: string; onDetail: () => void }) {
   const you = t.column === "you" && t.status === "running";
   const busy = t.live?.status === "running";
   const line = lineOf(t) || (t.status === "todo" ? "还没派出去" : "");
@@ -537,9 +539,16 @@ function TaskRow({ t, pane, current, action, onDetail }: { t: Task; pane?: CodeR
         <CodeRow pane={pane.pane} where={base(t.repo)} />
       ) : (
         <RowShell current={current} drag={t.id} onClick={() => (t.session ? showInCode(t.session) : onDetail())}>
+          {/* The agent's icon, as on Code's rows: with a dot here instead, the same kind of task had an icon or a dot by
+              whether its conversation happened to be open in a pane, which says nothing to the person. A dot only
+              while no agent has it yet (待办, not handed out) */}
+          {agent && AgentIcon ? (
+            <AgentIcon agent={agent} className="size-3.5 shrink-0 max-md:size-4" />
+          ) : (
           <span className="flex size-3.5 shrink-0 items-center justify-center max-md:size-4">
             <span className={clsx("size-2 rounded-full", you ? "bg-warn" : busy ? "animate-pulse bg-ok" : "bg-muted-foreground/40")} />
           </span>
+          )}
           <span className={clsx("min-w-0 flex-1 truncate", you && "font-medium")}>{t.title}</span>
           {t.repo && <span className="max-w-[40%] shrink-0 truncate text-[11px] text-muted-foreground">{base(t.repo)}</span>}
         </RowShell>
