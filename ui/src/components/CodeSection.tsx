@@ -751,8 +751,15 @@ function TaskRow({
   const nth = useCodeNumber(t.session);
   // The task's number leads its line: the secretary, the workers, 去向 and the cards all name tasks by it (t202), and
   // with the board gone nothing showed which row that was (the person, 2026-11-25: 「很多地方还在说编号…还是显示出来吧」)
+  // While its worker runs the line shimmers like 思考中 (as it did on the board's cards), near the foreground colour
+  // with the light sweep so it stays readable (.shimmer-light in index.css); one waiting on the person stays amber
   const text = (
-    <span className={clsx("block truncate text-[11px]", you ? "text-warn" : "text-muted-foreground")}>
+    <span
+      className={clsx(
+        "block truncate text-[11px]",
+        you ? "text-warn" : busy ? "shimmer shimmer-light text-foreground/85" : "text-muted-foreground",
+      )}
+    >
       <span className="mr-1.5 font-mono text-[10.5px] text-muted-foreground">{t.id}</span>
       {line}
     </span>
