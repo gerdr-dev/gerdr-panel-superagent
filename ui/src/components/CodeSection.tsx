@@ -407,7 +407,7 @@ export function Fusion({ children }: { children: React.ReactNode }) {
       current={(!!t.session && cur === t.session) || detail === t.id}
       action={action}
       agent={(t.session && byId[t.session]?.agent) || t.agent}
-      running={busy(t.session) || t.live?.status === "running"}
+      running={t.session && byId[t.session] ? busy(t.session) : t.live?.status === "running"}
       where={repoLabel(t.repo)}
       menu={taskItems(t)}
       onDetail={() => openDetail(t.id)}
