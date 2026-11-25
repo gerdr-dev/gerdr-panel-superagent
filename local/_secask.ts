@@ -33,6 +33,8 @@ export function secAsk(input: any, ctx: Ctx) {
       if (old) Object.assign(old, { status: "dropped", reason: "换成了新的问题", doneAt: Date.now() });
     }
     const n = x.nextAsk ?? 1;
+    // Messages waiting on a replaced question wait on this one (decide's wait links them by id)
+    for (const it of x.items ?? []) if (it.state === "waiting" && it.ask && replaced.includes(it.ask)) it.ask = `s${n}`;
     x.nextAsk = n + 1;
     const a: SecAsk = {
       id: `s${n}`,
@@ -121,7 +123,10 @@ export async function answerSec(input: { id: string; value?: string }, ctx: Ctx)
     Object.assign(a, { status: "done", answer: value || undefined, doneAt: Date.now() });
     return a;
   });
-  const text = a.kind === "none" ? `[你问的 ${a.id}] 「${a.title}」用户做完了。` : `[你问的 ${a.id}] 「${a.title}」用户的回答：${a.answer}`;
+  // Messages put on wait for this question (superagent.decide wait + ask): named, so the answer gets them decided
+  const waiting = (state(ctx).items ?? []).filter((x) => x.state === "waiting" && x.ask === a.id).map((x) => x.id);
+  const then = waiting.length ? `\n在等这个回答的消息：${waiting.join("、")}，照回答用 superagent.decide 给它们决定。` : "";
+  const text = (a.kind === "none" ? `[你问的 ${a.id}] 「${a.title}」用户做完了。` : `[你问的 ${a.id}] 「${a.title}」用户的回答：${a.answer}`) + then;
   await toMain(ctx, [text], "user", undefined, false);
   return { ask: a.id, answer: a.answer };
 }

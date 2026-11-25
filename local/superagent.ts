@@ -10,13 +10,13 @@ import { secAsks } from "./_secask";
 
 /** task: on a reroute, an existing worker of the card kept for this part (it is told, not restarted). */
 type Part = { repo: string; agent?: string; model?: string; effort?: string; worktree?: boolean; title?: string; prompt?: string; task?: string };
-type Decision = { item: string; decision?: "accept" | "attach" | "stop" | "ignore" | "wait"; title?: string; parts?: Part[]; task?: string; reason?: string; reply?: string; rule?: string; told?: boolean };
+type Decision = { item: string; decision?: "accept" | "attach" | "stop" | "ignore" | "wait"; title?: string; parts?: Part[]; task?: string; reason?: string; reply?: string; rule?: string; told?: boolean; ask?: string };
 
 /**
  * The main session's decisions on a batch, in one call: { decisions: [{ item, decision?, title?, parts?, task?,
  * reason?, reply? }] }. A board task (item tN) only needs parts. A message (item cN): accept (with parts) / attach
  * (task; told: true when the task already has the message, only linked) / stop (task, reason) / ignore (reason, reply?) /
- * wait (reason: what it asked the user; decided again once they answer). Each is applied on its own; the ones that failed are
+ * wait (ask: the open sN its ask_human made, reason: what it asked; decided again once they answer). Each is applied on its own; the ones that failed are
  * reported together, so it fixes and resends only those.
  */
 export async function decide(input: { decisions: Decision[] }, ctx: Ctx) {
@@ -90,8 +90,18 @@ async function one(d: Decision, ctx: Ctx) {
       // Asked the user first (2026-11-24, c623: "要不要建个任务估排期？"): its own state, not 没判断成, until a later
       // decide settles it
       if (!d.reason?.trim()) throw new Error("wait 要写 reason：问了用户什么");
-      settle({ state: "waiting", reason: d.reason.trim() });
-      return { item: it.id, waiting: true, note: "用户答了以后再 decide 这一条" };
+      // The question must be a card (ask_human), not words in the reply: 2026-11-25, c764 / c765 were put on wait,
+      // the question was only a sentence in the secretary's reply ("c764、c765 还在等你回"), nothing lit 等你, and the
+      // user, who doesn't read the secretary's chat, never saw it. The card is made by ask_human (its gerdrCard is
+      // drawn where the tool was called), so decide can't make it: it only checks one is open and links it.
+      const askId = String(d.ask ?? "").split("#")[0].trim();
+      const how = `先用 ask_human 问用户（卡片才会出现在对话里、「秘书」那一行才亮「等你」；只写在回复里他看不到），再带上它返回的 id：{"item":"${it.id}","decision":"wait","ask":"s8","reason":"…"}`;
+      if (!askId) throw new Error(`wait 要给 ask：${how}`);
+      const a = (state(ctx).asks ?? []).find((x) => x.id === askId);
+      if (!a) throw new Error(`没有 ${askId} 这个问题：${how}`);
+      if (a.status !== "open") throw new Error(`${askId}「${a.title}」已经${a.status === "done" ? `答了（${a.answer ?? "做完了"}），照回答给 ${it.id} decide` : "不在等用户了"}；还要问就重新 ask_human`);
+      settle({ state: "waiting", reason: d.reason.trim(), ask: askId });
+      return { item: it.id, waiting: true, ask: askId, note: `用户答了 ${askId} 以后再 decide 这一条` };
     }
     case "ignore": {
       if (!d.reason) throw new Error("ignore 要写 reason");

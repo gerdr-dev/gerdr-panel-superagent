@@ -110,6 +110,8 @@ export type Item = {
    * reads it with the message and the last decision. Kept so 去向 shows what was asked.
    */
   hint?: string;
+  /** waiting: the secretary's question (ask_human, sN) it waits on; its answer names this message to decide. */
+  ask?: string;
 };
 
 /** Why the secretary is having a turn: the user's words, a briefing (both owe the user a message), its own news, routing. */
@@ -397,8 +399,8 @@ async function brief(ctx: Ctx): Promise<string> {
         ? `- decide 的 accept 会替你建任务，但**不派出去**：放进任务列表的「待办」，用户看过、改好再派（他的设置）。parts 照常写，会成为任务上的仓库和 agent；拆成几份就是几个任务。` +
           `记下这条消息的去向；回不回原对话、什么时候回，按他的设置自动处理，你不用另外回。\n\n`
         : `- decide 会替你建任务、派出去、记下这条消息的去向；回不回原对话按用户的设置自动处理。\n`) +
-      `- 要先问用户才定得了的 [消息 cN]（排期、该谁做、缺信息）：问的同时给它 ${ex({ item: "c7", decision: "wait", reason: "问用户：要不要估排期、哪个仓库" })}，` +
-      `它在「去向」里标着「等你」，不会当成没判断成。一轮里什么决定都没给的，标着没判断成。` +
+      `- 要先问用户才定得了的 [消息 cN]（排期、该谁做、缺信息）：先 ask_human 问他（只写在回复里他看不到），再带上它返回的 sN 给这条 ${ex({ item: "c7", decision: "wait", ask: "s8", reason: "问用户：要不要估排期、哪个仓库" })}` +
+      `（几条消息为同一件事等他，就共用一个 sN）。它在「去向」里标着「等你」，不会当成没判断成；没有开着的问题卡，wait 会被拒。一轮里什么决定都没给的，标着没判断成。` +
       `两种都一样：用户答了以后照样用 superagent.decide 给这条 cN 决定：` +
       `accept 会建任务派出去，并记下它从哪个对话来（对方在那里的后续直接交给这个任务，回不回对方按用户的设置）；别另用 tasks.add / tasks.dispatch 建，那样这条消息一直挂着，对方的后续也到不了任务。` +
       `已经另建了，就用 attach 把 cN 并进那个任务，加 "told": true（它已经知道这条消息，不再转一遍）。\n` +
@@ -481,8 +483,8 @@ function talkText(ctx: Ctx) {
       `他要把任务移到某一组 \`tasks.setStatus ${ex({ id: "t5", status: "review" })}\`（todo / running / review / done；任务的状态只在他要你移时才动）；` +
       `他做完了 worker 请他做的步骤、或替他定了 worker 问的决定 \`tasks.complete ${ex({ id: "a5", value: "要交回的值（没有就不写）" })}\`；` +
       `转告 worker \`tasks.say ${ex({ id: "t5", text: "…" })}\`；不做了 \`tasks.drop ${ex({ id: "t5", reason: "…" })}\`。\n` +
-      `- 不要用你自带的提问工具（AskUserQuestion）：有要问用户的，直接在回复里问，他会在这里答你。` +
-      `问了就先不派，这一轮到此为止，他的回答会是他的下一条消息。\n` +
+      `- 不要用你自带的提问工具（AskUserQuestion），要问用户的用 ask_human（见上面）。用户不一定看你的回复：回复里写「还在等你回」「你看要不要…」，他多半看不到；` +
+      `**每个要他定、要他做的事都得有一张开着的问题卡**，包括简报、检查、分拣消息时顺带说到的。问了就先不派，这一轮到此为止，他的回答会以 [你问的 sN] 发来。\n` +
       `- **仓库拿不准就先问，不要先派了再说明**（包括这件事不属于仓库列表里的任何一个）：带上你的建议问他，怎么挑、怎么建议见「怎么派」。\n` +
       `- **worker 要用户回答的问题**（secretary.status 里带着问题、选项和交答案的命令）：任务列表里标着「等你」，他能点开去答，也可以对你说。` +
       `你问他的时候说清要他决定什么、为什么要紧、有哪几个选项，他答了，你用给出的命令替他交（一个问题一条命令），再告诉他交了。密钥不经过对话：让他打开那个任务，点标题栏上的「等你」里那一项，在弹出的框里填。\n` +
