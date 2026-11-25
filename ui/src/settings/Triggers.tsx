@@ -26,7 +26,7 @@ const DEST: Record<string, string> = {
   "inbox.onEvent": "秘书判断是不是活、派给谁；已有任务在跟的对话里的后续，按「设置 → 任务对话里的后续」直接给那个 worker 或先给秘书",
   "waits.onFollowed": "直接给在等这段对话的 worker，不经过秘书",
   "waits.onState": "MR 的状态满足 worker 写的条件时，直接叫醒在等它的 worker，不经过秘书",
-  "tasks.sync": "不经过 AI：面板代码更新看板上的卡片，把等你的事放进收件箱",
+  "tasks.sync": "不经过 AI：面板代码更新任务列表，把等你的事放进收件箱",
 };
 
 function Dest({ fn }: { fn?: string }) {

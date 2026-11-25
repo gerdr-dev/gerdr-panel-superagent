@@ -82,7 +82,7 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
 
       {s && (
         <>
-          <Section title="秘书" note="点任务面板左上角的「秘书」跟它说话；任务面板上没指定仓库的任务、外面来的消息，也都由它判断接不接、挑仓库和 agent 再派出去。它只说话和派活、不写代码；它要听懂你、写简报，别用太弱的模型。">
+          <Section title="秘书" note="点任务列表最上面的「秘书」跟它说话；没指定仓库的任务、外面来的消息，也都由它判断接不接、挑仓库和 agent 再派出去。它只说话和派活、不写代码；它要听懂你、写简报，别用太弱的模型。">
             <WhoFields who={s.router} onChange={(v) => put("router", v)} />
             <Field
               label="压缩对话"
@@ -140,7 +140,7 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
 
           <Section
             title="仓库"
-            note="新任务的仓库下拉和秘书都只看这份。说明写给秘书看（这是哪个服务、哪个产品），它靠这个挑仓库。空着时，任务面板拿最近用过的目录当建议。"
+            note="新任务的仓库下拉、新会话页的文件夹和秘书都只看这份。说明写给秘书看（这是哪个服务、哪个产品），它靠这个挑仓库。空着时，拿最近用过的目录当建议。"
           >
             <Repos repos={s.repos} onChange={(v) => put("repos", v)} />
           </Section>
@@ -151,7 +151,7 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
             </Field>
           </Section>
 
-          <Section title="归档" note="完成（或放弃）很久的任务移出任务面板的数据，任务面板和秘书每次就不用再读它们；什么都不删。「已完成」列底下能搜到、打开一个就放回来，它的 worker 又干起活来也会自己回来。">
+          <Section title="归档" note="完成（或放弃）很久的任务移出任务数据，面板和秘书每次就不用再读它们；什么都不删。秘书能搜到它们，按编号查一个就放回来，它的 worker 又干起活来也会自己回来。">
             <Field label="完成多少天后归档" hint={s.archiveDays > 0 ? `一个需求里所有任务都结束超过 ${s.archiveDays} 天，而且没有还在进行的任务提到它` : "不归档"}>
               <input className={input} type="number" min={0} step={1} value={s.archiveDays} onChange={(e) => put("archiveDays", Math.max(0, Math.round(Number(e.target.value) || 0)))} />
             </Field>
@@ -163,7 +163,7 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
           >
             <Field
               label="像是活的"
-              hint={{ review: "秘书在「待办」里建好卡片，不派出去：你看过、改好再点「派出去」，不要就放弃", dispatch: "秘书接了就直接派出去" }[s.inboxWork]}
+              hint={{ review: "秘书在「待办」里建好任务，不派出去：你看过、改好再点「派出去」，不要就放弃", dispatch: "秘书接了就直接派出去" }[s.inboxWork]}
             >
               <Choice value={s.inboxWork} options={[["review", "放进待办等我过目"], ["dispatch", "直接派出去"]]} onChange={(v) => put("inboxWork", v)} />
             </Field>
@@ -175,7 +175,7 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
             </Field>
             <Field
               label="回复对方"
-              hint={{ accept: "秘书一接下就回", dispatch: "任务派出去时才回：没过目之前不替你说话。待办卡片的「派出去」上面有个框，预先填好下面的回复内容，可以改，留空就不回", never: "不替你回" }[s.ack]}
+              hint={{ accept: "秘书一接下就回", dispatch: "任务派出去时才回：没过目之前不替你说话。待办任务的「派出去」上面有个框，预先填好下面的回复内容，可以改，留空就不回", never: "不替你回" }[s.ack]}
             >
               <Choice value={s.ack} options={[["accept", "接下时"], ["dispatch", "派出去时"], ["never", "不回"]]} onChange={(v) => put("ack", v)} />
             </Field>

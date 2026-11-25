@@ -6,7 +6,7 @@
 import { secIgnoredLead, state, toMain, updateState, type SecAsk } from "./_main";
 import { noteIgnored } from "./_store";
 
-const SHOWN = "这个问题已经作为卡片显示在你的对话里，用户能直接在卡片上答，左上角「秘书」按钮也会亮着计数：回复里不要再把问题、选项写一遍，一句话说为什么要问就够了。";
+const SHOWN = "这个问题已经作为卡片显示在你的对话里，用户能直接在卡片上答，任务列表里「秘书」那一行也会亮着「等你」计数：回复里不要再把问题、选项写一遍，一句话说为什么要问就够了。";
 
 export function isSecAsk(id: string) {
   return /^s\d+$/.test(String(id ?? "").split("#")[0]);

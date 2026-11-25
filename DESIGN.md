@@ -1,9 +1,11 @@
-# Superagent（秘书和任务面板）的设计
+# Superagent（秘书和它派出的任务）的设计
 
-**「看板」2026-11-12 起叫「任务面板」**（界面、给 agent 的话、worker 的流程 `references/task.md`，原来的 `board.md`）。
-下面较早写的段落和用户的原话里还叫看板，指的是同一个东西；代码里的文件名（`board.ts`、`pages/board.tsx`）没改。
+**2026-11-25 起没有任务面板这一页了**：面板显示在 Gerdr 的 Code 里，左边的列表是秘书和按状态分组的任务，
+见下面「没有任务面板了：面板就是 Code」。更早写的段落里的「看板 / 任务面板」「列」「卡片」「抽屉」说的是当时那一页
+（2026-11-12 以前叫看板，之后叫任务面板）；任务、状态、等你、等待、worker 这些机制没变，现在画在列表的行和 Code 的窗格上。
+给 agent 的消息里的「[任务面板]」和 worker 的流程 `references/task.md` 里的「任务面板」仍是这套任务系统的名字；`local/board.ts` 的文件名没改。
 
-改它（`ui/src/pages/index.tsx`、`ui/src/pages/board.tsx`、`local/secretary.ts`、`local/tasks.ts`、`local/_main.ts`、`local/superagent.ts`、`local/inbox.ts`、`local/board.ts`、`local/waits.ts`）之前先读这份。
+改它（`ui/src/layout.tsx`、`ui/src/components/CodeSection.tsx`、`ui/src/lib/view.ts`、`ui/src/components/TaskDetail.tsx`、`local/secretary.ts`、`local/tasks.ts`、`local/blank.ts`、`local/import.ts`、`local/_main.ts`、`local/superagent.ts`、`local/inbox.ts`、`local/board.ts`、`local/waits.ts`）之前先读这份。
 这里记的是**为什么这么做**，以及试过、被否掉的做法。每一条都是用户实际用的时候踩出来的。
 
 ## 出发点
@@ -24,6 +26,39 @@
 - **这套面板要给别人也能用。** 代码只放机制；用户本人的选择分两种：代码照着做的值（用哪个模型、哪些仓库、要不要自动合并）
   是「设置」，怎么做事（怎么交付、review 意见怎么处理）写在 `skills/` 里，用他自己的话；多久跑一次在 `schedules/`。
   见下面的「设置和流程」，和 Gerdr 内置 AGENTS.md 的「Adding to this panel」。
+
+## 没有任务面板了：面板就是 Code（2026-11-25）
+
+2026-11-24 先把秘书放进 Code 的列表（另一个仓库 gerdr-panel-fusion：Code 加秘书，看板是同一批任务的第二个视图）；
+当天用户说不想要看板（`pages/index.tsx` 的注释记着「我不想有看板」），看板就去掉了，任务成了 Code 列表里的行。
+2026-11-25 合回这个仓库，名字还叫 Superagent。
+
+- **面板就是一个 Code**（`layout.tsx`：Gerdr 的 `CodeView list="replace"`，实验性的；接口在 `lib/view.ts`）：分屏、Tab、
+  终端、浏览器、快捷键都是 Gerdr 自己的，左边的列表由面板画（`CodeSection.tsx`），不按工作区分，按每件事走到哪一步分。
+  用户（2026-11-24）：左边的分组是任务的状态，不是工作区。
+- **列表从上到下**：秘书那一行（状态点、「等你 N」、齿轮）；待办、进行中（等你的排最前、标黄）、待验收、已完成（最近 30 个），
+  一行一个任务，行下面是它 worker 最新的一段话；「其他」放不是对话的窗格（终端、文件、网页）；最底下「从 Code 导入」。
+  待办排在最前（2026-11-25 用户要的）。⌘1–9、⇧⌘] / ⇧⌘[ 按这份列表的顺序走（`useCodeOrder`），不按 Code 的 Tab。
+- **点一行就是 worker 的对话，在 Code 的窗格里**（`showInCode`）；从通知、收件箱点进来也一样（`onShowSession`）。
+  窗格标题上是任务编号和状态（点它可以移）、「等你」（列出等用户的几件，点一件跳到对话里那张卡片，`jumpInCode`）。
+  没派出去的任务没有对话，点开是原来看板上的那张卡（`TaskDetail`，盖在整个窗口上）；待办、进行中的 + 是新任务。
+- **状态照旧只由用户改**：把一行拖到另一组，或行和窗格菜单里的「移到…」。
+- **用户在这里开的对话都是任务**（`local/blank.ts`，Gerdr 的 `useCodeStart`）：新会话页、⌘T、⌘D、总览里的新 agent、分支，
+  开出来就是一个任务的 worker，带着面板的工具和规则，什么都不发，等用户的第一句，标题用 Gerdr 按第一句起的。
+  用户：「我希望他就是任务」。还没说过话、又不在屏幕上的不列出来（它还是任务，⇧⌘T 拿回来照样能用）。
+- **Code 原来的对话不列出来**（`local/import.ts`）：用户说 Code 是「一个可选的一次性导入」。「从 Code 导入」把项目的工作区
+  加进「设置 → 仓库」，选中的对话变成任务：开一个这里的 worker 用 `continueFrom` 接着它（之前的聊天在上面），原对话关掉、留着能读。
+  **被否掉的做法：Code 的对话和任务列在同一组里。** 看着一样，秘书却什么都不知道它们。
+- **秘书背后的东西**（设置、流程、记忆、触发器、定时任务、去向）是盖在整个窗口上的一张（`SettingsSheet`、`lib/portal.ts` 的 `WholeWindow`），
+  从秘书那一行的齿轮打开。用户（2026-11-24）：设置不该像一页卡在另一页里面。
+- **worker 照旧 `workspace: "none"`**：不进 Code 面板的工作区，只在这个面板自己的 Code 里显示。
+- **要能显示在 Code 里的 Gerdr**：没有 `CodeView` 的旧 Gerdr 上只提示升级。中间试过在旧 Gerdr 上退回看板，用户不要这个退路。
+- **看板的代码留了一份**：`pages/board.tsx` 整个改名成 `components/TaskDetail.tsx`，只用它的任务详情（没派出去的卡）
+  和新任务表单，看板本身不画。当时没删成只剩这两块，是为了 fusion 分支还能按同一个文件合进 Superagent 的改动。
+- **随看板一起没了的**：看板上方「Superagent 自己需要你看的」那一行（没判断成的消息、主动工作记下的，现在只在「去向」里）、
+  任务抽屉里的「链路」和「对话 / 文件」（`ChatDrawer` 只在没派出去的卡里还用）、「已完成」底下的已归档搜索。
+- **流程和说明里还有「任务面板」**：用户自己改过的流程（`user/skills/`）可能还按看板写，所以秘书的说明末尾补了一段
+  （`_main.ts`）：「任务面板 / 看板 / 卡片」指的是这份列表和背后的任务数据，别让用户去一个不存在的页面。
 
 ## 概念
 
@@ -49,7 +84,8 @@
 「只有待办我点击了运行之后变为进行中（也是我来触发），其他的也应该全部是我来触发」「直接改成拖拽或者我来设置状态，
 不让 worker 主动改状态 + agent 状态自动判断了，不然跳来跳去」。
 
-- **列就是任务的 `status`，只有用户能改**：拖卡片（桌面），或者任务抽屉右上角菜单里的「移到…」（手机也能用），
+- **列就是任务的 `status`，只有用户能改**：拖卡片（桌面），或者任务抽屉右上角菜单里的「移到…」（手机也能用；2026-11-25 起是
+  把列表里的一行拖到另一组，或菜单里的「移到…」），
   都走 `tasks.setStatus`。卡片右上角的「⋯」和抽屉、对话里的是同一份菜单（`board.tsx` 的 `taskMenu`：复制 id、移到…、放弃 / 恢复，
   2026-11-19 用户要求卡片上也有、和里面一致）；原有的按钮照旧：派出去（待办 → 进行中）、通过 / 标为完成、打回（→ 进行中）、放弃 / 恢复。
   秘书只在用户让它移的时候调 `setStatus`。回到待办只限还没派出去的任务。
@@ -178,7 +214,7 @@ worker 拿到一组 面板工具（`local/board.ts`，经 Gerdr 的 `gerdr panel
   卡片的 `type` 是 `task-step`，由 `ui/src/cards.tsx` 画：还在等时就是 Gerdr 自带的卡片（能在对话里直接选、能撤回）；
   看板上处理完或撤回以后，变成一行「已处理：…」「已撤回」。以前卡片一直是可点的样子，看不出已经答过了。
   Gerdr 启动时就加载 `cards.tsx`，所以这些卡片在哪里显示都是这个样子。
-  用户在对话里时，抽屉顶栏每件等他的事一行，点一下跳到对话里那张卡片。
+  用户在对话里时，抽屉顶栏每件等他的事一行，点一下跳到对话里那张卡片（2026-11-25 起是窗格标题上的「等你」）。
 - **能回到对话**：一个 ask 单独打开时（存密钥、过期了要重新生成，对话里的卡片做不了这两样）有「回到 tN 的对话」。
 - **用户说「不用了」**：ask 上的「不用了」（`tasks.dropAsk`）撤掉它，并告诉 worker 换个做法；以前人工任务上的「放弃」
   只放弃那一项，worker 不知道。
@@ -358,13 +394,14 @@ worker 最新的总结、产物都在需求详情里，老任务没有活动，�
   任务换了 agent 就不套（claude 的模型名对 codex 没意义），用那个 agent 自己的默认。
   值写错了，Gerdr 开会话时直接报错并列出可选值，不会悄悄换成默认模型去跑。
 - **看板派出去的 worker 不回报给助手**（不设 `reportTo`）。用户看的是看板，回报只会让助手对着空气把 worker 的话复述一遍。
-- **worker 是看板的，不进 Code**（`ctx.sessions.start({ workspace: "none" })`）：Gerdr 给看板开的对话打上 `panel` 标签，
-  从通知、收件箱、「进行中」点到它，Gerdr 都切回这个面板，交给看板显示（`onShowSession`：打开那个任务的抽屉）。
-  看板不知道有 Code，也没有「在 Code 里打开」：面板之间是平级的，Code 只是另一个面板。
+- **worker 是这个面板的，不进 Code 面板**（`ctx.sessions.start({ workspace: "none" })`）：Gerdr 给面板开的对话打上 `panel` 标签，
+  从通知、收件箱、「进行中」点到它，Gerdr 都切回这个面板（`onShowSession`）。2026-11-25 以前打开的是那个任务的抽屉；
+  现在面板自己就是一个 Code，在它的窗格里打开（`showInCode`），Gerdr 的 Code 面板里还是看不到这些对话。
 - **仓库从哪来**：「设置 → 仓库」，每个带一句说明（给调度会话挑仓库用）和「小改动可直推」，
   新任务的仓库下拉和派活的对话都只看这一份。没设的时候拿最近用过的目录当建议。
   标了可直推的仓库，开 worker 时在交接里说一句（`tasks.ts` 的 `directNote`）；什么算小改动，worker 照 `deliver.md` 判断。
   **被否掉的做法：读 Code 的工作区。** 看板和 Code 是平级的两套界面，各管各的；而且 Code 的工作区里混着很多和这个项目无关的目录。
+  现在「从 Code 导入」可以把工作区一次性加进仓库列表（用户自己勾），之后还是只看这一份。
 
 ## 来自别处的任务：同意、回复、交付（2026-11-12）
 
@@ -429,10 +466,11 @@ worker 回那段对话里的人（任务从 Slack 私信、thread 来的），�
   看板右上角还有个「秘书在想」按钮打开同一段对话：两个入口重复，用户说「秘书在想」四个字很怪。现在看板左上角是「秘书」（抽屉，
   在判断 / 等你回答 / 出错时带个点）和「去向」，右边是设置和新任务；`index.tsx` 就是看板，`/board?open=tN` 照旧能用。
   秘书的对话开着免打扰（Gerdr 会话的 `muted`）：它每轮跑完都会通知，用户不需要——它是用户想看才去看的。
+  2026-11-25 起没有这一页：秘书是 Code 左边列表最上面那一行，对话在 Code 的窗格里，「去向」和设置在那一行的齿轮后面。
 - **秘书的问题和 worker 的一样是卡片**（`local/_secask.ts`，2026-11-19）：秘书要用户答、拍板、确认、做一步，用 `ask_human`
   （秘书的对话调用时不挂在任务上，记在 `superagent.json` 的 `asks`，编号 sN）。卡片在它自己的对话里，和 worker 的同一种（`task-step`，
   答案走 `secretary.answer`，作为 [你问的 sN] 发给秘书）；左上角「秘书」按钮显示开着的问题数（黄底数字），抽屉顶上一行一个，
-  点了跳到卡片，✕ 忽略（见下一条）。
+  点了跳到卡片，✕ 忽略（见下一条）。现在是秘书那一行和它窗格标题上的「等你 N」，点开一个一行，点了跳到卡片。
   用户在对话里直接回了，秘书 `cancel_human` 撤掉那张卡。
   起因：秘书在回复里用文字问，这一轮结束会话就空闲，按钮上什么都没有，对话又开着免打扰，用户：「我会漏看」。
   按钮原来的「等你回答」只看会话状态（审批 / 自带的提问工具），文字问不算。
@@ -500,6 +538,7 @@ worker 回那段对话里的人（任务从 Slack 私信、thread 来的），�
 动态是对话的摘要加上看板的记录，既不全又多出噪音。用户：「队友需求确实不明显，如果一个 worker 需要另一个 ai，就直接开启 sub agent 就行了。」
 
 - **点开任务就是 worker 的对话**（`ChatDrawer`，做完、放弃的也一样），顶上一行说现在怎样、等你处理的事（`chatPanel`）。卡片是 `MiniCard`，带摘要。
+  2026-11-25 起对话在 Code 的窗格里打开，现在怎样、等你处理的事在窗格标题上。
 - **没有队友**：`add_teammate`、`tell`、`wait_for` 的 teammate、派活的 `team` 都去掉了。worker 要帮手用自己的子 agent；
   要单独验收的一块另开任务（`tasks.add` 带 `from`）。一件事拆几份 = 几张卡，一份要用另一份的结果就 `blockedBy`，秘书收到前一份做完的 [动态] 再派。
   内部的 `members` / `reqOf` 还在（没有 `team` 字段时就是任务自己），老数据照样读。
@@ -529,6 +568,7 @@ t123（PortAI 计费税率，portai 仓库）要在新后台 portai-console 加�
 ### 秘书是辅助，看板是主（2026-11-11）
 
 用户：「现在我主要盯任务面板，秘书只是辅助，他不应该主动跟需求，除非我有定时任务（每 3 小时看看哪些任务卡住了，然后他来给我汇报）。」
+2026-11-25 起没有看板页面，用户盯的是 Code 左边的任务列表；这里的分工照旧。
 
 - **任务状态变化不再发给秘书**（`notice` 和 [动态] 去掉了）。下面「任务状态一变就告诉秘书」那条是之前的做法。
 - **定时检查**：`schedules/stuck.json` 每 3 小时跑 `secretary.checkStuck`。看板自己算出卡住的任务（等用户、没进展、出错、一轮跑太久，
@@ -674,9 +714,10 @@ t123（PortAI 计费税率，portai 仓库）要在新后台 portai-console 加�
   也不在原对话里说「收到」（没人在等）。模式在「设置 → 主动工作」：关 / 只记录（默认）/ 照做。只记录时，决定记成
   「本来会接」，连同它会怎么派；「去向」里点「照做」就照那样建任务。新规则先只记录、看着对了再放开，dsh 的建议。
   `triggers/mr.json` 也标成「不是找我的」：没人跟的 MR 上的动静，没有规则就不接。
-- **要人管的在看板上突出，不另开一页**：「等你」一列有东西就整列高亮、数字变成黄底；「待验收」淡淡标出；没派出去的卡片描黄边。
-  Superagent 自己的问题（调度会话在问你 / 出错、没判断成的消息、主动工作今天记下的「本来会接」）在看板上方一行一条，带去处；
-  正常时什么都不显示（dsh：健康的状态不占地方）。
+- **要人管的就地突出，不另开一页**：现在是列表里的黄色「等你」：进行中组名上的「等你 N」、等用户的任务排最前、
+  行上和窗格标题上的「等你」、秘书那一行的「等你 N」（它在问你的）。正常时什么都不显示（dsh：健康的状态不占地方）。
+  看板时期另有：「等你」一列整列高亮、没派出去的卡片描黄边，Superagent 自己的问题（调度会话在问你 / 出错、没判断成的消息、
+  主动工作今天记下的「本来会接」）在看板上方一行一条；这一行随看板去掉了，那些现在只在「去向」里。
   **被否掉的做法：单独一个「要你管」首页**（照 dsh 的 Overview）。用户觉得这个概念不好：多一个地方要看，看板本身就该说清楚。
   最近一天的数字也随它去掉了。
 - **还没做的**（dsh 有）：worker 主动跟别的对话只拿上下文（另一个 MR、另一个 issue）；规则改了以后，对已经在做的任务的提醒。
@@ -763,10 +804,14 @@ agent 复盘也要整条链。所以：
   **被否掉的做法：关掉时把 `router` 清掉。** 派完就再也找不到它当时为什么这么派。拆出来的子任务继承同一个 `router`。
 - **在任务的抽屉里看，不在秘书页**：秘书页是跟用户的对话，派活的决定属于任务。抽屉顶上「链路」：来源、上一级（谁派的这个任务）、
   拆自、整棵会话树、拆出；点哪个，抽屉就换成哪个对话。还在派活的任务，点卡片直接打开调度会话，能实时纠正。
+  （2026-11-25 起派出去的任务打开的是 Code 窗格里的对话，界面上没有链路了；数据照旧，`tasks.trace` / `tasks.tree` 能查。）
 - **看完就能调**：在调度会话里有「派得不对？改仓库、模型或派活规则」，打开「设置」（仓库、模型），旁边就是「流程」（`routing.md`）。
 - **给 agent 复盘**：`tasks.trace`（任务这一级的链）和 `tasks.tree`（整棵会话树），再用 `gerdr session read` 读每个对话。
 
 ## 用户在对话里
+
+**2026-11-25 起 worker 的对话在 Code 的窗格里打开**（见「没有任务面板了」），顶上的东西是窗格标题上的任务编号、状态和「等你」；
+`ChatDrawer` 只在没派出去的卡里还用。下面是看板时期的做法，「正文写内容，按钮只写动作」「消息立即发送」照旧适用。
 
 点 agent 任务的卡片，打开的是 worker 的对话：看板自己的抽屉（`ui/src/components/ChatDrawer.tsx`），
 里面是 Gerdr 原生的聊天（`@gerdr/core` 的 `SessionChat`，和 Code 里一模一样：图片、文件、审批、卡片），按 Esc 或点外面关闭。
@@ -783,11 +828,12 @@ agent 复盘也要整条链。所以：
 
 已完成的任务、还没派出去的任务、单独打开的一个 ask，才用看板自己的详情面板。
 
-## 界面：自己的组件，只有对话用 Gerdr 的
+## 界面：自己的组件，Code 和对话用 Gerdr 的
 
-面板的界面全是自己的：按钮、抽屉、弹窗用 shadcn/ui（`ui/src/components/ui/`，照 shadcn 的做法拷进来，依赖写在
-`ui/package.json`），动画是自带的 tw-animate（`ui/src/animate.css`）。从 Gerdr 拿的只有对话本身：`@gerdr/core` 的
-`SessionChat`、`useSession`、`onShowSession`、卡片注册。
+面板自己画的部分全是自己的：按钮、抽屉、弹窗用 shadcn/ui（`ui/src/components/ui/`，照 shadcn 的做法拷进来，依赖写在
+`ui/package.json`），动画是自带的 tw-animate（`ui/src/animate.css`）。从 Gerdr 拿的是对话（`@gerdr/core` 的
+`SessionChat`、`useSession`、`onShowSession`、卡片注册），2026-11-25 起加上 Code 本身（`CodeView`、`CodeRow` 和一组
+`useCode…` 钩子，都经 `lib/view.ts` 拿，旧 Gerdr 上缺的有退路）：分屏、Tab、终端是 Gerdr 的本事，自己做一份只会落后。
 **被否掉的做法：用 Gerdr 内部的组件**（`@gerdr/core/ui`）。面板就跟着 Gerdr 的组件走了，Gerdr 改一次面板变一次，
 想按自己的意思改也改不了。面板是能单独发布、给别人装的东西，界面得自己说了算。
 
@@ -804,6 +850,7 @@ agent 复盘也要整条链。所以：
   按文件夹 id 还找得到。
 - **抽屉里「对话 / 文件」**：文件是 `@gerdr/core` 的 `ArtifactsFolder`（记录、文件树、预览、Markdown 原地改）。和对话一样
   用 Gerdr 的：看文件、改稿子、视频拖进度条是 Gerdr 的本事，不是面板的样子；没有它的旧 Gerdr 不显示这个切换。
+  2026-11-25 起派出去的任务在 Code 的窗格里打开，没有这个切换了；文件夹照旧在 `~/Gerdr/<项目>/任务/` 下。
 - 里面怎么放（稿子.md、按平台分目录、草稿放 `草稿/`）是用户的流程，写在 `skills/`，不写进代码。
 - 还没做：用户给任务的附件拷进 `素材/`（现在随第一条消息发给 worker）；任务卡片上显示产物摘要；`links` 并进记录。
 - **「什么算产物」写在 `task.md` 的「产物」一节**（2026-11-17）：t93 被叫「做成产物」，把上线清单（DDL、网关、dataporter
@@ -838,7 +885,7 @@ worker 在看板上怎么做（每次停下要汇报、自己开的会话来问�
 - **用到就回来**：按 id 找（`_store.ts` 的 `find`；在 `update` 里时，写的时候发现多了没读过的部分，整个改动重来一遍）、
   `tasks.list {id}`、worker 自己调面板工具（`load` 看 `ctx.caller.session`）、它的会话又跑起来（`tasks.list` 的 `revive`：
   用户在它的对话里写了话，接着照旧的规则把任务重新打开）。回来以后没事的话，下一次检查又会归档。
-- **看得到**：「已完成」列底下「已归档 N 个」，能搜，点一个就放回「已完成」并打开；秘书用 `tasks.archived {q}` 查以前的事，
+- **看得到**：「已完成」列底下「已归档 N 个」，能搜，点一个就放回「已完成」并打开（看板时期；现在列表的「已完成」只列最近 30 个，没有归档入口）；秘书用 `tasks.archived {q}` 查以前的事，
   `secretary.status` 的「完成的」把时间范围内已归档的也算上。
 
 ## 个人的东西都在 `user/`
@@ -861,7 +908,9 @@ worker 在看板上怎么做（每次停下要汇报、自己开的会话来问�
 | `local/_archive.ts` | 归档：完成很久的需求移到 `user/data/archive/`，用到时搬回来（`tasks.archived` / `tasks.unarchive`） |
 | `local/_user.ts` | `user/`：个人副本优先的读法、旧 `data/` 的一次性迁移 |
 | `local/_apply.ts` | worker 汇报怎么落到任务上（工具和旧文字块共用） |
-| `local/tasks.ts` | 看板和秘书调用的函数：list / add / start / accept / complete / deliver / redo / drop… |
+| `local/tasks.ts` | 页面和秘书调用的函数：list / add / start / accept / complete / deliver / redo / drop… |
+| `local/blank.ts` | 用户在 Code 里开的对话（⌘T、⌘D、分支）变成任务 |
+| `local/import.ts` | 「从 Code 导入」：工作区进仓库列表、对话变成任务 |
 | `local/_main.ts` | Superagent 的核心：秘书的会话（换会话、取回复、动态）、订阅、交回、没判断成、事件的去向记录（`user/data/superagent.json`） |
 | `local/secretary.ts` | 页面和定时任务调的 `open` / `say` / `status` / `briefing` / `checkStuck` / `compact`（`local/_log.ts` 只剩一次性抄出旧记录） |
 | `local/superagent.ts` | 调度会话对消息和重新安排的 `decide`，「去向」的 `log` / `retry` |
@@ -871,10 +920,13 @@ worker 在看板上怎么做（每次停下要汇报、自己开的会话来问�
 | `ui/src/lib/settings.ts` | 设置的结构、默认值、校验（页面和 local 共用） |
 | `local/_config.ts`、`local/settings.ts` | 设置的读（只存和默认不同的，一次性从旧的 `{{变量}}` 迁移）、页面和助手的读写 |
 | `local/playbooks.ts`、`local/schedules.ts` | 「流程」「定时任务」的读写 |
-| `ui/src/pages/index.tsx` | 秘书页（打开面板先看到的） |
-| `ui/src/pages/board.tsx` | 看板 |
-| `ui/src/components/SettingsSheet.tsx`、`ui/src/settings/` | 「去向」「设置」「流程」「触发器」「定时任务」（不是单独的页面：两页右上角都能打开） |
-| `ui/src/components/ChatDrawer.tsx` | worker 对话的抽屉（`SessionChat`） |
+| `ui/src/layout.tsx` | 面板就是 Code（`CodeView list="replace"`）；太旧的 Gerdr 上提示升级 |
+| `ui/src/components/CodeSection.tsx` | Code 左边的列表：秘书、按状态分组的任务、其他、从 Code 导入；窗格标题、菜单、拖动 |
+| `ui/src/lib/view.ts` | 从 Gerdr 拿的 Code 部件（`CodeView`、`CodeRow`、`useCode…`），旧 Gerdr 上的退路 |
+| `ui/src/components/TaskDetail.tsx` | 原来的看板页（`pages/board.tsx` 改名），只用它的任务详情（没派出去的卡）和新任务表单 |
+| `ui/src/pages/index.tsx` | 空页：面板显示在 Code 里 |
+| `ui/src/components/SettingsSheet.tsx`、`ui/src/settings/` | 「去向」「设置」「流程」「记忆」「触发器」「定时任务」：秘书那一行的齿轮打开，盖在整个窗口上 |
+| `ui/src/components/ChatDrawer.tsx` | 对话抽屉（`SessionChat`），现在只在没派出去的卡里用 |
 | `ui/src/cards.tsx` | 对话里的 `task-step` 卡片 |
 | `skills/superagent-panel/` | 用户本人的做事方式（给所有 agent 看） |
 | `local/_clues.ts` | 外面来的消息的线索：编号、链接在哪个 worker 的对话里出现过（秘书看的消息、`tasks.search` 都用它） |
