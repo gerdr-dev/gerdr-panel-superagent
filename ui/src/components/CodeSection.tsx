@@ -472,7 +472,9 @@ function RowButton({ title, onClick, children }: { title: string; onClick: () =>
   return (
     <button
       title={title}
-      className="hidden size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground group-hover/task:flex hover:bg-muted hover:text-foreground [@media(hover:none)]:flex"
+      // Its room is always kept (invisible, not hidden) and it's no taller than the line: appearing on hover it made
+      // the row grow and the list jump
+      className="invisible flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground group-hover/task:visible hover:bg-muted hover:text-foreground [@media(hover:none)]:visible"
       onClick={(e) => {
         e.stopPropagation();
         onClick();
@@ -527,7 +529,10 @@ function TaskRow({ t, pane, current, action, onDetail }: { t: Task; pane?: CodeR
   return (
     // The row in front is tinted, and its line is part of it: tinted here, around both (the same tint as Code's
     // row, so the two read as one block). With the row alone tinted, its edge ran through the middle of the line
-    <div className={clsx("group/task rounded-md", current && line && "bg-accent")} title={`${t.id} ${t.title}${t.repo ? `\n${t.repo}` : ""}`}>
+    // One block to point at and to click, the line included: with the row alone taking the hover and the click, on a
+    // desktop the highlight was a strip over half of it and the line under it was dead. The row's own hover tint is
+    // taken off (the block has it), or the two would stack darker over the row
+    <div className={clsx("group/task rounded-md [&>div:first-child]:hover:bg-transparent", current && line ? "bg-accent" : "hover:bg-accent/60")} title={`${t.id} ${t.title}${t.repo ? `\n${t.repo}` : ""}`}>
       {pane ? (
         <CodeRow pane={pane.pane} where={base(t.repo)} />
       ) : (
@@ -543,7 +548,8 @@ function TaskRow({ t, pane, current, action, onDetail }: { t: Task; pane?: CodeR
         // Starts where the titles do: the row's left padding + its icon + the gap (28px; a phone's icon is 16px: 30px)
         // -mt / pb: it belongs to the row above. That row ends in padding (6px in a phone's drawer) and the next one
         // starts with as much, so at the row's own distance the line sat nearer the row under it than its own
-        <div className="group -mt-1.5 flex items-center gap-1 pr-2 pb-1.5 pl-7 leading-4 max-md:pl-[30px]">
+        // The pull-up is for a phone's roomier row (it ends in 6px of padding); a desktop's row has none to make up for
+        <div className="flex cursor-default items-center gap-1 pr-2 pb-1 pl-7 leading-4 max-md:-mt-1.5 max-md:pb-1.5 max-md:pl-[30px]" onClick={() => (t.session ? showInCode(t.session) : onDetail())}>
           <span className={clsx("min-w-0 flex-1 truncate text-[11px]", you ? "text-warn" : "text-muted-foreground")}>{line}</span>
           {action}
         </div>
