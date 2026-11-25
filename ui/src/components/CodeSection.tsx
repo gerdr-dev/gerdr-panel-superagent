@@ -1,7 +1,7 @@
 import * as core from "@gerdr/core";
 import clsx from "clsx";
-import { ArrowRightLeft, Ban, Download, Bot, CheckCircle2, ChevronRight, Circle, CircleDashed, CircleDot, LayoutGrid, MessageSquare, Play, Plus, Settings } from "lucide-react";
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { Ban, Download, Bot, CheckCircle2, ChevronRight, Circle, CircleDashed, CircleDot, LayoutGrid, MessageSquare, Play, Plus, Settings } from "lucide-react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { run } from "../lib/gerdr";
 import { WholeWindow } from "../lib/portal";
 import { NewTaskDialog, TaskDetail } from "./TaskDetail";
@@ -110,6 +110,7 @@ export function CodeSection() {
 export function Fusion({ children }: { children: React.ReactNode }) {
   const { tasks, act } = useTasks();
   const cur = useCodeSession();
+  const switching = useRef(new Set<string>());
   const rows = useCodeRows();
   // From what was last known (see lib/tasks.ts lastTasks: this mounts anew with every opening of a phone's drawer)
   const [main, setMain] = useState<Main>(last.main);
@@ -207,7 +208,7 @@ export function Fusion({ children }: { children: React.ReactNode }) {
     try {
       await run("settings.set", { router: { agent: id, model: "", effort: "" } });
       const r = await run<{ main: string }>("secretary.open", {});
-      if (main && cur === main.id && r.main !== main.id) showInCode(r.main);
+      if (main && cur === main.id && r.main !== main.id) showInCode(r.main, main.id);
     } catch (e: any) {
       toast?.error?.(String(e?.message ?? e));
     }
@@ -300,24 +301,37 @@ export function Fusion({ children }: { children: React.ReactNode }) {
     // The secretary's own conversation: which agent it runs as. Here, in its pane's ⋯ menu, rather than a dropdown on
     // its row in the list, where it took a third of the row for something changed once in a while (the person,
     // 2026-11-24). 设置 → 秘书 has it too, with the model and effort
-    if (session && isMain(session)) {
-      const def = agents.find((a) => a.default);
-      const now = agents.find((a) => a.id === agent)?.name ?? (def ? `默认（${def.name}）` : "默认");
-      return [
-        {
-          id: "agent",
-          label: `秘书的 agent：${now}`,
-          icon: <Bot />,
-          // A second level, unfolded when picked: listed outright, seven agents made the menu twice as long
-          children: [{ id: "", name: def ? `默认（${def.name}）` : "默认" }, ...agents]
-            .filter((a) => a.id !== agent)
-            .map((a) => ({ id: `agent-${a.id || "default"}`, label: `换成 ${a.name}`, icon: <ArrowRightLeft />, onSelect: () => void pickAgent(a.id) })),
-        },
-      ];
-    }
     if (!session) return [];
+    const agentMenu = (current: string | undefined, select: (id: string) => Promise<void>) => ({
+      id: "agent",
+      label: "更换 agent...",
+      icon: <Bot />,
+      disabled: switching.current.has(session),
+      children: agents
+        .filter((a) => a.id !== current)
+        .map((a) => ({
+          id: `agent-${a.id}`,
+          label: `换成 ${a.name}`,
+          icon: <core.AgentIcon agent={a.id} />,
+          onSelect: () => {
+            if (switching.current.has(session)) return;
+            switching.current.add(session);
+            void select(a.id).catch((e) => toast?.error?.(String(e?.message ?? e))).finally(() => switching.current.delete(session));
+          },
+        })),
+    });
+    if (isMain(session)) {
+      const menu = agentMenu(byId[session]?.agent || agent, pickAgent);
+      return menu.children.length ? [menu] : [];
+    }
     const t = taskOf.get(session);
-    if (t) return taskItems(t);
+    if (t) {
+      const menu = agentMenu(byId[session]?.agent, async (id) => {
+        const next = await act("switchAgent", { id: t.id, session, agent: id }) as Task;
+        if (next.session) showInCode(next.session, session);
+      });
+      return menu.children.length ? [...taskItems(t), menu] : taskItems(t);
+    }
     return byId[session]?.tags?.panel ? [] : [{ id: "import", label: "导入为任务…", icon: <Download />, onSelect: () => setImporting(true) }];
   });
   // After the pane's title: the task's number and where it stands, in the groups' own icons and colours, and a tap on

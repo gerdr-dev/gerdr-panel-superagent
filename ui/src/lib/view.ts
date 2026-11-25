@@ -26,7 +26,7 @@ type Core = {
   useCodeDirs?: (dirs: { path: string; name?: string }[]) => void;
   useCodeRowMenu?: (fn: (row: { pane: string; session?: string }) => CodeMenuItem[]) => void;
   useCodeRowDrop?: (fn: (row: { pane: string; session?: string }) => void) => (el: HTMLElement | null) => void;
-  showInCodeView?: (session: string) => void;
+  showInCodeView?: (session: string, replace?: string) => void;
   useCodeSession?: () => string | undefined;
 };
 const c = core as unknown as Core;
@@ -52,7 +52,7 @@ export const jumpInCode = (session: string, ref: string) => (c.jumpInCode ? c.ju
 export const newCodeTab = (opts?: { cwd?: string }) => c.newCodeTab?.(opts);
 // All of it or nothing: the list is ours to draw (list="replace"), from Code's rows
 export const canHostCode = !!c.CodeView && !!c.showInCodeView && !!c.CodeRow && !!c.useCodeRows;
-export const showInCode = (session: string) => c.showInCodeView?.(session);
+export const showInCode = (session: string, replace?: string) => c.showInCodeView?.(session, replace);
 export const useCodeSession: () => string | undefined = c.useCodeSession ?? (() => undefined);
 
 /** The settings sheet's open tab; null = Code. Not kept across reloads: coming back, one wants Code. */

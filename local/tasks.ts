@@ -745,6 +745,44 @@ export function ackOrigin(ctx: Ctx, t: Task) {
   }
 }
 
+/** Hand the same task and its conversation to another agent, keeping its place on the board. */
+export async function switchAgent(input: { id: string; session: string; agent: string }, ctx: Ctx) {
+  const t = find(load(ctx).store, input.id);
+  if (!t.session || t.session !== input.session || t.status === "dropped") throw new Error("任务会话已变更，请重新打开菜单");
+  const from = ctx.sessions.get(t.session);
+  if (!from) throw new Error("找不到原任务会话");
+  if (!input.agent || input.agent === from.agent) throw new Error("请选择另一个 agent");
+  if (from.status === "running" || from.status === "waiting") throw new Error("请先结束当前轮次，再更换 agent");
+
+  const sess = await ctx.sessions.start({
+    cwd: from.cwd,
+    agent: input.agent,
+    ...(t.autoTitle ? {} : { title: t.title }),
+    systemFile: `${ctx.workspace.dir}/${writeWorkerSystem(ctx, t.id, t.repo || from.cwd)}`,
+    artifactsDir: folder({ id: t.id }, ctx)?.path,
+    tags: { task: t.id },
+    continueFrom: from.id,
+    workspace: "none",
+  });
+
+  try {
+    return update(ctx, (s) => {
+      const current = find(s, t.id);
+      if (current.session !== from.id || current.status === "dropped") throw new Error("任务会话已变更，请重新打开菜单");
+      current.session = sess.id;
+      current.sessions = [...new Set([...(current.sessions ?? []), from.id, sess.id])];
+      current.agent = input.agent;
+      delete current.model;
+      delete current.effort;
+      current.updatedAt = Date.now();
+      return current;
+    });
+  } catch (error) {
+    await ctx.sessions.close(sess.id).catch(() => {});
+    throw error;
+  }
+}
+
 /**
  * Which agent / model / effort a worker runs on. The defaults (设置 → worker) go with their agent: a model named there is
  * that agent's (a claude model means nothing to codex), so a task on another agent only gets a model it names itself.
