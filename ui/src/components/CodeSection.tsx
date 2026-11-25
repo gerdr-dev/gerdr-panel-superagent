@@ -643,6 +643,9 @@ function TaskRow({ t, pane, current, action, agent, menu, onDetail }: { t: Task;
           )}
           <span className={clsx("min-w-0 flex-1 truncate", you && "font-medium")}>{t.title}</span>
           {t.repo && <span className="max-w-[40%] shrink-0 truncate text-[11px] text-muted-foreground">{base(t.repo)}</span>}
+          {/* Code's row ends in its status dot's column (kept even when there is no dot) and 4px more of padding:
+              without the same here the folder's name stood 20px further right than on the rows beside it */}
+          <span className="mr-1 size-2 shrink-0" />
         </RowShell>
         {
           // Starts where the titles do: the row's left padding + its icon + the gap (28px; a phone's icon is 16px: 30px)
