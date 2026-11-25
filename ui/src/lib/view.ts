@@ -17,7 +17,7 @@ export type CodeRowInfo = {
 };
 type Core = {
   CodeView?: (props: { sidebar?: ReactNode; list?: "add" | "replace" }) => ReactNode;
-  CodeRow?: (props: { pane: string; where?: string }) => ReactNode;
+  CodeRow?: (props: { pane: string; where?: string; below?: ReactNode }) => ReactNode;
   useCodeRows?: () => CodeRowInfo[];
   newCodeTab?: (opts?: { cwd?: string }) => void;
   closeCodeDrawer?: () => void;

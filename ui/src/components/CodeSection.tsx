@@ -530,16 +530,14 @@ function TaskRow({ t, pane, current, action, agent, onDetail }: { t: Task; pane?
   const you = t.column === "you" && t.status === "running";
   const busy = t.live?.status === "running";
   const line = lineOf(t) || (t.status === "todo" ? "还没派出去" : "");
+  const text = <span className={clsx("block truncate text-[11px]", you ? "text-warn" : "text-muted-foreground")}>{line}</span>;
+  // Its conversation has a pane: Code's own row with our line inside it (core CodeRow `below`), so the whole of it is
+  // one item — hovered, clicked, right-clicked and dragged as one. The line used to be a box of ours under Code's
+  // row, patched to look like part of it: the menu and the drag still only took on the title
+  if (pane) return <CodeRow pane={pane.pane} where={base(t.repo)} below={line ? text : undefined} />;
   return (
-    // The row in front is tinted, and its line is part of it: tinted here, around both (the same tint as Code's
-    // row, so the two read as one block). With the row alone tinted, its edge ran through the middle of the line
-    // One block to point at and to click, the line included: with the row alone taking the hover and the click, on a
-    // desktop the highlight was a strip over half of it and the line under it was dead. The row's own hover tint is
-    // taken off (the block has it), or the two would stack darker over the row
-    <div className={clsx("group/task rounded-md [&>div:first-child]:hover:bg-transparent", current && line ? "bg-accent" : "hover:bg-accent/60")} title={`${t.id} ${t.title}${t.repo ? `\n${t.repo}` : ""}`}>
-      {pane ? (
-        <CodeRow pane={pane.pane} where={base(t.repo)} />
-      ) : (
+    // No pane (not handed out, or its conversation isn't open): a row of ours, the line included in the one block
+    <div className={clsx("group/task rounded-md [&>div:first-child]:bg-transparent [&>div:first-child]:hover:bg-transparent", current ? "bg-accent" : "hover:bg-accent/60")} title={`${t.id} ${t.title}${t.repo ? `\n${t.repo}` : ""}`}>
         <RowShell current={current} drag={t.id} onClick={() => (t.session ? showInCode(t.session) : onDetail())}>
           {/* The agent's icon, as on Code's rows: with a dot here instead, the same kind of task had an icon or a dot by
               whether its conversation happened to be open in a pane, which says nothing to the person. A dot only
@@ -554,7 +552,6 @@ function TaskRow({ t, pane, current, action, agent, onDetail }: { t: Task; pane?
           <span className={clsx("min-w-0 flex-1 truncate", you && "font-medium")}>{t.title}</span>
           {t.repo && <span className="max-w-[40%] shrink-0 truncate text-[11px] text-muted-foreground">{base(t.repo)}</span>}
         </RowShell>
-      )}
       {(line || action) && (
         // Starts where the titles do: the row's left padding + its icon + the gap (28px; a phone's icon is 16px: 30px)
         // -mt / pb: it belongs to the row above. That row ends in padding (6px in a phone's drawer) and the next one
