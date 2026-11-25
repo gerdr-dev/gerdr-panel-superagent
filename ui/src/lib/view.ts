@@ -17,13 +17,13 @@ export type CodeRowInfo = {
 };
 type Core = {
   CodeView?: (props: { sidebar?: ReactNode; list?: "add" | "replace" }) => ReactNode;
-  CodeRow?: (props: { pane: string; where?: string; below?: ReactNode }) => ReactNode;
+  CodeRow?: (props: { pane: string; where?: ReactNode; below?: ReactNode }) => ReactNode;
   useCodeRows?: () => CodeRowInfo[];
   newCodeTab?: (opts?: { cwd?: string }) => void;
   closeCodeDrawer?: () => void;
   useCodePaneTag?: (fn: (row: { pane: string; session?: string }) => CodePaneTag | CodePaneTag[] | null) => void;
   jumpInCode?: (session: string, ref: string) => void;
-  useCodeDirs?: (dirs: { path: string; name?: string }[]) => void;
+  useCodeDirs?: (dirs: { path: string; name?: string; color?: string }[]) => void;
   useCodeOrder?: (sessions: string[]) => void;
   useCodeNumber?: (session?: string) => number | undefined;
   useCodeStart?: (fn: (o: { agent: string; cwd: string; mode?: string; continueFrom?: string }) => Promise<string>) => void;
@@ -44,7 +44,7 @@ export type CodeMenuItem = { id: string; label: string; icon?: ReactNode; disabl
 /** Our items in a pane's ⋯ menu and its row's right-click menu (移到…). Without it (an older Gerdr): none there. */
 export const useCodeRowMenu: (fn: (row: { pane: string; session?: string }) => CodeMenuItem[]) => void = c.useCodeRowMenu ?? (() => {});
 /** The folders offered on Code's new-conversation page while we show: ours (设置 → 仓库), not Code's workspaces. */
-export const useCodeDirs: (dirs: { path: string; name?: string }[]) => void = c.useCodeDirs ?? (() => {});
+export const useCodeDirs: (dirs: { path: string; name?: string; color?: string }[]) => void = c.useCodeDirs ?? (() => {});
 /**
  * Conversations started in Code while we show (Cmd+T, 进行中's +, ⌘D, a fork) start as ours: a task's worker. Without
  * it (an older Gerdr) they stay Code's, and show here only once imported.

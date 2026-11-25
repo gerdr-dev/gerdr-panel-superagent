@@ -12,12 +12,16 @@
 // the code, from here. DESIGN.md, 「设置和流程」.
 
 /** mode: the permission mode its sessions start in (claude: default / acceptEdits / plan / auto; codex: ask / auto / read-only). */
+import { isColor } from "./repoColor";
+
 export type Who = { agent: string; model: string; effort: string; mode: string };
 
 export type Repo = {
   path: string;
   /** One line for the router: what this repository is (which service / product). */
   note?: string;
+  /** Its colour in the list and on the new-conversation page (#rrggbb: lib/repoColor.ts). */
+  color?: string;
 };
 
 export type Settings = {
@@ -105,7 +109,8 @@ export function normalize(raw: any): Settings {
     const path = str(typeof x === "string" ? x : x?.path, "");
     if (!path || repos.some((y) => y.path === path)) continue;
     const note = str(x?.note, "");
-    repos.push({ path, ...(note ? { note } : {}) });
+    const color = isColor(x?.color) ? x.color.toLowerCase() : "";
+    repos.push({ path, ...(note ? { note } : {}), ...(color ? { color } : {}) });
   }
   return {
     router: who(r.router, d.router),

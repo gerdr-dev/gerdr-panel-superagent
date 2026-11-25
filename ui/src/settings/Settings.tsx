@@ -1,10 +1,11 @@
-import { Plus, X } from "lucide-react";
+import { Palette, Plus, X } from "lucide-react";
 import clsx from "clsx";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "../components/Button";
 import { AgentPick, ChoicePick, input, PathPick, useAgents, type AgentChoice } from "../components/pickers";
 import { run } from "../lib/gerdr";
 import { ACK_TEXT, normalize, type Repo, type Settings, type Who } from "../lib/settings";
+import { PRESETS } from "../lib/repoColor";
 import { SaveBar } from "../components/SaveBar";
 
 // 设置: the values the code acts on (lib/settings.ts says why they're settings and not prose in the skill). Each field
@@ -307,7 +308,8 @@ function Repos({ repos, onChange }: { repos: Repo[]; onChange: (r: Repo[]) => vo
         // on every row); the full path sits under it, wrapped rather than cut
         <div key={r.path} className="space-y-1.5 rounded-lg border bg-background p-2.5">
           <div className="flex items-center gap-2">
-            <span className="min-w-0 flex-1 truncate text-[13px] font-medium" title={r.path}>
+            <RepoColor value={r.color} onChange={(color) => at(i, { color })} />
+            <span className="min-w-0 flex-1 truncate text-[13px] font-medium" style={r.color ? { color: r.color } : undefined} title={r.path}>
               {r.path.replace(/\/+$/, "").split("/").pop() || r.path}
             </span>
             <Button variant="ghost" size="icon" className="-my-1 shrink-0" aria-label={`去掉 ${r.path}`} onClick={() => onChange(repos.filter((_, j) => j !== i))}>
@@ -327,6 +329,63 @@ function Repos({ repos, onChange }: { repos: Repo[]; onChange: (r: Repo[]) => vo
           加
         </Button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * A repository's colour (lib/repoColor.ts): a dot that opens the presets, a custom one (the system's colour picker)
+ * and none. In the list it colours the repository's name on a task's row; on the new-conversation page, its folder.
+ */
+function RepoColor({ value, onChange }: { value?: string; onChange: (c: string | undefined) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const off = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    document.addEventListener("pointerdown", off, true);
+    return () => document.removeEventListener("pointerdown", off, true);
+  }, [open]);
+  const dot = "size-5 shrink-0 rounded-full border";
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        title="颜色：列表里这个仓库的名字、新会话页上它的文件夹按钮用它"
+        className={clsx(dot, "flex items-center justify-center", !value && "border-dashed text-muted-foreground")}
+        style={value ? { background: value, borderColor: value } : undefined}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {!value && <Palette className="size-3" />}
+      </button>
+      {open && (
+        <div className="absolute top-7 left-0 z-20 w-56 space-y-2 rounded-lg border bg-popover p-2 shadow-lg">
+          <div className="grid grid-cols-5 gap-1.5">
+            {PRESETS.map((p) => (
+              <button
+                key={p.hex}
+                type="button"
+                title={p.name}
+                className={clsx(dot, value === p.hex && "ring-2 ring-foreground ring-offset-1 ring-offset-popover")}
+                style={{ background: p.hex, borderColor: p.hex }}
+                onClick={() => (onChange(p.hex), setOpen(false))}
+              />
+            ))}
+          </div>
+          <div className="flex items-center gap-2 text-[12px]">
+            <label className="flex flex-1 cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 hover:bg-accent">
+              {/* The system's picker: any colour, kept as #rrggbb */}
+              <input type="color" className="size-5 cursor-pointer rounded border-0 bg-transparent p-0" value={value ?? "#8b8d98"} onChange={(e) => onChange(e.target.value)} />
+              自定义
+            </label>
+            {value && (
+              <button type="button" className="rounded-md px-1.5 py-1 text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => (onChange(undefined), setOpen(false))}>
+                不要颜色
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

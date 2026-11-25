@@ -3,6 +3,7 @@ import clsx from "clsx";
 import { Ban, Download, Bot, CheckCircle2, ChevronRight, Circle, CircleDashed, CircleDot, LayoutGrid, MessageSquare, Play, Plus, Settings } from "lucide-react";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { run } from "../lib/gerdr";
+import { colorOf } from "../lib/repoColor";
 import { WholeWindow } from "../lib/portal";
 import { NewTaskDialog, TaskDetail } from "./TaskDetail";
 import { ImportDialog } from "./ImportDialog";
@@ -78,7 +79,7 @@ const base = (p?: string) => (p ?? "").replace(/\/+$/, "").split("/").pop() ?? "
 type Main = { id: string; status: string; waiting?: string } | null;
 type Sess = { id: string; status: string; agent?: string; title?: string; cwd?: string; updatedAt?: number; turn?: { startedAt?: number }; tags?: Record<string, string> };
 /** What the functions last answered, for the next mount to start from. */
-const last: { main: Main; asks: number; standing: Record<string, "review" | "done">; agents: AgentOpt[]; agent: string; repos: { path: string }[] } = {
+const last: { main: Main; asks: number; standing: Record<string, "review" | "done">; agents: AgentOpt[]; agent: string; repos: { path: string; color?: string }[] } = {
   main: null,
   asks: 0,
   standing: {},
@@ -177,7 +178,7 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   // The new-conversation page's quick picks are the repositories in 设置 → 仓库 (the person: that page should take them
   // from here, not from Code's workspaces, which this panel doesn't show; Code mode keeps its own). The same list the
   // secretary picks from, so a conversation started by hand lands where one it dispatched would
-  const [repos, setRepos] = useState<{ path: string }[]>(last.repos);
+  const [repos, setRepos] = useState<{ path: string; color?: string }[]>(last.repos);
   // Which agent the secretary runs as (设置 → 秘书 → agent, settings.router.agent), and the ones there are
   const [agent, setAgent] = useState(last.agent);
   const [agents, setAgents] = useState<AgentOpt[]>(last.agents);
@@ -213,7 +214,7 @@ export function Fusion({ children }: { children: React.ReactNode }) {
       toast?.error?.(String(e?.message ?? e));
     }
   };
-  useCodeDirs(repos.map((r) => ({ path: r.path, name: base(r.path) })));
+  useCodeDirs(repos.map((r) => ({ path: r.path, name: base(r.path), ...(r.color ? { color: r.color } : {}) })));
   // What the person starts themselves (Cmd+T, +, ⌘D, a fork) is a task from the start, like the secretary's (local/blank.ts)
   useCodeStart(async (o) => (await run<{ session: string }>("blank.run", o)).session);
 
@@ -390,11 +391,12 @@ export function Fusion({ children }: { children: React.ReactNode }) {
       current={(!!t.session && cur === t.session) || detail === t.id}
       action={action}
       agent={(t.session && byId[t.session]?.agent) || t.agent}
+      where={repoLabel(t.repo)}
       menu={taskItems(t)}
       onDetail={() => openDetail(t.id)}
     />
   );
-  const ownRow = (r: CodeRowInfo) => <CodeRow key={r.pane} pane={r.pane} where={base(r.cwd)} />;
+  const ownRow = (r: CodeRowInfo) => <CodeRow key={r.pane} pane={r.pane} where={repoLabel(r.cwd)} />;
 
   // One order for a group, tasks and the person's own conversations together (they aren't told apart): what's
   // running now first, then by when each last moved, newest first. "Moved" is when its turn started, not its last
@@ -402,6 +404,12 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   // order, workspace by workspace, which read as no order at all once the workspaces weren't shown.
   const at = (id?: string) => (id && byId[id] ? (byId[id].turn?.startedAt ?? byId[id].updatedAt ?? 0) : 0);
   const busy = (id?: string) => !!id && byId[id]?.status === "running";
+  // A repository's name as the rows show it, in the colour the person gave it (设置 → 仓库)
+  const repoLabel = (path?: string) => {
+    const name = base(path);
+    const color = colorOf(repos, path);
+    return color ? <span style={{ color }}>{name}</span> : name;
+  };
   // The conversations of the rows, in the order they're drawn (folded groups left out): the keys go by it (useCodeOrder)
   const order: string[] = [];
   const listed = (id?: string) => void (id && !order.includes(id) && order.push(id));
@@ -696,7 +704,25 @@ function lineOf(t: Task): string {
  * row), ours when it hasn't been opened yet (a click opens it). Under it, what Code's row can't say: what it waits
  * on the person for, or its worker's newest line, and the one move that makes sense from where it stands.
  */
-function TaskRow({ t, pane, current, action, agent, menu, onDetail }: { t: Task; pane?: CodeRowInfo; current: boolean; action?: React.ReactNode; agent?: string; menu: RowMenuItem[]; onDetail: () => void }) {
+function TaskRow({
+  t,
+  pane,
+  current,
+  action,
+  agent,
+  where,
+  menu,
+  onDetail,
+}: {
+  t: Task;
+  pane?: CodeRowInfo;
+  current: boolean;
+  action?: React.ReactNode;
+  agent?: string;
+  where: React.ReactNode;
+  menu: RowMenuItem[];
+  onDetail: () => void;
+}) {
   const you = needsPerson(t) && t.status === "running";
   const busy = t.live?.status === "running";
   const line = lineOf(t) || (t.status === "todo" ? "还没派出去" : "");
@@ -713,7 +739,7 @@ function TaskRow({ t, pane, current, action, agent, menu, onDetail }: { t: Task;
   // Its conversation has a pane: Code's own row with our line inside it (core CodeRow `below`), so the whole of it is
   // one item — hovered, clicked, right-clicked and dragged as one. The line used to be a box of ours under Code's
   // row, patched to look like part of it: the menu and the drag still only took on the title
-  if (pane) return <CodeRow pane={pane.pane} where={base(t.repo)} below={text} />;
+  if (pane) return <CodeRow pane={pane.pane} where={where} below={text} />;
   return (
     // No pane (not handed out, or its conversation isn't open): a row of ours, the line included in the one block
     <RowMenu items={menu}>
@@ -739,7 +765,7 @@ function TaskRow({ t, pane, current, action, agent, menu, onDetail }: { t: Task;
             </span>
           )}
           <span className={clsx("min-w-0 flex-1 truncate", you && "font-medium")}>{t.title}</span>
-          {t.repo && <span className="max-w-[40%] shrink-0 truncate text-[11px] text-muted-foreground">{base(t.repo)}</span>}
+          {t.repo && <span className="max-w-[40%] shrink-0 truncate text-[11px] text-muted-foreground">{where}</span>}
           {/* Code's row ends in its status dot's column (kept even when there is no dot) and 4px more of padding:
               without the same here the folder's name stood 20px further right than on the rows beside it */}
           <span className="mr-1 size-2 shrink-0" />
