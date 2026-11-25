@@ -25,6 +25,7 @@ type Core = {
   jumpInCode?: (session: string, ref: string) => void;
   useCodeDirs?: (dirs: { path: string; name?: string; color?: string }[]) => void;
   useCodeOrder?: (sessions: string[]) => void;
+  useCodeOverview?: (sessions: string[]) => void;
   useCodeNumber?: (session?: string) => number | undefined;
   useCodeStart?: (fn: (o: { agent: string; cwd: string; mode?: string; continueFrom?: string }) => Promise<string>) => void;
   useCodeRowMenu?: (fn: (row: { pane: string; session?: string }) => CodeMenuItem[]) => void;
@@ -55,6 +56,11 @@ export const useCodeStart: (fn: (o: { agent: string; cwd: string; mode?: string;
  * instead of Code's tabs and workspaces. An older Gerdr: Code's keys as they were.
  */
 export const useCodeOrder: (sessions: string[]) => void = c.useCodeOrder ?? (() => {});
+/**
+ * The conversations a phone's overview pages through while we show (its strip of tabs, the swipe), in our order. An
+ * older Gerdr: the overview stays Code's "active".
+ */
+export const useCodeOverview: (sessions: string[]) => void = c.useCodeOverview ?? (() => {});
 /** The ⌘N number for a row we draw ourselves, while ⌘ is held (Code's rows number themselves). */
 export const useCodeNumber: (session?: string) => number | undefined = c.useCodeNumber ?? (() => undefined);
 /** Close a phone's drawer (Code's list), before showing what opens behind it. */

@@ -9,7 +9,7 @@ import { AskDialog, NewTaskDialog, TaskDetail } from "./TaskDetail";
 import { ImportDialog } from "./ImportDialog";
 import { RowMenu, type RowMenuItem } from "./RowMenu";
 import { openAsks, type Task, useTasks } from "../lib/tasks";
-import { CodeRow, type CodeRowInfo, closeCodeDrawer, newCodeTab, useCodeDirs, useCodeStart, useCodeOrder, useCodeNumber, openSettings, showInCode, useCodeRowDrop, useCodePaneTag, jumpInCode, useCodeRowMenu, useCodeRows, useCodeSession, type CodePaneTag } from "../lib/view";
+import { CodeRow, type CodeRowInfo, closeCodeDrawer, newCodeTab, useCodeDirs, useCodeStart, useCodeOrder, useCodeOverview, useCodeNumber, openSettings, showInCode, useCodeRowDrop, useCodePaneTag, jumpInCode, useCodeRowMenu, useCodeRows, useCodeSession, type CodePaneTag } from "../lib/view";
 import { usePanelChange, usePanelVisible, useRefresh, useSessions } from "../lib/visible";
 
 // Code's whole list, drawn by this panel (lib/view.ts, layout.tsx; core CodeView list="replace"): not Code's
@@ -430,13 +430,12 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   // The conversations of the rows, in the order they're drawn (folded groups left out): the keys go by it (useCodeOrder)
   const order: string[] = [];
   const listed = (id?: string) => void (id && !order.includes(id) && order.push(id));
-  const sorted = (ts: Task[], rs: CodeRowInfo[]) =>
+  const ranked = (ts: Task[], rs: CodeRowInfo[]) =>
     [
-      ...ts.map((t) => ({ id: t.session, run: busy(t.session) || t.live?.status === "running", at: Math.max(at(t.session), t.live?.turnStartedAt ?? 0) || t.updatedAt, el: taskRow(t) })),
-      ...rs.map((r) => ({ id: r.session, run: busy(r.session), at: at(r.session), el: ownRow(r) })),
-    ]
-      .sort((a, b) => Number(b.run) - Number(a.run) || b.at - a.at)
-      .map((x) => (listed(x.id), x.el));
+      ...ts.map((t) => ({ id: t.session, run: busy(t.session) || t.live?.status === "running", at: Math.max(at(t.session), t.live?.turnStartedAt ?? 0) || t.updatedAt, el: () => taskRow(t) })),
+      ...rs.map((r) => ({ id: r.session, run: busy(r.session), at: at(r.session), el: () => ownRow(r) })),
+    ].sort((a, b) => Number(b.run) - Number(a.run) || b.at - a.at);
+  const sorted = (ts: Task[], rs: CodeRowInfo[]) => ranked(ts, rs).map((x) => (listed(x.id), x.el()));
 
   // A task not handed out has no conversation to open: its row opens the board's card for it (TaskDetail), over the
   // whole window. Without it such a task could only be started as it was: no way to read what was asked, set its
@@ -575,6 +574,10 @@ export function Fusion({ children }: { children: React.ReactNode }) {
     </div>
   );
   useCodeOrder(order);
+  // A phone's overview pages through 等你 and 进行中 only, in the list's order, folded or not (the person, 2026-11-25:
+  // 「只放面板里等你和进行中的任务」). Without this it was Code's "active": every agent that ran in the project, done
+  // tasks and conversations this list hides included
+  useCodeOverview([...ranked(youTasks, youOwn), ...ranked(activeTasks, activeOwn)].flatMap((x) => (x.id ? [x.id] : [])));
   return (
     <ListContext.Provider value={list}>
       {children}
