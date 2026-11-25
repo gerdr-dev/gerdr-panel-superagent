@@ -32,6 +32,16 @@ export function waitingLines(tasks: Listed[]): Line[] {
       items.push({ id: t.id, title: `${t.id} 待办：${cut(t.title, 80)}`, body: who ? `${who}${t.origin.source ? `（${t.origin.source}）` : ""}` : t.title });
       continue;
     }
+    // A reply its worker wrote and holds for the user to send or not (设置 → 回复对方 = review; _outbox.ts): the list
+    // counts it under 等你, but the inbox didn't have it, so nothing told someone away from the panel that the work was
+    // done and only their 发送 was left (2026-11-25). Opening it goes to the chat, where the card is
+    const held = (t.outbox ?? []).filter((o) => o.state === "pending");
+    if (held.length) {
+      const to = held[0].where.split(" · ").pop();
+      const more = held.length > 1 ? `（还有 ${held.length - 1} 条）` : "";
+      items.push({ id: t.id, title: `${t.id} 待发给 ${to}：${cut(held[0].text.replace(/\s*\n\s*/g, " "), 80)}${more}`, body: t.title, session: t.session });
+      continue;
+    }
     if (t.column !== "you") continue;
     // What its worker asked of the user (its asks): opening it goes to the task's chat, where the ask's card is.
     // Named by the task (t113), the card the user knows; one question: the body is the task's title, not the question
