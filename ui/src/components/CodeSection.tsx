@@ -1,10 +1,11 @@
 import * as core from "@gerdr/core";
 import clsx from "clsx";
-import { ArrowRightLeft, Ban, Bot, CheckCircle2, ChevronRight, Circle, CircleDashed, CircleDot, LayoutGrid, MessageSquare, Play, Plus, Settings } from "lucide-react";
+import { ArrowRightLeft, Ban, Download, Bot, CheckCircle2, ChevronRight, Circle, CircleDashed, CircleDot, LayoutGrid, MessageSquare, Play, Plus, Settings } from "lucide-react";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { run } from "../lib/gerdr";
 import { WholeWindow } from "../lib/portal";
 import { NewTaskDialog, TaskDetail } from "./TaskDetail";
+import { ImportDialog } from "./ImportDialog";
 import { RowMenu, type RowMenuItem } from "./RowMenu";
 import { openAsks, type Task, useTasks } from "../lib/tasks";
 import { CodeRow, type CodeRowInfo, closeCodeDrawer, newCodeTab, useCodeDirs, openSettings, showInCode, useCodeRowDrop, useCodePaneTag, useCodeRowMenu, useCodeRows, useCodeSession } from "../lib/view";
@@ -75,7 +76,7 @@ function FoldTitle({ open, onClick, icon, label, children }: { open: boolean; on
 const base = (p?: string) => (p ?? "").replace(/\/+$/, "").split("/").pop() ?? "";
 
 type Main = { id: string; status: string; waiting?: string } | null;
-type Sess = { id: string; status: string; agent?: string; updatedAt?: number; turn?: { startedAt?: number }; tags?: Record<string, string> };
+type Sess = { id: string; status: string; agent?: string; title?: string; cwd?: string; updatedAt?: number; turn?: { startedAt?: number }; tags?: Record<string, string> };
 /** What the functions last answered, for the next mount to start from. */
 const last: { main: Main; asks: number; standing: Record<string, "review" | "done">; agents: AgentOpt[]; agent: string; repos: { path: string }[] } = {
   main: null,
@@ -135,6 +136,8 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   const live = useSessions((s) => open.has(s.id) || s.id === main?.id || !!s.tags?.task) as Sess[];
   const byId = useMemo(() => Object.fromEntries(live.map((s) => [s.id, s])), [live, openKey]);
   const status = main && main.status !== "gone" ? (byId[main.id]?.status ?? main.status) : "";
+  // The panel's own folder (where the secretary lives): a workspace of Code's too once its conversation was opened, never a repository
+  const panelDir = (main && byId[main.id]?.cwd)?.replace(/\/+$/, "") ?? "";
   const openMain = () =>
     main && status
       ? showInCode(main.id)
@@ -243,7 +246,11 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   // Before the tasks are known at all (the very first load), a worker's pane is told by its tag and waits for its
   // task rather than show among the person's own and jump groups a second later
   const unknownTask = (id: string) => tasks == null && !!byId[id]?.tags?.task;
-  const own = rows.filter((r) => r.kind === "session" && !(r.session && (taskOf.has(r.session) || isMain(r.session) || unknownTask(r.session))));
+  // Code's conversations that aren't ours. Not listed (2026-11-25, the person: the panel shows its own tasks; Code is
+  // 「一个可选的一次性导入」): they are what 从 Code 导入 offers, where one becomes a task like any other. Until then they
+  // were listed in the groups beside the tasks, alike on the surface only: the secretary knew nothing of them.
+  const importable = rows.filter((r) => r.kind === "session" && !(r.session && (taskOf.has(r.session) || isMain(r.session) || unknownTask(r.session) || byId[r.session]?.tags?.panel)));
+  const own: CodeRowInfo[] = [];
   const needs = (r: CodeRowInfo) => !!r.session && (byId[r.session]?.status === "waiting" || byId[r.session]?.status === "error");
   const stands = (r: CodeRowInfo) => (r.session ? standing[r.session] : undefined);
   const youOwn = own.filter((r) => needs(r) && stands(r) !== "done");
@@ -254,7 +261,21 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   // keeps one in every workspace that has nothing else, so with the workspaces not shown they turned up in 进行中 one
   // per empty workspace, and closing one only made Code put it back. Not listed, except the one in front (so the
   // list still says where one is), under 其他.
-  const other = rows.filter((r) => r.kind !== "session" && (r.kind !== "new" || r.current));
+  // …and a conversation that isn't a task while it is the one in front, so the list still says where one is
+  const other = rows.filter((r) => (r.kind !== "session" && (r.kind !== "new" || r.current)) || (r.current && importable.includes(r)));
+  // 从 Code 导入: this project's workspaces (as repositories) and those conversations
+  const [importing, setImporting] = useState(false);
+  const wsDirs = [...new Map(rows.filter((r) => r.workspace.cwd).map((r) => [r.workspace.cwd!.replace(/\/+$/, ""), r.workspace.name])).entries()];
+  const importRepos = wsDirs.filter(([path]) => path !== panelDir).map(([path, name]) => ({ path, name: name || base(path), have: repos.some((x) => x.path.replace(/\/+$/, "") === path) }));
+  const importSessions = importable.map((r) => ({
+    id: r.session!,
+    title: byId[r.session!]?.title ?? "",
+    cwd: byId[r.session!]?.cwd ?? r.cwd ?? "",
+    agent: byId[r.session!]?.agent ?? "",
+    status: byId[r.session!]?.status ?? "",
+    updatedAt: byId[r.session!]?.updatedAt,
+  }));
+  const toImport = importSessions.length + importRepos.filter((r) => !r.have).length;
   const you = youTasks.length + youOwn.length;
 
   const move = (t: Task, to: Status) => act("setStatus", { id: t.id, status: to }).catch((e) => toast?.error?.(String(e?.message ?? e)));
@@ -297,8 +318,7 @@ export function Fusion({ children }: { children: React.ReactNode }) {
     if (!session) return [];
     const t = taskOf.get(session);
     if (t) return taskItems(t);
-    const at: Status = standing[session] ?? "running";
-    return (["running", "review", "done"] as const).filter((to) => to !== at).map((to) => ({ id: `move-${to}`, label: `移到${LABEL[to]}`, icon: ICON[to], onSelect: () => onMove(to, { session }) }));
+    return byId[session]?.tags?.panel ? [] : [{ id: "import", label: "导入为任务…", icon: <Download />, onSelect: () => setImporting(true) }];
   });
   // After the pane's title: the task's number and where it stands, in the groups' own icons and colours, and a tap on
   // it moves it. Two tasks side by side had the same title bar, and on a phone (the list in the drawer) an open
@@ -306,6 +326,11 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   useCodePaneTag(({ session }) => {
     if (!session || isMain(session)) return null;
     const t = taskOf.get(session);
+    // Not ours: it says so, and the tap brings it in
+    if (!t)
+      return byId[session]?.tags?.panel
+        ? null
+        : { label: "不是任务", title: "这个对话是 Code 里的，不在这个面板的任务里", items: [{ id: "import", label: "导入为任务…", icon: <Download />, onSelect: () => setImporting(true) }] };
     const at: Status = t ? (t.status as Status) : (standing[session] ?? "running");
     const waits = at === "running" && (t ? needsPerson(t) : byId[session]?.status === "waiting" || byId[session]?.status === "error");
     const items = t
@@ -364,12 +389,13 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   }, [detailTask?.session, detailTask?.status]);
   const panelShown = usePanelVisible();
   useEffect(() => {
-    if (!panelShown) (setDetail(""), setCreating(false));
+    if (!panelShown) (setDetail(""), setCreating(false), setImporting(false));
   }, [panelShown]);
   const overlays = (
     <WholeWindow>
       {detailTask && <TaskDetail t={detailTask} byId={byTask} act={act} onClose={() => setDetail("")} onGo={setDetail} onSession={(id) => (setDetail(""), showInCode(id))} />}
       {creating && <NewTaskDialog act={act} onClose={() => setCreating(false)} />}
+      {importing && <ImportDialog repos={importRepos} sessions={importSessions} onClose={() => setImporting(false)} onDone={(w) => (setImporting(false), w && showInCode(w))} />}
     </WholeWindow>
   );
 
@@ -433,8 +459,8 @@ export function Fusion({ children }: { children: React.ReactNode }) {
           <span
             role="button"
             className="flex size-5 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
-            title="新对话：自己随手开一个，不经过秘书"
-            onClick={(e) => (e.stopPropagation(), newCodeTab())}
+            title="新任务：写一句要做什么，直接派出去（不经过秘书就选上仓库）；Code 里已有的对话用最下面的「从 Code 导入」"
+            onClick={(e) => (e.stopPropagation(), closeCodeDrawer(), setCreating(true))}
           >
             <Plus className="size-3.5" />
           </span>
@@ -465,6 +491,19 @@ export function Fusion({ children }: { children: React.ReactNode }) {
           <FoldTitle open={otherOpen} onClick={foldOther} icon={<LayoutGrid className="size-3.5 shrink-0 text-muted-foreground max-md:size-4" />} label={`其他 ${other.length}`} />
           {otherOpen && other.map(ownRow)}
         </>
+      )}
+      {/* Only while Code has something not brought in: a line, no group */}
+      {toImport > 0 && (
+        <button
+          className="mt-1 flex h-7 w-full items-center gap-2 rounded-md pr-1 pl-1.5 text-[11px] text-muted-foreground select-none hover:bg-accent/60 hover:text-foreground max-md:h-9"
+          title="这个面板只列自己的任务。Code 里已有的工作空间和对话，选了才带进来：工作空间成为仓库，对话成为任务"
+          onClick={() => (closeCodeDrawer(), setImporting(true))}
+        >
+          <span className="flex size-3.5 shrink-0 items-center justify-center max-md:size-4">
+            <Download className="size-3.5 max-md:size-4" />
+          </span>
+          从 Code 导入{importSessions.length ? `（${importSessions.length} 个对话没导入）` : "…"}
+        </button>
       )}
     </div>
   );

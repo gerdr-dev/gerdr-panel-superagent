@@ -634,7 +634,7 @@ export function remarkOf(t: Task) {
 }
 
 export async function start(
-  input: { id: string; prompt?: string; repo?: string; agent?: string; model?: string; effort?: string; worktree?: boolean; mode?: string; reply?: string },
+  input: { id: string; prompt?: string; repo?: string; agent?: string; model?: string; effort?: string; worktree?: boolean; mode?: string; reply?: string; /** A conversation its worker carries on (local/import.ts): its chat comes along, and nothing is sent to it now */ continueFrom?: string },
   ctx: Ctx,
 ) {
   // reply: the card's 回复对方 box, kept on the task until it's out (it may go to the secretary for a repository first);
@@ -682,15 +682,18 @@ export async function start(
     // sandbox write there)
     artifactsDir: folder({ id: t.id }, ctx)?.path,
     tags: { task: t.id },
+    ...(input.continueFrom ? { continueFrom: input.continueFrom } : {}),
     // Followed on the board (its drawer shows the chat), not in Code: no tab of it appears there
     workspace: "none",
     // No reportTo: the user follows the board, not the panel's agent, and the worker updates the board itself (panel
     // tools). A report would only have the panel's agent repeat the worker's reply to nobody, a turn each time.
   } as any);
-  await ctx.sessions.send(sess.id, (prompt || "看附件，照里面的做。") + remarkOf(t), {
-    attachments: (t.attachments ?? []).map((a) => a.path),
-    show: true,
-  } as any);
+  // Carried on from a conversation the person had (import): it has said nothing new yet, and they speak next
+  if (!input.continueFrom)
+    await ctx.sessions.send(sess.id, (prompt || "看附件，照里面的做。") + remarkOf(t), {
+      attachments: (t.attachments ?? []).map((a) => a.path),
+      show: true,
+    } as any);
   const out = update(ctx, (s) => {
     const x = find(s, t.id);
     Object.assign(x, { status: "running", routing: undefined, prompt, repo, session: sess.id, sessions: [...(x.sessions ?? []), sess.id], updatedAt: Date.now() });
