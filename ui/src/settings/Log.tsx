@@ -270,12 +270,14 @@ function Path({ x, onTask }: { x: Item; onTask: (id: string) => void }) {
   const e = x.event;
   const hops: { key: string; body: ReactNode }[] = [];
   hops.push({ key: "from", body: <>来自 {[e.source, e.place, e.who || e.actor].filter(Boolean).join(" · ")}</> });
-  for (const v of x.via ?? [])
+  // Older items kept no via: a hand-back still means it went straight to that task first (only those can be given back)
+  const via = x.via ?? x.handBacks?.map((h) => ({ task: h.task, why: undefined })) ?? [];
+  for (const v of via)
     hops.push({
       key: `via-${v.task}`,
       body: (
         <>
-          直接给 <TaskChip id={v.task} onTask={onTask} />：{v.why === "wait" ? "它在等这段对话里的回复" : "它跟着这段对话（从这里建的，或之前并进过）"}，不经过秘书
+          直接给 <TaskChip id={v.task} onTask={onTask} />：{v.why === "wait" ? "它在等这段对话里的回复" : v.why === "thread" ? "它跟着这段对话（从这里建的，或之前并进过）" : "它跟着这段对话（那时还没记是哪种）"}，不经过秘书
         </>
       ),
     });
