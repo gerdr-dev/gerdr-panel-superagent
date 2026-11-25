@@ -408,6 +408,12 @@ export async function onFollowed(input: { event: GerdrEvent }, ctx: Ctx) {
     await evaluate(ctx, [it.id], store.tasks);
     return { item: it.id, pending: true };
   }
+  // Not handed out yet: judged by the secretary, as inbox.ts does (a card has no worker to give it back)
+  if (ev.actor && owners.some((t) => !t.session)) {
+    const it = record(ctx, ev, { state: "pending", sentAt: Date.now() });
+    await evaluate(ctx, [it.id], store.tasks);
+    return { item: it.id, pending: true, followUpOf: owners.map((t) => t.id) };
+  }
   for (const t of owners) await followUp(ctx, t.id, ev);
   const it = record(ctx, ev, { state: "delivered", tasks: owners.map((t) => t.id) });
   return { item: it.id, delivered: it.tasks };
