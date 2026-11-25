@@ -269,7 +269,8 @@ function TaskChip({ id, onTask }: { id: string; onTask: (id: string) => void }) 
 function Path({ x, onTask }: { x: Item; onTask: (id: string) => void }) {
   const e = x.event;
   const hops: { key: string; body: ReactNode }[] = [];
-  hops.push({ key: "from", body: <>来自 {[e.source, e.place, e.who || e.actor].filter(Boolean).join(" · ")}</> });
+  // Where it was said only matters when it went on from there: a plain straight delivery is one line
+  if (x.handBacks?.length) hops.push({ key: "from", body: <>来自 {[e.source, e.place, e.who || e.actor].filter(Boolean).join(" · ")}</> });
   // Older items kept no via: a hand-back still means it went straight to that task first (only those can be given back)
   const via = x.via ?? x.handBacks?.map((h) => ({ task: h.task, why: undefined })) ?? [];
   for (const v of via)
