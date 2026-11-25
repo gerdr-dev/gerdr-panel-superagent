@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { X, Activity, AlarmClock, BookmarkPlus, Check, CircleCheck, CornerUpLeft, Eye, FileText, Hourglass, Link2, MessageSquare, Pencil, Send, SquareTerminal, Undo2, UserPlus, Users } from "lucide-react";
-import { DefaultCard, registerCard, type CardProps } from "@gerdr/core";
+import { DefaultCard, registerCard, usePanelChange, type CardProps } from "@gerdr/core";
 import { run } from "./lib/gerdr";
 import { jumpInCode } from "./lib/view";
 import { boardFresh, cardState, onCardStates } from "./lib/cardstates";
@@ -84,6 +84,15 @@ function useCardStatus<T>(project: string | undefined, key: string | null, ask: 
       () => {},
     );
   };
+  // Its task changed (an agent's cancel_human, an answer from the board, an ignore): ask again now. Before this a card
+  // with the board not loaded waited for its 30s poll, and a question the worker had just taken back still said 等你
+  // under the line saying so (2026-11-25). The board, when loaded, files fresh states on the same signal.
+  const changed = usePanelChange("user/data", { panel: p || undefined });
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) return void (first.current = false);
+    if (p && !(boardFresh(p, every * 2) && cardState(p, key!) !== undefined)) void get();
+  }, [changed]);
   useEffect(() => {
     alive.current = true;
     if (!p) return;
