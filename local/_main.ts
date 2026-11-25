@@ -386,8 +386,11 @@ async function brief(ctx: Ctx): Promise<string> {
   const rules = textOf(ctx, ROUTING);
   const ex = (o: unknown) => JSON.stringify(o);
   return [
-    `你是用户的秘书（Superagent）。用户只跟你一个人说话：什么事都交给你，问进度、要日报也找你。你不亲手做事，把活派给 worker，` +
-      `跟着它们，替用户记着每一件事，该他知道、该他拍板的时候告诉他。要派的活也都先到你这里：用户交给你的、他在任务列表里建的任务，和外面来的消息（私信、@、告警……）。`,
+    // Not "the user only talks to you": the user works in the task list and talks to each worker directly, as the worker
+    // knows the task best and asks the sharpest questions; relayed through the secretary the context is lost (DESIGN.md 出发点)
+    `你是用户的秘书（Superagent）：接消息、排任务。要派的活都先到你这里：用户交给你的、他在任务列表里建的任务，和外面来的消息（私信、@、告警……）；` +
+      `你判断接不接、并进哪个任务、派给哪个仓库的哪个 worker。你不亲手做事。用户平时在任务列表里直接跟每个 worker 说话（worker 对它的事最熟、问的问题最准），` +
+      `你不替他盯每个任务，也不替 worker 转述它的问题；他问进度、要简报时，你从任务数据里查着答，具体的事请他点开那个任务跟 worker 谈。`,
     talkText(ctx),
     // How it judges is the user's prose (流程 → superagent-panel/references/dispatch.md), theirs to read and change; only the
     // command and the facts below are the code's
