@@ -24,6 +24,8 @@ type Core = {
   useCodePaneTag?: (fn: (row: { pane: string; session?: string }) => CodePaneTag | CodePaneTag[] | null) => void;
   jumpInCode?: (session: string, ref: string) => void;
   useCodeDirs?: (dirs: { path: string; name?: string }[]) => void;
+  useCodeOrder?: (sessions: string[]) => void;
+  useCodeNumber?: (session?: string) => number | undefined;
   useCodeStart?: (fn: (o: { agent: string; cwd: string; mode?: string; continueFrom?: string }) => Promise<string>) => void;
   useCodeRowMenu?: (fn: (row: { pane: string; session?: string }) => CodeMenuItem[]) => void;
   useCodeRowDrop?: (fn: (row: { pane: string; session?: string }) => void) => (el: HTMLElement | null) => void;
@@ -48,6 +50,13 @@ export const useCodeDirs: (dirs: { path: string; name?: string }[]) => void = c.
  * it (an older Gerdr) they stay Code's, and show here only once imported.
  */
 export const useCodeStart: (fn: (o: { agent: string; cwd: string; mode?: string; continueFrom?: string }) => Promise<string>) => void = c.useCodeStart ?? (() => {});
+/**
+ * Our list's order (the conversations of its rows, as shown): ⌘1–9, ⇧⌘] / ⇧⌘[, ⌘E and where ⌘W lands go by it
+ * instead of Code's tabs and workspaces. An older Gerdr: Code's keys as they were.
+ */
+export const useCodeOrder: (sessions: string[]) => void = c.useCodeOrder ?? (() => {});
+/** The ⌘N number for a row we draw ourselves, while ⌘ is held (Code's rows number themselves). */
+export const useCodeNumber: (session?: string) => number | undefined = c.useCodeNumber ?? (() => undefined);
 /** Close a phone's drawer (Code's list), before showing what opens behind it. */
 export const closeCodeDrawer = () => c.closeCodeDrawer?.();
 export type CodePaneTag = { label: string; icon?: ReactNode; tone?: "warn" | "ok" | "brand"; title?: string; items?: CodeMenuItem[] };

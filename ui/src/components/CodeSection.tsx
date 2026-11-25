@@ -8,7 +8,7 @@ import { NewTaskDialog, TaskDetail } from "./TaskDetail";
 import { ImportDialog } from "./ImportDialog";
 import { RowMenu, type RowMenuItem } from "./RowMenu";
 import { openAsks, type Task, useTasks } from "../lib/tasks";
-import { CodeRow, type CodeRowInfo, closeCodeDrawer, newCodeTab, useCodeDirs, useCodeStart, openSettings, showInCode, useCodeRowDrop, useCodePaneTag, jumpInCode, useCodeRowMenu, useCodeRows, useCodeSession, type CodePaneTag } from "../lib/view";
+import { CodeRow, type CodeRowInfo, closeCodeDrawer, newCodeTab, useCodeDirs, useCodeStart, useCodeOrder, useCodeNumber, openSettings, showInCode, useCodeRowDrop, useCodePaneTag, jumpInCode, useCodeRowMenu, useCodeRows, useCodeSession, type CodePaneTag } from "../lib/view";
 import { usePanelChange, usePanelVisible, useRefresh, useSessions } from "../lib/visible";
 
 // Code's whole list, drawn by this panel (lib/view.ts, layout.tsx; core CodeView list="replace"): not Code's
@@ -395,13 +395,16 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   // order, workspace by workspace, which read as no order at all once the workspaces weren't shown.
   const at = (id?: string) => (id && byId[id] ? (byId[id].turn?.startedAt ?? byId[id].updatedAt ?? 0) : 0);
   const busy = (id?: string) => !!id && byId[id]?.status === "running";
+  // The conversations of the rows, in the order they're drawn (folded groups left out): the keys go by it (useCodeOrder)
+  const order: string[] = [];
+  const listed = (id?: string) => void (id && !order.includes(id) && order.push(id));
   const sorted = (ts: Task[], rs: CodeRowInfo[]) =>
     [
-      ...ts.map((t) => ({ run: busy(t.session) || t.live?.status === "running", at: Math.max(at(t.session), t.live?.turnStartedAt ?? 0) || t.updatedAt, el: taskRow(t) })),
-      ...rs.map((r) => ({ run: busy(r.session), at: at(r.session), el: ownRow(r) })),
+      ...ts.map((t) => ({ id: t.session, run: busy(t.session) || t.live?.status === "running", at: Math.max(at(t.session), t.live?.turnStartedAt ?? 0) || t.updatedAt, el: taskRow(t) })),
+      ...rs.map((r) => ({ id: r.session, run: busy(r.session), at: at(r.session), el: ownRow(r) })),
     ]
       .sort((a, b) => Number(b.run) - Number(a.run) || b.at - a.at)
-      .map((x) => x.el);
+      .map((x) => (listed(x.id), x.el));
 
   // A task not handed out has no conversation to open: its row opens the board's card for it (TaskDetail), over the
   // whole window. Without it such a task could only be started as it was: no way to read what was asked, set its
@@ -517,7 +520,7 @@ export function Fusion({ children }: { children: React.ReactNode }) {
       {other.length > 0 && (
         <>
           <FoldTitle open={otherOpen} onClick={foldOther} icon={<LayoutGrid className="size-3.5 shrink-0 text-muted-foreground max-md:size-4" />} label={`其他 ${other.length}`} />
-          {otherOpen && other.map(ownRow)}
+          {otherOpen && other.map((r) => (listed(r.session), ownRow(r)))}
         </>
       )}
       {/* Only while Code has something not brought in: a line, no group */}
@@ -535,6 +538,7 @@ export function Fusion({ children }: { children: React.ReactNode }) {
       )}
     </div>
   );
+  useCodeOrder(order);
   return (
     <ListContext.Provider value={list}>
       {children}
@@ -689,6 +693,8 @@ function TaskRow({ t, pane, current, action, agent, menu, onDetail }: { t: Task;
   const you = needsPerson(t) && t.status === "running";
   const busy = t.live?.status === "running";
   const line = lineOf(t) || (t.status === "todo" ? "还没派出去" : "");
+  // ⌘N's number while ⌘ is held, in the icon's place (as Code's rows; CodeRow numbers itself)
+  const nth = useCodeNumber(t.session);
   // The task's number leads its line: the secretary, the workers, 去向 and the cards all name tasks by it (t202), and
   // with the board gone nothing showed which row that was (the person, 2026-11-25: 「很多地方还在说编号…还是显示出来吧」)
   const text = (
@@ -716,7 +722,9 @@ function TaskRow({ t, pane, current, action, agent, menu, onDetail }: { t: Task;
           {/* The agent's icon, as on Code's rows: with a dot here instead, the same kind of task had an icon or a dot by
               whether its conversation happened to be open in a pane, which says nothing to the person. A dot only
               while no agent has it yet (待办, not handed out) */}
-          {agent && AgentIcon ? (
+          {nth ? (
+            <span className="flex size-3.5 shrink-0 items-center justify-center text-[11px] font-semibold text-foreground tabular-nums max-md:size-4">{nth}</span>
+          ) : agent && AgentIcon ? (
             <AgentIcon agent={agent} className="size-3.5 shrink-0 max-md:size-4" />
           ) : (
             <span className="flex size-3.5 shrink-0 items-center justify-center max-md:size-4">
