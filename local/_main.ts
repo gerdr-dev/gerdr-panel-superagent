@@ -573,6 +573,10 @@ const abs = (ctx: Ctx, p: string) => `${ctx.workspace.dir}/${p}`;
  */
 async function writeSystem(ctx: Ctx): Promise<{ hash: string; changed: boolean }> {
   let b = await brief(ctx);
+  // This panel has no board page (2026-11-24): the words 任务面板 / 看板 / 卡片 are all over the brief and the skills
+  // (shared with Superagent), so say once what they mean here rather than have the secretary send the user to a page
+  // that isn't there
+  b += `\n\n## 这个面板没有任务面板页面\n用户不看看板。任务显示在 Code 左边列表里你这一节：进行中的（等他的排最前、标黄）、折起来的待办和待验收；点一行就是那个 worker 的对话。上面和流程里说的「任务面板 / 看板 / 卡片」指的就是这份列表和它背后的任务数据，照常用。别让用户「去任务面板看」「在看板上点」：要他知道的在回复里说全，要他定的、要他做的用 ask_human。`;
   if (ctx.fs.stat(HISTORY))
     b += `\n\n## 以前的聊天\n秘书页还是面板自己画的那阵子（2026-11-12 以前）你和用户说过的话，在 ${abs(ctx, HISTORY)}：用户提起那时候的事再去读。`;
   const h = hash(b);

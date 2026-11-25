@@ -1,3 +1,7 @@
+// Superagent's board page (its pages/board.tsx), kept here whole for the parts this panel still shows: a task's detail
+// (Drawer: a card not handed out yet — what was asked and by whom, repository and agent, 备注, 回复对方, hand it out,
+// give it up) and the new-task form. The board itself (BoardPage) isn't drawn. Not cut down to those parts on
+// purpose: as the same file, Superagent's later changes to it merge in (git follows the rename).
 import { AlertTriangle, ArrowUp, Ban, Bot, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, Copy, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Plus, Search, Send, Settings, Undo2, X } from "lucide-react";
 import { EditableTitle } from "../components/EditableTitle";
 import clsx from "clsx";
@@ -192,7 +196,8 @@ function colOf(t: Task): Col {
 }
 
 
-export default function BoardPage() {
+// Not used in this panel (no board); kept whole so Superagent's changes to this file still merge
+function BoardPage() {
   const { tasks, archived, error, act } = useTasks();
   const [archive, setArchive] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -972,6 +977,9 @@ function Drawer({ t, byId, act, onClose, onGo }: { t: Task; byId: Record<string,
         className="w-full gap-0 sm:max-w-[520px]"
         onInteractOutside={(e) => {
           const el = e.target as Element | null;
+          // Over Code (this panel: TaskDetail below) a click anywhere outside closes it: there is no board under it
+          // whose other cards should stay clickable with it open. Its own menus and dialogs, opened over it, aren't outside
+          if (closeOutside) return void (el?.closest?.("[data-radix-popper-content-wrapper],[role=menu],[role=listbox],[role=dialog]") && e.preventDefault());
           if (!el?.closest?.("[data-gerdr-mount]") || el.closest("[data-task-card]")) e.preventDefault();
         }}
       >
@@ -1013,6 +1021,9 @@ function AskDrawer({ a, by, act, onClose, onGo }: { a: Ask; by: Task; act: Act; 
         className="w-full gap-0 sm:max-w-[520px]"
         onInteractOutside={(e) => {
           const el = e.target as Element | null;
+          // Over Code (this panel: TaskDetail below) a click anywhere outside closes it: there is no board under it
+          // whose other cards should stay clickable with it open. Its own menus and dialogs, opened over it, aren't outside
+          if (closeOutside) return void (el?.closest?.("[data-radix-popper-content-wrapper],[role=menu],[role=listbox],[role=dialog]") && e.preventDefault());
           if (!el?.closest?.("[data-gerdr-mount]") || el.closest("[data-task-card]")) e.preventDefault();
         }}
       >
@@ -2062,4 +2073,21 @@ function DragGhost({ x, y, w, children }: { x: number; y: number; w: number; chi
       </div>
     </div>
   );
+}
+
+void BoardPage;
+
+/** The task drawer closes on a click outside it (set by TaskDetail: the drawer is over Code, not over the board). */
+let closeOutside = false;
+
+/** A task's detail, as the board's card opened: for a task with no conversation yet (待办). `onSession`: a conversation it links to was picked. */
+export function TaskDetail({ t, byId, act, onClose, onGo, onSession }: { t: Task; byId: Record<string, Task>; act: Act; onClose: () => void; onGo: (id: string) => void; onSession: (session: string) => void }) {
+  openChat = (session) => onSession(session);
+  closeOutside = true;
+  return <Drawer t={t} byId={byId} act={act} onClose={onClose} onGo={onGo} />;
+}
+
+/** The new-task form (what to do, repository, agent, attachments; kept in 待办 or handed out at once). */
+export function NewTaskDialog({ act, onClose }: { act: Act; onClose: () => void }) {
+  return <NewTask act={act} onClose={onClose} />;
 }

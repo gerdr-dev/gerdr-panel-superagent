@@ -30,7 +30,8 @@ export const TABS: { id: SettingsTab; label: string; icon: typeof Timer }[] = [
 export function SettingsSheet({ tab, onTab, onClose, onTask }: { tab: SettingsTab; onTab: (t: SettingsTab) => void; onClose: () => void; onTask: (id: string) => void }) {
   return (
     <Sheet open onOpenChange={(o) => !o && onClose()}>
-      <SheetContent showCloseButton={false} aria-describedby={undefined} className="w-full gap-0 sm:max-w-5xl">
+      {/* pt: it reaches the window's top (layout.tsx WholeWindow), clear of a phone's status bar / notch */}
+      <SheetContent showCloseButton={false} aria-describedby={undefined} className="w-full gap-0 pt-[env(safe-area-inset-top)] sm:max-w-5xl">
         <SheetTitle className="sr-only">Superagent</SheetTitle>
       <header className="flex items-center gap-1 border-b px-3 py-2">
         {/* On a phone the tabs don't fit beside the name: the name goes and the tabs scroll sideways, each on one line */}

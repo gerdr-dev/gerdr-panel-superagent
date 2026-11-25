@@ -634,7 +634,7 @@ export function remarkOf(t: Task) {
 }
 
 export async function start(
-  input: { id: string; prompt?: string; repo?: string; agent?: string; model?: string; effort?: string; worktree?: boolean; mode?: string; reply?: string },
+  input: { id: string; prompt?: string; repo?: string; agent?: string; model?: string; effort?: string; worktree?: boolean; mode?: string; reply?: string; /** A conversation its worker carries on (local/import.ts): its chat comes along, and nothing is sent to it now */ continueFrom?: string; /** Nothing sent: the person types the first message themselves (local/blank.ts) */ quiet?: boolean },
   ctx: Ctx,
 ) {
   // reply: the card's 回复对方 box, kept on the task until it's out (it may go to the secretary for a repository first);
@@ -682,15 +682,18 @@ export async function start(
     // sandbox write there)
     artifactsDir: folder({ id: t.id }, ctx)?.path,
     tags: { task: t.id },
+    ...(input.continueFrom ? { continueFrom: input.continueFrom } : {}),
     // Followed on the board (its drawer shows the chat), not in Code: no tab of it appears there
     workspace: "none",
     // No reportTo: the user follows the board, not the panel's agent, and the worker updates the board itself (panel
     // tools). A report would only have the panel's agent repeat the worker's reply to nobody, a turn each time.
   } as any);
-  await ctx.sessions.send(sess.id, (prompt || "看附件，照里面的做。") + remarkOf(t), {
-    attachments: (t.attachments ?? []).map((a) => a.path),
-    show: true,
-  } as any);
+  // Carried on from a conversation the person had (import): it has said nothing new yet, and they speak next
+  if (!input.continueFrom && !input.quiet)
+    await ctx.sessions.send(sess.id, (prompt || "看附件，照里面的做。") + remarkOf(t), {
+      attachments: (t.attachments ?? []).map((a) => a.path),
+      show: true,
+    } as any);
   const out = update(ctx, (s) => {
     const x = find(s, t.id);
     Object.assign(x, { status: "running", routing: undefined, prompt, repo, session: sess.id, sessions: [...(x.sessions ?? []), sess.id], updatedAt: Date.now() });
@@ -739,6 +742,44 @@ export function ackOrigin(ctx: Ctx, t: Task) {
     (ctx as any).events.reply({ ...t.origin, at: 0 }, text);
   } catch (err: any) {
     ctx.log(`回复 ${t.origin.source}/${t.origin.kind} 失败：${err?.message ?? err}`);
+  }
+}
+
+/** Hand the same task and its conversation to another agent, keeping its place on the board. */
+export async function switchAgent(input: { id: string; session: string; agent: string }, ctx: Ctx) {
+  const t = find(load(ctx).store, input.id);
+  if (!t.session || t.session !== input.session || t.status === "dropped") throw new Error("任务会话已变更，请重新打开菜单");
+  const from = ctx.sessions.get(t.session);
+  if (!from) throw new Error("找不到原任务会话");
+  if (!input.agent || input.agent === from.agent) throw new Error("请选择另一个 agent");
+  if (from.status === "running" || from.status === "waiting") throw new Error("请先结束当前轮次，再更换 agent");
+
+  const sess = await ctx.sessions.start({
+    cwd: from.cwd,
+    agent: input.agent,
+    ...(t.autoTitle ? {} : { title: t.title }),
+    systemFile: `${ctx.workspace.dir}/${writeWorkerSystem(ctx, t.id, t.repo || from.cwd)}`,
+    artifactsDir: folder({ id: t.id }, ctx)?.path,
+    tags: { task: t.id },
+    continueFrom: from.id,
+    workspace: "none",
+  });
+
+  try {
+    return update(ctx, (s) => {
+      const current = find(s, t.id);
+      if (current.session !== from.id || current.status === "dropped") throw new Error("任务会话已变更，请重新打开菜单");
+      current.session = sess.id;
+      current.sessions = [...new Set([...(current.sessions ?? []), from.id, sess.id])];
+      current.agent = input.agent;
+      delete current.model;
+      delete current.effort;
+      current.updatedAt = Date.now();
+      return current;
+    });
+  } catch (error) {
+    await ctx.sessions.close(sess.id).catch(() => {});
+    throw error;
   }
 }
 
