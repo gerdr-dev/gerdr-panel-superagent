@@ -4,6 +4,7 @@
 // TaskStep, ref sN); the 秘书 button counts the open ones; the user answers on the card or closes one unanswered.
 
 import { secIgnoredLead, state, toMain, updateState, type SecAsk } from "./_main";
+import { noteIgnored } from "./_store";
 
 const SHOWN = "这个问题已经作为卡片显示在你的对话里，用户能直接在卡片上答，左上角「秘书」按钮也会亮着计数：回复里不要再把问题、选项写一遍，一句话说为什么要问就够了。";
 
@@ -125,12 +126,13 @@ export async function answerSec(input: { id: string; value?: string }, ctx: Ctx)
   return { ask: a.id, answer: a.answer };
 }
 
-/** The user ignored it (the ✕ on its card or its row): { id }. The secretary hears at the start of its next turn, not now. */
+/** The user ignored it (the ✕ on its card or its row): { id }. The secretary hears with its next message, not now. */
 export function closeSec(input: { id: string }, ctx: Ctx) {
   const a = updateState(ctx, (x) => {
     const a = findSec(x.asks, String(input?.id ?? ""));
     if (a.status !== "open") throw new Error(`「${a.title}」已经不在等你了`);
-    Object.assign(a, { status: "dropped", closedByUser: true, told: false, doneAt: Date.now() });
+    // Said with the secretary's next message, whoever sends it (noteIgnored); untold only on a Gerdr without notes
+    Object.assign(a, { status: "dropped", closedByUser: true, told: noteIgnored(ctx, x.main, a), doneAt: Date.now() });
     return a;
   });
   return { closed: a.id };

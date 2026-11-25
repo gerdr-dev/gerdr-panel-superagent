@@ -764,6 +764,37 @@ export async function handBack(ctx: Ctx, task: string, eventId: string, reason: 
 }
 
 /**
+ * What the main session said in the turn that read each item (by item id): its first agent message after the user
+ * message holding "[消息 <id>]" (eventBlock). Messages queued while it ran arrive together, so consecutive user
+ * messages share the reply that follows them. Without sessions.read (an older Gerdr), only the newest message sent
+ * gets `last` (the session's reply); an item not found gets nothing rather than another turn's words.
+ */
+function turnReplies(ctx: Ctx, main: string, ids: string[], last: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  let conv: { role: string; text: string }[] | null | undefined;
+  try {
+    conv = (ctx.sessions as any).read?.(main, { last: 400 });
+  } catch {
+    conv = undefined;
+  }
+  if (!conv) {
+    const newest = state(ctx).items.filter((x) => x.sentAt).sort((a, b) => b.sentAt! - a.sentAt!)[0];
+    if (newest && ids.includes(newest.id)) out[newest.id] = last;
+    return out;
+  }
+  for (const id of ids) {
+    const tag = `[消息 ${id}]`;
+    let i = -1;
+    for (let k = conv.length - 1; k >= 0; k--) if (conv[k].role === "user" && conv[k].text.includes(tag)) { i = k; break; }
+    if (i < 0) continue;
+    while (i < conv.length && conv[i].role === "user") i++;
+    const a = conv[i];
+    if (a?.role === "agent" && a.text.trim()) out[id] = a.text;
+  }
+  return out;
+}
+
+/**
  * Called on every board refresh: what the main session let pass without a decision. It's idle (not still at it, not
  * asking the user) and has been for a while after the item was sent: the item is unavailable, the task goes back to
  * 待办 to be dispatched again. A message queued while it ran starts its next turn at once, so a 20 s quiet
@@ -788,13 +819,19 @@ export function sweep(ctx: Ctx) {
     });
   }
   if (Date.now() - m.updatedAt < 20_000) return;
-  if (s.items.some((x) => x.state === "pending" && left(x.sentAt))) {
+  const undecided = s.items.filter((x) => x.state === "pending" && left(x.sentAt));
+  if (undecided.length) {
+    // What it said instead (usually a question to the user): the 去向 row shows it, so "没给决定" doesn't read as a
+    // failure when the secretary is waiting on the user's answer (2026-11-24, c623). Each message gets what was said in
+    // the turn that read it: m.reply is only the last turn, and stamping it on every message left undecided gave them
+    // all the same reason, about another message (2026-11-24: four rows all saying "没接 c636…").
+    const said = turnReplies(ctx, s.main, undecided.map((it) => it.id), String(m.reply ?? ""));
     updateState(ctx, (x) => {
-      // What it said instead (usually a question to the user): the 去向 row shows it, so "没给决定" doesn't read as a
-      // failure when the secretary is waiting on the user's answer (2026-11-24, c623)
-      const said = cutLine(String(m.reply ?? "").split(/\n\s*\n/)[0] ?? "", 200);
-      const reason = said ? `秘书这一轮没给决定，它说：${said}` : "调度会话这一轮结束了，没给决定";
-      for (const it of x.items) if (it.state === "pending" && left(it.sentAt)) Object.assign(it, { state: "unavailable", reason });
+      for (const it of x.items) {
+        if (it.state !== "pending" || !left(it.sentAt)) continue;
+        const p = cutLine((said[it.id] ?? "").split(/\n\s*\n/)[0] ?? "", 200);
+        Object.assign(it, { state: "unavailable", reason: p ? `秘书这一轮没给决定，它说：${p}` : "调度会话这一轮结束了，没给决定" });
+      }
     });
   }
   const stuck = (t: Task) => t.status === "todo" && !!t.routing && t.router === s.main && left(t.routing);
