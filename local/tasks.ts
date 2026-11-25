@@ -902,7 +902,7 @@ export async function complete(input: { id: string; value?: string }, ctx: Ctx) 
       : `你请用户做的「${h.title}」（${h.id}）他做完了。${back}\n先按你说的方式核验${h.verify ? `（${h.verify}）` : ""}，没问题再继续；核验不过就用 ask_human 再问一次，说明哪里不对。`;
   // Its wait on h ended in the write above (_waits.ts sync); this only tells the worker, the one way every wake goes
   const woke = t.session && t.status !== "dropped";
-  if (woke) await wake(ctx, t.id, { how: h.handBack.kind === "choice" ? `你答了：${h.handedBack}` : "你做完了", text, fold: false });
+  if (woke) await wake(ctx, t.id, { how: h.handBack.kind === "choice" ? `你答了：${h.handedBack}` : "你做完了", text });
   return { ask: h, task: t.id, woke: woke ? [t.id] : [] };
 }
 
@@ -935,7 +935,7 @@ export async function dropAsk(input: { id: string; reason?: string }, ctx: Ctx) 
     activity(s, t, { kind: "user", by: t.id, of: h.id, text: `你说「${h.title}」不用了${why ? `：${why}` : ""}` });
     return { t, h };
   });
-  if (worker(t)) await wake(ctx, t.id, { how: `你说「${h.title}」不用了`, fold: false, text: `你请用户做 / 答的「${h.title}」（${h.id}），用户说不用了${why ? `：${why}` : ""}。别再等它：换个做法接着做，真的少不了就用 ask_human 说明为什么再问一次。` }).catch(() => {});
+  if (worker(t)) await wake(ctx, t.id, { how: `你说「${h.title}」不用了`, text: `你请用户做 / 答的「${h.title}」（${h.id}），用户说不用了${why ? `：${why}` : ""}。别再等它：换个做法接着做，真的少不了就用 ask_human 说明为什么再问一次。` }).catch(() => {});
   return { ask: h, task: t.id };
 }
 
@@ -1498,7 +1498,10 @@ async function deliver(ctx: Ctx, t: Task, h: Ask) {
     `你问的问题（${h.id}），用户${asked(h).length ? "答了" : "都没答"}：\n${asked(h).map((q, i) => `${i + 1}. ${q.title}\n   → ${q.answer}`).join("\n")}` +
     (skipped.length ? `\n用户说不用答了（已经过时，别再按它们做）：${skipped.map((q) => `「${q.title}」`).join("、")}` : "") +
     `\n照这些接着做。`;
-  await wake(ctx, t.id, { how: `你答了「${h.title}」`, text, fold: false }).catch(() => {});
+  // Folded to one line that carries the answers: shown whole, the panel's wrapping (你问的问题…照这些接着做) read as a
+  // message the user typed themselves (2026-11-25); the line's 「[任务面板] 你答了…」 says it came from the panel
+  const how = asked(h).length ? `你答了：${asked(h).map((q) => q.answer).join("；")}` : `你说「${h.title}」都不用答了`;
+  await wake(ctx, t.id, { how, text }).catch(() => {});
 }
 
 /**
@@ -1582,8 +1585,7 @@ export async function sendAnswered(input: { id: string }, ctx: Ctx) {
   });
   if (worker(t))
     await wake(ctx, t.id, {
-      how: `你先发了已答的`,
-      fold: false,
+      how: `你先发了答案：${fresh.map((q) => q.answer).join("；")}`,
       text:
         `用户先把答了的发给你（${h.id}）：\n${fresh.map((q) => `- ${q.title}\n  → ${q.answer}`).join("\n")}\n` +
         `还没答、之后再答的：${rest.map((q) => `${h.id}#${q.id}「${q.title}」`).join("、")}（答了会再发给你）。能照已答的先做的就先做；还没答的里已经不用问的，cancel_human 它。`,
