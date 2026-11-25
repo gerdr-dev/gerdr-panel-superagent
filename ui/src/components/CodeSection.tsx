@@ -573,7 +573,9 @@ function lineOf(t: Task): string {
   // A reply its worker wrote to someone outside, held for the person to send or not: theirs to act on first (they
   // are waited for outside), and nothing said so in the list — the row looked like any task at work
   const out = heldOut(t);
-  if (out.length) return `等你${out.length > 1 ? ` ${out.length}` : ""}：发不发给 ${out[0].where}`;
+  // Who it is for, alone: `where` is "slack-me · 私聊 · 青阳 (Yang Jing)", and the source and kind of chat say nothing
+  // the person acts on. No 等你 in front either: 待发 already says it's theirs to do
+  if (out.length) return `待发给 ${out[0].where.split(" · ").pop()}${out.length > 1 ? ` 等 ${out.length} 条` : ""}`;
   if (t.column === "you") {
     // What waits on the person, counted as they would: an ask with several questions is that many things to
     // answer, not one (a card), and a step to do isn't a question. The worker's own title for the card isn't used
