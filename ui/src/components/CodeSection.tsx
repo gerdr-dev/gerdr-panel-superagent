@@ -57,7 +57,7 @@ const STATUS_ICON: Record<Status, React.ReactNode> = {
   todo: <Circle className="size-3.5 shrink-0 text-muted-foreground max-md:size-4" />,
   running: <CircleDashed className="size-3.5 shrink-0 text-brand max-md:size-4" />,
   review: <CircleDot className="size-3.5 shrink-0 text-ok max-md:size-4" />,
-  done: <CheckCircle2 className="size-3.5 shrink-0 text-muted-foreground max-md:size-4" />,
+  done: <CheckCircle2 className="size-3.5 shrink-0 text-ok max-md:size-4" />,
 };
 
 /**
@@ -97,7 +97,12 @@ const last: { main: Main; asks: number; secOpen: { id: string; title: string }[]
 };
 type Status = "todo" | "running" | "review" | "done";
 const LABEL: Record<Status, string> = { todo: "待办", running: "进行中", review: "待验收", done: "已完成" };
-const ICON: Record<"running" | "review" | "done", React.ReactNode> = { running: <CircleDashed />, review: <CircleDot />, done: <CheckCircle2 /> };
+// In the groups' colours too, so a menu's 移到… rows (Code's ⋯, right click, ⌘W's) show the same icons as the groups
+const ICON: Record<"running" | "review" | "done", React.ReactNode> = {
+  running: <CircleDashed className="text-brand" />,
+  review: <CircleDot className="text-ok" />,
+  done: <CheckCircle2 className="text-ok" />,
+};
 /** A task row of ours being dragged (rows that are Code's own are dragged by Code: useCodeRowDrop). */
 const TASK_MIME = "text/x-gerdr-task";
 
@@ -959,7 +964,6 @@ function CloseDialog({ t, items, onClose }: { t: Task; items: { id: string; labe
     onClose();
     it.onSelect();
   };
-  const tone: Record<string, string> = { "move-running": "text-brand", "move-review": "text-ok", "move-done": "text-muted-foreground" };
   const row = (it: (typeof items)[number], i: number) => (
     <button
       key={it.id}
@@ -970,7 +974,7 @@ function CloseDialog({ t, items, onClose }: { t: Task; items: { id: string; labe
       )}
       onClick={() => pick(i)}
     >
-      <span className={clsx("flex", !it.danger && tone[it.id])}>{it.icon}</span>
+      <span className="flex">{it.icon}</span>
       <span className="flex-1 truncate">{it.label.replace(/^移到/, "")}</span>
       <kbd className="font-mono text-[11px] text-muted-foreground">{i + 1}</kbd>
     </button>
