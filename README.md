@@ -2,11 +2,11 @@
 
 [Gerdr](https://github.com/gerdr-dev/gerdr) 的一个面板：一个 Code，左边的列表换成一个秘书和按状态分好的任务。
 
-<p align="center"><img src="docs/images/superagent.gif" alt="左边是秘书和按状态分组的任务，右边是 worker 的对话" width="100%" /></p>
+<p align="center"><img src="docs/images/superagent.gif" alt="Slack 上来活，秘书接进待办，派出去，几个小时后点发送" width="100%" /></p>
 
-你只跟秘书说话：交代一件事，它挑仓库、派给 Claude Code / Codex 的 worker，替你盯 MR 的 review 意见和流水线，要你拍板时才来问，到点写简报。
+飞书 / Slack 上有人找你，秘书把活接进待办，你点一下派出去，接着做自己的事。要找运维开权限、找负责人合代码，worker 自己发消息、自己等；几个小时后做完了才叫你：看一眼它的汇报，点发送。
 
-*A [Gerdr](https://github.com/gerdr-dev/gerdr) panel: you talk to one secretary, it hands tasks to Claude Code / Codex workers and follows them up. The UI is in Chinese for now.*
+*A [Gerdr](https://github.com/gerdr-dev/gerdr) panel: the secretary takes in messages from outside and lines up tasks for Claude Code / Codex workers; you talk to each worker directly, and the panel waits on people for them. The UI is in Chinese for now.*
 
 - **任务**（主角）：按「待办 / 进行中 / 待验收 / 已完成」分组，每行一个任务，点开就是它 worker 的对话。**你直接跟 worker 说话**：
   它对这件事最熟、上下文最全，问出来的问题也最准；隔着秘书转述会丢上下文，判断就不准。要你拍板的标黄排最前（「等你」）。
