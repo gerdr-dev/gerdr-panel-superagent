@@ -482,10 +482,10 @@ function TaskOutgoing({ card }: CardProps) {
     (v) => v.state !== "pending",
     30000,
   );
-  // The words are drawn as Markdown (Slack's *bold* and • lists read as they will in Slack); 编辑 turns them into a
-  // box filled with what the worker wrote, to change before sending
+  // While it waits the words are an input box right away (no 编辑 to press first: the user asked for it, 2026-11-26),
+  // filled with what the worker wrote, to change before sending. Once it ended they're drawn as Markdown (Slack's
+  // *bold* and • lists read as they did in Slack)
   const [draft, setDraft] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState("");
   const [err, setErr] = useState("");
   const box = useRef<HTMLTextAreaElement>(null);
@@ -499,14 +499,13 @@ function TaskOutgoing({ card }: CardProps) {
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight + 2}px`;
-  }, [value, st?.state, editing]);
+  }, [value, st?.state]);
   const act = async (fn: "send" | "skip") => {
     setBusy(fn);
     setErr("");
     try {
       await run(`outbox.${fn}`, fn === "send" ? { ref: c.ref, text: value } : { ref: c.ref }, { project: c.project });
       setDraft(null);
-      setEditing(false);
       await get();
     } catch (e) {
       setErr(String((e as Error)?.message ?? e));
@@ -539,11 +538,10 @@ function TaskOutgoing({ card }: CardProps) {
           {c.task ? ` · ${c.task}` : ""}
         </span>
       </div>
-      {editing && !over ? (
+      {!over ? (
         <textarea
           ref={box}
           rows={2}
-          autoFocus
           className="w-full resize-none overflow-hidden rounded-md border bg-background px-2 py-1.5 text-[13px] leading-relaxed outline-none focus:ring-1 focus:ring-brand"
           value={value}
           disabled={!!busy}
@@ -557,7 +555,7 @@ function TaskOutgoing({ card }: CardProps) {
           }}
         />
       ) : (
-        // The same frame as the box, so 编辑 doesn't move the text around
+        // The same frame as the box, so the text doesn't move when the card ends
         <div className={`rounded-md border bg-background px-2 py-1.5 leading-relaxed ${over ? "text-muted-foreground" : ""} ${over && !sent ? "line-through" : ""}`}>
           <Md>{replyMd(value, /slack/i.test(where))}</Md>
         </div>
@@ -577,19 +575,13 @@ function TaskOutgoing({ card }: CardProps) {
           <button className="rounded-md border px-2.5 py-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50" disabled={!!busy} onClick={() => act("skip")}>
             不发
           </button>
-          {!editing && (
-            <button className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50" disabled={!!busy} onClick={() => setEditing(true)}>
-              <Pencil className="size-3" />
-              编辑
-            </button>
-          )}
           {edited && (
             <button className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-muted-foreground hover:bg-accent hover:text-foreground" disabled={!!busy} onClick={() => setDraft(null)}>
               <Undo2 className="size-3" />
               恢复原文
             </button>
           )}
-          {editing && <span className="ml-auto text-muted-foreground/70">⌘↵ 发送</span>}
+          <span className="ml-auto text-muted-foreground/70">⌘↵ 发送</span>
           {err && <span className="w-full text-bad">{err}</span>}
         </div>
       )}
