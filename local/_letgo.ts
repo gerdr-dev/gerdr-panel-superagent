@@ -67,10 +67,10 @@ export function opens(ctx: Ctx, gate: Gate, repo?: string) {
   return !!policyFor(ctx, repo)?.gates.includes(gate);
 }
 
-/** The permission mode the deciding policy gives a worker of this engine in this repository; "" = 设置's. */
-export function modeFor(ctx: Ctx, engine: string, repo?: string) {
+/** The permission mode the deciding policy gives this agent (a role: else its engine's) in this repository; "" = 设置's. */
+export function modeFor(ctx: Ctx, agent: string, base: string | undefined, repo?: string) {
   const p = policyFor(ctx, repo);
-  return !p ? "" : engine === "codex" ? p.mode.codex : engine === "claude" ? p.mode.claude : "";
+  return (p && (p.mode[agent] || (base ? p.mode[base] : ""))) || "";
 }
 
 /**

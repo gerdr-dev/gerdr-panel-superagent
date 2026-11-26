@@ -129,6 +129,7 @@ export async function agents(input: unknown, ctx: Ctx) {
     base: a.base,
     models: a.models,
     efforts: a.efforts,
+    modes: a.modes,
     default: a.id === conf.agent || undefined,
     defaults: { model: conf.config[a.id]?.model, effort: conf.config[a.id]?.effort, mode: conf.modes[a.id] },
   }));

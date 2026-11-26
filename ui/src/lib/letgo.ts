@@ -43,8 +43,11 @@ export type Policy = {
    * source shows it, or a conversation / channel id. Writing to them stays a card for the user to send.
    */
   confirm: string[];
-  /** The permission mode a worker starts in, in its repositories, per engine. "": 设置 → 干活's. */
-  mode: { claude: string; codex: string };
+  /**
+   * The permission mode a worker starts in, in its repositories, by agent id (a role falls back to its engine's
+   * entry). Missing or "": 设置 → 干活's.
+   */
+  mode: Record<string, string>;
   /** Said to the secretary and the workers while it is in effect (red lines, "有八成把握就直接派"). */
   note: string;
 };
@@ -97,7 +100,7 @@ export function normalizeLetGo(raw: any, legacy?: { inboxWork?: unknown; replies
       gates: GATES.filter((g) => Array.isArray(p?.gates) && p.gates.includes(g)),
       repos: strings(p?.repos).map((x) => x.replace(/(.)\/+$/, "$1")),
       confirm: strings(p?.confirm),
-      mode: { claude: str(p?.mode?.claude), codex: str(p?.mode?.codex) },
+      mode: Object.fromEntries(Object.entries(p?.mode && typeof p.mode === "object" ? p.mode : {}).map(([k, v]) => [k, str(v)]).filter(([k, v]) => k && v)),
       note: typeof p?.note === "string" ? p.note.trim() : "",
     });
   }

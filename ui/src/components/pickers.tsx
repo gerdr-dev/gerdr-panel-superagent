@@ -213,6 +213,8 @@ export type AgentOption = {
   base?: string;
   models?: AgentChoice[];
   efforts?: AgentChoice[];
+  /** Its permission modes, as it names them; absent until it has run here. */
+  modes?: AgentChoice[];
   /** The agent an empty agent field starts (Gerdr's default agent). */
   default?: boolean;
   /** Gerdr's defaults for it: what an empty model / effort / mode field gives (local/settings.ts agents). */

@@ -2,7 +2,7 @@ import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 import clsx from "clsx";
 import { useEffect, useState } from "react";
 import { Button } from "../components/Button";
-import { input } from "../components/pickers";
+import { input, useAgents, type AgentOption } from "../components/pickers";
 import { SaveBar } from "../components/SaveBar";
 import { useUnsaved } from "../components/unsaved";
 import { run } from "../lib/gerdr";
@@ -188,7 +188,9 @@ function PolicyCard(props: { p: Policy; repos: string[]; first: boolean; last: b
   const all = [...repos, ...p.repos.filter((r) => r !== ANY_REPO && !repos.includes(r))];
   const [confirm, setConfirm] = useState(p.confirm.join("\n"));
   useEffect(() => setConfirm(p.confirm.join("\n")), [p.confirm.join("\n")]);
-  const modeOptions = (engine: "claude" | "codex") => [["", "跟设置走"], ...MODES[engine].map((m) => [m.id, m.name])] as [string, string][];
+  const agents = useAgents();
+  // Each agent's own modes (Gerdr reports them once it has run here); a known engine's list before that
+  const modesOf = (a: AgentOption) => (a.modes?.length ? a.modes : (MODES[a.base ?? a.id] ?? []));
   return (
     <section className="space-y-3 rounded-xl border bg-card p-4">
       <div className="flex items-center gap-1">
@@ -262,20 +264,32 @@ function PolicyCard(props: { p: Policy; repos: string[]; first: boolean; last: b
         />
       </Field>
 
-      <Field label="worker 权限模式" hint="这套策略生效时、在它管的仓库里新开的 worker 用的模式（已经在跑的不变）。跟设置走 = 「设置 → 干活」里的。auto 不弹批准。">
+      <Field label="worker 权限模式" hint="这套策略生效时、在它管的仓库里新开的 worker 用的模式（已经在跑的不变）。每个 agent 列的是它自己的模式；跟设置走 = 「设置 → 干活」或 Gerdr 给它定的。角色没单独选时用它底子引擎那一行的。">
         <div className="space-y-1.5">
-          {(["claude", "codex"] as const).map((engine) => (
-            <div key={engine} className="flex items-center gap-2">
-              <span className="w-12 text-[12px] text-muted-foreground">{engine}</span>
-              <div className="inline-flex flex-wrap rounded-md border p-0.5">
-                {modeOptions(engine).map(([v, label]) => (
-                  <button key={v} onClick={() => onChange({ ...p, mode: { ...p.mode, [engine]: v } })} className={clsx("rounded-sm px-2.5 py-1 text-[12px]", p.mode[engine] === v ? "bg-accent font-medium" : "text-muted-foreground hover:text-foreground")}>
-                    {label}
-                  </button>
-                ))}
+          {agents.map((a) => {
+            const v = p.mode[a.id] ?? "";
+            const set = (m: string) => onChange({ ...p, mode: Object.fromEntries(Object.entries({ ...p.mode, [a.id]: m }).filter(([, x]) => x)) as Record<string, string> });
+            const list = modesOf(a);
+            return (
+              <div key={a.id} className="flex flex-wrap items-center gap-2">
+                <span className="w-28 truncate text-[12px] text-muted-foreground" title={a.id}>
+                  {a.name}
+                </span>
+                {list.length ? (
+                  <div className="inline-flex flex-wrap rounded-md border p-0.5">
+                    {[{ id: "", name: "跟设置走" }, ...list.filter((m) => m.id), ...(v && !list.some((m) => m.id === v) ? [{ id: v, name: v }] : [])].map((m) => (
+                      <button key={m.id} title={m.name !== m.id && m.id ? m.id : undefined} onClick={() => set(m.id)} className={clsx("rounded-sm px-2.5 py-1 text-[12px]", v === m.id ? "bg-accent font-medium" : "text-muted-foreground hover:text-foreground")}>
+                        {m.name}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <input className={clsx(input, "w-48")} value={v} placeholder="跟设置走（这个 agent 还没跑过，手写模式 id）" onChange={(e) => set(e.target.value.trim())} />
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
+          {!agents.length && <p className="text-[12px] text-muted-foreground">正在读有哪些 agent…</p>}
         </div>
       </Field>
 

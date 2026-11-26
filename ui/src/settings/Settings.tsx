@@ -238,10 +238,10 @@ export function Choice<T extends string>({ value, options, onChange }: { value: 
   );
 }
 
-// Permission modes each engine takes (Gerdr doesn't list them for agents): claude's, codex's
+// Permission modes each engine takes, for an agent that hasn't run here yet (Gerdr lists an agent's own once it has)
 export const MODES: Record<string, AgentChoice[]> = {
   claude: ["default", "acceptEdits", "plan", "auto"].map((id) => ({ id, name: id })),
-  codex: ["ask", "auto", "read-only"].map((id) => ({ id, name: id })),
+  codex: ["ask", "auto", "read-only", "full-access"].map((id) => ({ id, name: id })),
 };
 
 function WhoFields({ who, onChange }: { who: Who; onChange: (w: Who) => void }) {
@@ -249,7 +249,8 @@ function WhoFields({ who, onChange }: { who: Who; onChange: (w: Who) => void }) 
   // The agent the menus are for: the one picked, else Gerdr's default agent
   const a = agents.find((x) => x.id === who.agent) ?? (who.agent ? undefined : agents.find((x) => x.default));
   const engine = a?.base ?? a?.id ?? "";
-  const modes = MODES[engine] ?? [...MODES.claude, ...MODES.codex.filter((m) => m.id !== "auto")];
+  // The agent's own list (Gerdr reports it once it has run here); the known engines' as a fallback before that
+  const modes = a?.modes?.length ? a.modes : (MODES[engine] ?? [...MODES.claude, ...MODES.codex.filter((m) => m.id !== "auto")]);
   // What 默认 is: Gerdr's default for this agent, else the one the agent's own list marks (claude: "默认 · …")
   const named = (list: AgentChoice[] | undefined, id: string | undefined) => {
     const hit = id != null ? list?.find((o) => o.id === id) : undefined;

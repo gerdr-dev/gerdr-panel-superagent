@@ -9,7 +9,7 @@ import { open, syncAgents, syncSessions, wakeText } from "./_waits";
 import { cutLine, wake } from "./_wake";
 import { askState, cardStates } from "./_cardstate";
 import { closeSec, isSecAsk, secretaryIgnored, secStatus } from "./_secask";
-import { allAgents, mentionsIn } from "./_agents";
+import { allAgents, defaultAgent, mentionsIn } from "./_agents";
 import { archived as archivedGroups, archivedCount, archiveOld, latest, revive, unarchive as bringBack } from "./_archive";
 import { isMain, mains, rerouteTask, routeTask, sweep, toMain } from "./_main";
 import { textOf } from "./playbooks";
@@ -671,7 +671,7 @@ export async function start(
       if (r.code !== 0) throw new Error(`开 worktree 失败：${r.stderr.trim()}`);
     }
   }
-  const who = workerOf(ctx, t, input, repo);
+  const who = workerOf(ctx, t, input, repo, input.agent || t.agent || workflow(ctx).worker.agent ? undefined : await defaultAgent(ctx));
   // Its rules and the user's memory go to its system prompt (a file Gerdr re-reads when the agent starts again), not
   // its first message: that one is the user's own words, shown whole in the chat they read (2026-11-12, the user: "我肯定
   // 是想要看到我发的消息的，下半段才是我不关心的"). Started empty, so we know whether this Gerdr took the file.
@@ -791,16 +791,17 @@ export async function switchAgent(input: { id: string; session: string; agent: s
  * Which agent / model / effort a worker runs on. The defaults (设置 → worker) go with their agent: a model named there is
  * that agent's (a claude model means nothing to codex), so a task on another agent only gets a model it names itself.
  */
-function workerOf(ctx: Ctx, t: Task, input: { agent?: string; model?: string; effort?: string; mode?: string }, repo?: string) {
+function workerOf(ctx: Ctx, t: Task, input: { agent?: string; model?: string; effort?: string; mode?: string }, repo?: string, defAgent?: string) {
   const w = workflow(ctx).worker;
   const agent = input.agent || t.agent || w.agent;
   const same = agent === w.agent;
   // Let it go: the policy in effect may give workers in its repositories their own permission mode. Only at the start:
   // a session's mode isn't changed under it, so one started before keeps its own
   if (!input.mode) {
-    // A role runs on its base engine; no agent named is Gerdr's default, taken as claude (codex users name codex)
-    const info = agent ? ctx.sessions.agents().find((a) => a.id === agent) : undefined;
-    const m = modeFor(ctx, info?.base || agent || "claude", repo ?? t.repo);
+    // No agent named: Gerdr's default agent (defAgent, looked up by start). A role falls back to its engine's entry
+    const id = agent || defAgent || "claude";
+    const info = ctx.sessions.agents().find((a) => a.id === id);
+    const m = modeFor(ctx, id, info?.base, repo ?? t.repo);
     if (m)
       return {
         agent: agent || undefined,
