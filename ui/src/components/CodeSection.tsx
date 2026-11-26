@@ -468,6 +468,17 @@ export function Fusion({ children }: { children: React.ReactNode }) {
       ...rs.map((r) => ({ id: r.session, run: busy(r.session), at: at(r.session), el: () => ownRow(r) })),
     ].sort((a, b) => Number(b.run) - Number(a.run) || b.at - a.at);
   const sorted = (ts: Task[], rs: CodeRowInfo[]) => ranked(ts, rs).map((x) => (listed(x.id), x.el()));
+  // A folded group's title says when some of its rows' agents are working (the person, 2026-11-26): a task moved to
+  // 待验收 / 已完成 and spoken to again runs out of sight, and nothing said so. The rows' own busy dot, with a count
+  const busyHint = (open: boolean, ts: Task[], rs: CodeRowInfo[]) => {
+    const n = open ? 0 : ranked(ts, rs).filter((x) => x.run).length;
+    return n > 0 ? (
+      <span className="flex items-center gap-1 text-[10px] text-ok tabular-nums" title={`折叠着，里面有 ${n} 个在干活`}>
+        <span className="size-1.5 animate-pulse rounded-full bg-ok" />
+        {n} 在跑
+      </span>
+    ) : null;
+  };
 
   // A task not handed out has no conversation to open: its row opens the board's card for it (TaskDetail), over the
   // whole window. Without it such a task could only be started as it was: no way to read what was asked, set its
@@ -583,6 +594,7 @@ export function Fusion({ children }: { children: React.ReactNode }) {
           {/* What waits on the person is in 进行中, first and in amber, not a group of its own: DESIGN.md, 2026-11-13
               (「不需要 等你 和 进行中。否则就是会跳来跳去…等我的直接提前，黄色」). It was a group here for a day, right under
               the secretary, and read as something of the secretary's rather than work in progress */}
+          {busyHint(activeOpen, activeTasks, activeOwn)}
           {you > 0 && <span className="rounded-full bg-warn px-1.5 text-[10px] leading-4 font-semibold text-background tabular-nums">等你 {you}</span>}
           <span
             role="button"
@@ -606,11 +618,15 @@ export function Fusion({ children }: { children: React.ReactNode }) {
       {/* Always listed, empty ones too: each is where a row is dragged to */}
       <>
         <Drop to="review" onMove={onMove}>
-          <FoldTitle open={reviewOpen} onClick={foldReview} icon={STATUS_ICON.review} label={`待验收 ${review.length + reviewOwn.length}`} />
+          <FoldTitle open={reviewOpen} onClick={foldReview} icon={STATUS_ICON.review} label={`待验收 ${review.length + reviewOwn.length}`}>
+            {busyHint(reviewOpen, review, reviewOwn)}
+          </FoldTitle>
           {reviewOpen && sorted(review, reviewOwn)}
         </Drop>
         <Drop to="done" onMove={onMove}>
-          <FoldTitle open={doneOpen} onClick={foldDone} icon={STATUS_ICON.done} label={`已完成 ${done.length + doneOwn.length}`} />
+          <FoldTitle open={doneOpen} onClick={foldDone} icon={STATUS_ICON.done} label={`已完成 ${done.length + doneOwn.length}`}>
+            {busyHint(doneOpen, done, doneOwn)}
+          </FoldTitle>
           {doneOpen && sorted(done, doneOwn)}
         </Drop>
       </>
