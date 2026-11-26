@@ -24,6 +24,11 @@ import { usePanelChange, usePanelVisible, useRefresh, useSessions } from "../lib
 // 进行中 while its tab is open and 等你 while its agent waits on them (an approval, an error); closing it ends it.
 
 const AgentIcon = (core as unknown as { AgentIcon?: (p: { agent: string; className?: string }) => React.ReactNode }).AgentIcon;
+// The status dot of Code's rows, for ⌘K's task rows (PaletteTask); absent in a Gerdr before 2026-11-26
+const { StatusDot, dotStatus } = core as unknown as {
+  StatusDot?: (p: { status?: string; unread?: boolean; className?: string }) => React.ReactNode;
+  dotStatus?: (s: { status: string; tasks?: { status: string }[] }) => string | undefined;
+};
 const toast = (core as unknown as { toast?: { error?: (m: string) => unknown } }).toast;
 
 /** A folded group of rows, open or not, per device. */
@@ -464,20 +469,27 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   const openDetail = (id: string) => (closeCodeDrawer(), setDetail(id));
   // ⌘K finds any task (finished ones too, not only those listed), and opens it like a click on its row: its worker's
   // conversation, or the card of one not handed out. This lived in the board (BoardPage), which isn't drawn since the
-  // panel hosts Code, so ⌘K had lost the tasks (2026-11-26). In the order the list goes by what matters, then newest
+  // panel hosts Code, so ⌘K had lost the tasks (2026-11-26). Same rows as the list, in its order (等你, 进行中 by
+  // `ranked`'s key, 待验收, 待办, then 已完成 newest first) and with its agent icons: they read as the same list. A
+  // blank task the list hides (`untouched`, no pane) is left out here too: it showed as a stray "新会话"
   const rank = (t: Task) => (t.status === "running" ? (needsPerson(t) ? 0 : 1) : t.status === "review" ? 2 : t.status === "todo" ? 3 : 4);
+  const moved = (t: Task) => (t.status === "done" ? (t.doneAt ?? t.updatedAt) : Math.max(at(t.session), t.live?.turnStartedAt ?? 0) || t.updatedAt);
+  const going = (t: Task) => busy(t.session) || t.live?.status === "running";
   useSearchItems(
     all
-      .filter((t) => t.status !== "dropped")
-      .sort((a, b) => rank(a) - rank(b) || (b.doneAt ?? b.updatedAt) - (a.doneAt ?? a.updatedAt))
+      .filter((t) => t.status !== "dropped" && !(t.status === "running" && untouched(t) && !paneOf.has(t.session!)))
+      .sort((a, b) => rank(a) - rank(b) || (rank(a) < 2 ? Number(going(b)) - Number(going(a)) : 0) || moved(b) - moved(a))
       .map((t) => {
         const you = t.status === "running" && needsPerson(t);
+        const agent = (t.session && byId[t.session]?.agent) || t.agent;
         return {
           id: t.id,
           label: t.title,
           detail: you ? "等你" : LABEL[t.status as Status],
           ...(you ? { tone: "warn" as const, pill: true } : t.status === "running" ? { tone: "brand" as const } : t.status === "review" ? { tone: "ok" as const } : {}),
           keywords: [t.id, t.repo, t.origin?.title, t.prompt?.slice(0, 300)].filter(Boolean).join(" "),
+          icon: agent && AgentIcon ? <AgentIcon agent={agent} className="size-4 shrink-0" /> : undefined,
+          content: <PaletteTask t={t} agent={agent} session={t.session ? byId[t.session] : undefined} where={repoLabel(t.repo)} />,
           onSelect: () => (t.session && t.status !== "todo" ? showInCode(t.session) : openDetail(t.id)),
         };
       }),
@@ -769,6 +781,82 @@ function lineOf(t: Task): string {
   return (t.latest || t.summary || (t.status === "todo" ? t.prompt : "") || (t.status === "running" ? t.stopWhy : "") || "").split("\n")[0];
 }
 
+/** A task row's second line: its number, then what it waits on the person for or its worker's newest line. */
+function TaskLine({ t, line, you, busy }: { t: Task; line: string; you: boolean; busy: boolean }) {
+  // The task's number leads its line: the secretary, the workers, 去向 and the cards all name tasks by it (t202), and
+  // with the board gone nothing showed which row that was (the person, 2026-11-25: 「很多地方还在说编号…还是显示出来吧」)
+  // While its worker runs the line shimmers like 思考中 (as it did on the board's cards); one waiting on the person
+  // stays amber. The line keeps the idle rows' muted colour and a copy of it in the foreground colour lies on top,
+  // masked to the moving band only: dimming a foreground line with the mask (as .gerdr-shimmer does) left it brighter
+  // than the idle rows beside it (the person, 2026-11-25). The band is Gerdr's .gerdr-shimmer (@gerdr/chat) with its
+  // mask swapped for one that hides everything off the band; not our .shimmer: this line is drawn in Code's list,
+  // outside the panel's area, and the panel's index.css is scoped to that area (uisite scopeCSS), so it never reached it
+  const words = (
+    <>
+      <span className="mr-1.5 font-mono text-[10.5px]">{t.id}</span>
+      {line}
+    </>
+  );
+  const sweep = busy && !you;
+  return (
+    <span className={clsx("block truncate text-[11px]", you ? "text-warn" : "text-muted-foreground", sweep && "relative")}>
+      {/* the id stays muted on an amber line too */}
+      {you ? (
+        <>
+          <span className="mr-1.5 font-mono text-[10.5px] text-muted-foreground">{t.id}</span>
+          {line}
+        </>
+      ) : (
+        words
+      )}
+      {sweep && (
+        <span
+          aria-hidden
+          className="gerdr-shimmer pointer-events-none absolute inset-0 truncate"
+          style={{ "--gerdr-shimmer-mask": "linear-gradient(90deg, transparent calc(50% - 40px), #000 50%, transparent calc(50% + 40px))" } as React.CSSProperties}
+        >
+          {words}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/**
+ * A task in ⌘K, drawn as its row in the list (TaskRow: Code's row when it has a pane, ours when not): the agent's
+ * icon, title, repository and status dot, its number and line under it. The person: the palette's rows should be the
+ * list's rows (2026-11-26); a plain title with a status word didn't read as the same task. Its group in the list
+ * (待验收…) at the line's end, since here they're all in one list.
+ */
+function PaletteTask({ t, agent, session, where }: { t: Task; agent?: string; session?: Sess; where: React.ReactNode }) {
+  const you = needsPerson(t) && t.status === "running";
+  const busy = session ? session.status === "running" : t.live?.status === "running";
+  const line = lineOf(t) || (t.status === "todo" ? "还没派出去" : "");
+  const group = you ? "" : LABEL[t.status as Status];
+  return (
+    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+      <span className="flex min-w-0 items-center gap-2">
+        {agent && AgentIcon ? (
+          <AgentIcon agent={agent} className="size-4 shrink-0" />
+        ) : (
+          <span className="flex size-4 shrink-0 items-center justify-center">
+            <span className={clsx("size-2 rounded-full", you ? "bg-warn" : busy ? "animate-pulse bg-ok" : "bg-muted-foreground/40")} />
+          </span>
+        )}
+        <span className={clsx("min-w-0 flex-1 truncate", you && "font-medium")}>{t.title}</span>
+        {t.repo && <span className="max-w-[30%] shrink-0 truncate text-[11px] text-muted-foreground">{where}</span>}
+        {StatusDot && session ? <StatusDot status={dotStatus?.(session) ?? session.status} /> : <span className="size-2 shrink-0" />}
+      </span>
+      <span className="flex min-w-0 items-center gap-2 pl-6">
+        <span className="min-w-0 flex-1">
+          <TaskLine t={t} line={line} you={you} busy={busy && !you} />
+        </span>
+        {group && <span className={clsx("shrink-0 text-[11px]", t.status === "running" ? "text-brand" : t.status === "review" ? "text-ok" : "text-muted-foreground")}>{group}</span>}
+      </span>
+    </span>
+  );
+}
+
 /**
  * A task: Code's own row when its worker's conversation has a pane (so it's closed, renamed, split, dragged like any
  * row), ours when it hasn't been opened yet (a click opens it). Under it, what Code's row can't say: what it waits
@@ -801,43 +889,7 @@ function TaskRow({
   const line = lineOf(t) || (t.status === "todo" ? "还没派出去" : "");
   // ⌘N's number while ⌘ is held, in the icon's place (as Code's rows; CodeRow numbers itself)
   const nth = useCodeNumber(t.session);
-  // The task's number leads its line: the secretary, the workers, 去向 and the cards all name tasks by it (t202), and
-  // with the board gone nothing showed which row that was (the person, 2026-11-25: 「很多地方还在说编号…还是显示出来吧」)
-  // While its worker runs the line shimmers like 思考中 (as it did on the board's cards); one waiting on the person
-  // stays amber. The line keeps the idle rows' muted colour and a copy of it in the foreground colour lies on top,
-  // masked to the moving band only: dimming a foreground line with the mask (as .gerdr-shimmer does) left it brighter
-  // than the idle rows beside it (the person, 2026-11-25). The band is Gerdr's .gerdr-shimmer (@gerdr/chat) with its
-  // mask swapped for one that hides everything off the band; not our .shimmer: this line is drawn in Code's list,
-  // outside the panel's area, and the panel's index.css is scoped to that area (uisite scopeCSS), so it never reached it
-  const words = (
-    <>
-      <span className="mr-1.5 font-mono text-[10.5px]">{t.id}</span>
-      {line}
-    </>
-  );
-  const sweep = busy && !you;
-  const text = (
-    <span className={clsx("block truncate text-[11px]", you ? "text-warn" : "text-muted-foreground", sweep && "relative")}>
-      {/* the id stays muted on an amber line too */}
-      {you ? (
-        <>
-          <span className="mr-1.5 font-mono text-[10.5px] text-muted-foreground">{t.id}</span>
-          {line}
-        </>
-      ) : (
-        words
-      )}
-      {sweep && (
-        <span
-          aria-hidden
-          className="gerdr-shimmer pointer-events-none absolute inset-0 truncate"
-          style={{ "--gerdr-shimmer-mask": "linear-gradient(90deg, transparent calc(50% - 40px), #000 50%, transparent calc(50% + 40px))" } as React.CSSProperties}
-        >
-          {words}
-        </span>
-      )}
-    </span>
-  );
+  const text = <TaskLine t={t} line={line} you={you} busy={busy} />;
   // Its conversation has a pane: Code's own row with our line inside it (core CodeRow `below`), so the whole of it is
   // one item — hovered, clicked, right-clicked and dragged as one. The line used to be a box of ours under Code's
   // row, patched to look like part of it: the menu and the drag still only took on the title
