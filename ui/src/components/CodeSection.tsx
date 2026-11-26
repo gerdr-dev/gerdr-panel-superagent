@@ -469,15 +469,11 @@ export function Fusion({ children }: { children: React.ReactNode }) {
     ].sort((a, b) => Number(b.run) - Number(a.run) || b.at - a.at);
   const sorted = (ts: Task[], rs: CodeRowInfo[]) => ranked(ts, rs).map((x) => (listed(x.id), x.el()));
   // A folded group's title says when some of its rows' agents are working (the person, 2026-11-26): a task moved to
-  // 待验收 / 已完成 and spoken to again runs out of sight, and nothing said so. The rows' own busy dot, with a count
+  // 待验收 / 已完成 and spoken to again runs out of sight, and nothing said so. Just the dot a running row has (amber,
+  // pulsing): a count in words read as noise (the person, same day)
   const busyHint = (open: boolean, ts: Task[], rs: CodeRowInfo[]) => {
     const n = open ? 0 : ranked(ts, rs).filter((x) => x.run).length;
-    return n > 0 ? (
-      <span className="flex items-center gap-1 text-[10px] text-ok tabular-nums" title={`折叠着，里面有 ${n} 个在干活`}>
-        <span className="size-1.5 animate-pulse rounded-full bg-ok" />
-        {n} 在跑
-      </span>
-    ) : null;
+    return n > 0 ? <span className="size-2 shrink-0 animate-pulse rounded-full bg-warn" title={`折叠着，里面有 ${n} 个在干活`} /> : null;
   };
 
   // A task not handed out has no conversation to open: its row opens the board's card for it (TaskDetail), over the
