@@ -542,7 +542,7 @@ function TaskOutgoing({ card }: CardProps) {
         <textarea
           ref={box}
           rows={2}
-          className="w-full resize-none overflow-hidden rounded-md border bg-background px-2 py-1.5 text-[13px] leading-relaxed outline-none focus:ring-1 focus:ring-brand"
+          className="w-full resize-none overflow-hidden rounded-md border bg-background px-2 py-1.5 text-[length:var(--gerdr-font,14px)] leading-relaxed outline-none focus:ring-1 focus:ring-brand"
           value={value}
           disabled={!!busy}
           onChange={(e) => setDraft(e.target.value)}
@@ -557,7 +557,7 @@ function TaskOutgoing({ card }: CardProps) {
       ) : (
         // The same frame as the box, so the text doesn't move when the card ends
         <div className={`rounded-md border bg-background px-2 py-1.5 leading-relaxed ${over ? "text-muted-foreground" : ""} ${over && !sent ? "line-through" : ""}`}>
-          <Md>{replyMd(value, /slack/i.test(where))}</Md>
+          <Md chat>{replyMd(value, /slack/i.test(where))}</Md>
         </div>
       )}
       {over ? (
