@@ -473,7 +473,12 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   // pulsing): a count in words read as noise (the person, same day)
   const busyHint = (open: boolean, ts: Task[], rs: CodeRowInfo[]) => {
     const n = open ? 0 : ranked(ts, rs).filter((x) => x.run).length;
-    return n > 0 ? <span className="size-2 shrink-0 animate-pulse rounded-full bg-warn" title={`折叠着，里面有 ${n} 个在干活`} /> : null;
+    // In a size-5 box like the + beside 进行中, so the dot sits in the rows' dot column instead of the title's edge
+    return n > 0 ? (
+      <span className="flex size-5 shrink-0 items-center justify-center" title={`折叠着，里面有 ${n} 个在干活`}>
+        <span className="size-2 animate-pulse rounded-full bg-warn" />
+      </span>
+    ) : null;
   };
 
   // A task not handed out has no conversation to open: its row opens the board's card for it (TaskDetail), over the
