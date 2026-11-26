@@ -579,9 +579,12 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   // A phone's overview pages through 等你 and 进行中 only, in the list's order, folded or not (the person, 2026-11-25:
   // 「只放面板里等你和进行中的任务」). Without this it was Code's "active": every agent that ran in the project, done
   // tasks and conversations this list hides included
-  useCodeOverview([...ranked(youTasks, youOwn), ...ranked(activeTasks, activeOwn)].flatMap((x) => (x.id ? [x.id] : [])));
+  const overview = [...ranked(youTasks, youOwn), ...ranked(activeTasks, activeOwn)].flatMap((x) => (x.id ? [x.id] : []));
   return (
     <ListContext.Provider value={list}>
+      {/* Only once the tasks are known: before that the list is empty, and giving it showed 进行中是空的 over the tiles
+          Gerdr remembered from last time (the person, 2026-11-26: after a reload the phone flashed empty, then the tasks) */}
+      {tasks && <GiveOverview ids={overview} />}
       {children}
       {overlays}
     </ListContext.Provider>
@@ -592,6 +595,12 @@ export function Fusion({ children }: { children: React.ReactNode }) {
  * A group as a place to drop rows on: Code's own rows (core useCodeRowDrop, lit up by Code) and ours (a task whose
  * conversation has no pane yet: plain HTML drag). The whole group, title included, so a folded one takes drops too.
  */
+/** useCodeOverview, in a component of its own so it can wait for the tasks (a hook can't be called conditionally). */
+function GiveOverview({ ids }: { ids: string[] }) {
+  useCodeOverview(ids);
+  return null;
+}
+
 function Drop({ to, onMove, children }: { to: Status; onMove: (to: Status, row: { session?: string; task?: string }) => void; children: React.ReactNode }) {
   const ref = useCodeRowDrop((r) => onMove(to, { session: r.session }));
   const [over, setOver] = useState(false);

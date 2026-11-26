@@ -132,6 +132,18 @@ export type Task = {
  */
 let lastTasks: Task[] | null = null;
 
+/** How long one tasks.list may take: it reads every worker's conversation, a few seconds on a phone at most. */
+const LIST_DEADLINE = 30_000;
+function withDeadline<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error("读任务列表超时")), ms);
+    p.then(
+      (v) => (clearTimeout(t), resolve(v)),
+      (e) => (clearTimeout(t), reject(e)),
+    );
+  });
+}
+
 export function useTasks() {
   const [tasks, setTasks] = useState<Task[] | null>(lastTasks);
   useEffect(() => {
@@ -144,6 +156,8 @@ export function useTasks() {
   // one. It used to be dropped: on a phone (each call a round trip through the relay) the reload after sending a
   // message hit the one still in flight and the message showed up only with the next 5 s poll (2026-11-06).
   const inflight = useRef<Promise<void> | null>(null);
+  const retry = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => void (retry.current && clearTimeout(retry.current)), []);
   const again = useRef(false);
   // Moves the user just made (a drag, 移到…), shown at once: tasks.setStatus and the tasks.list after it take a second
   // or more (list re-reads every worker's session), and the card sat in its old column all that time. Laid over what
@@ -172,13 +186,17 @@ export function useTasks() {
       do {
         again.current = false;
         try {
-          const r = await run<{ tasks: Task[]; archived?: number; project?: string }>("tasks.list");
+          // With a deadline: on a phone through the relay a request can hang for good (the connection died under it),
+          // and with one list at a time that left the board empty until the app was restarted (the person, 2026-11-26)
+          const r = await withDeadline(run<{ tasks: Task[]; archived?: number; project?: string }>("tasks.list"), LIST_DEADLINE);
           fileCardStates(r.project, r.tasks as { cards?: Record<string, unknown> }[]);
           setTasks(overlay(r.tasks));
           setArchived(r.archived ?? 0);
           setError("");
         } catch (e: any) {
           setError(String(e.message || e));
+          // Not left to the 60 s fallback: try again soon, sooner while there's nothing to show yet
+          if (!retry.current) retry.current = setTimeout(() => ((retry.current = null), void reload()), lastTasks ? 10_000 : 3000);
         }
       } while (again.current);
     };
