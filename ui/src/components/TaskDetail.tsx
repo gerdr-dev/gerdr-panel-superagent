@@ -46,7 +46,7 @@ const COLS: { id: Col; title: string; icon: React.ReactNode }[] = [
   { id: "todo", title: "待办", icon: <Circle className="size-3.5 text-muted-foreground" /> },
   { id: "active", title: "进行中", icon: <CircleDashed className="size-3.5 text-brand" /> },
   { id: "review", title: "待验收", icon: <CircleDot className="size-3.5 text-ok" /> },
-  { id: "done", title: "已完成", icon: <CheckCircle2 className="size-3.5 text-ok" /> },
+  { id: "done", title: "已完成", icon: <CheckCircle2 className="size-3.5 text-ok fill-ok [&_path]:fill-none [&_path]:stroke-background" /> },
 ];
 
 /** The status a column stands for (tasks.setStatus). */
