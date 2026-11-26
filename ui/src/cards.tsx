@@ -349,7 +349,7 @@ function TaskWait({ card }: CardProps) {
   // waits: the task's waits it stands for (local/_waits.ts); cards made before those had ids carry since (+ kind "mr")
   const c = card as { project?: string; task?: string; waits?: string[]; since?: number; title?: string; body?: string; wakes?: Wake[]; kind?: string; url?: string };
   // Keyed by its since: one wait_for's waits share it (local/_cardstate.ts); every card has it, old ones too
-  const [st] = useCardStatus<Wait>(
+  const [st, get] = useCardStatus<Wait>(
     c.project,
     c.task && c.since ? `wait:${c.task}:${c.since}` : null,
     () => run<Wait>("waits.status", { id: c.task, waits: c.waits, since: c.since, kind: c.kind }, { project: c.project }),
@@ -363,6 +363,21 @@ function TaskWait({ card }: CardProps) {
     return () => clearInterval(timer);
   }, []);
   const on = !st || st.state === "waiting";
+  // ✕: the user closes the wait themselves (local/waits.ts stop), the worker told with its next message
+  const [stopping, setStopping] = useState(false);
+  const [err, setErr] = useState("");
+  const stop = async () => {
+    setStopping(true);
+    setErr("");
+    try {
+      await run("waits.stop", { id: c.task, waits: c.waits, since: c.since }, { project: c.project });
+      await get();
+    } catch (e) {
+      setErr(String((e as Error)?.message ?? e));
+    } finally {
+      setStopping(false);
+    }
+  };
   // Cards and boards from before wakeItem only have the prose, its parts joined by "；": one row each
   const body = st?.body ?? c.body;
   const wakes: Wake[] = st?.wakes ?? (st?.body ? undefined : c.wakes) ?? (body ? body.split("；").map((text) => ({ kind: text.includes("回来看") ? "time" : "", text })) : []);
@@ -385,7 +400,13 @@ function TaskWait({ card }: CardProps) {
           {on ? "在等" : "等完了"} · {c.task}
         </span>
         <span className="ml-auto shrink-0">{on ? waited : st?.at ? new Date(st.at).toTimeString().slice(0, 5) : ""}</span>
+        {on && st && c.task && (
+          <button className="-my-1 -mr-1.5 shrink-0 rounded-md p-1 hover:bg-accent hover:text-foreground disabled:opacity-50" title="不等了：关掉这个等待，worker 下次收到消息时会知道" disabled={stopping} onClick={stop}>
+            <X className="size-3.5" />
+          </button>
+        )}
       </div>
+      {err && <p className="text-[12px] text-bad">{err}</p>}
       <p className={`text-[13px] font-medium ${on ? "" : "text-muted-foreground"}`}>
         {c.url ? (
           <a href={c.url} target="_blank" rel="noreferrer" className="hover:underline">

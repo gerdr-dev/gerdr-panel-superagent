@@ -255,6 +255,34 @@ export function cancel_wait(input: { id: string; reason: string }, ctx: Ctx) {
 }
 
 /**
+ * The user closes a wait from its card (ui/src/cards.tsx "task-wait", the ✕ by "等了 n 分钟"): { id, waits } or, for
+ * old cards, { id, since } — the whole wait_for goes, as with cancel_wait. The worker isn't woken for it (the user
+ * closed it because it no longer matters, not to start a turn); it's told with its next message, as one folded line
+ * (Gerdr's ctx.sessions.note, as an ignored question is), so it doesn't go on as if still waiting (2026-11-26).
+ */
+export function stop(input: { id: string; waits?: string[]; since?: number }, ctx: Ctx) {
+  const ended = update(ctx, (s) => {
+    const t = s.tasks.find((x) => x.id === input?.id);
+    if (!t) throw new Error(`没有任务 ${input?.id}`);
+    const pick = input.waits?.length ? (w: Wait) => input.waits!.includes(w.id) : (w: Wait) => w.since === input.since;
+    const ws = endGroups(t, pick, "你关掉了，不等了");
+    if (!ws.length) throw new Error("这个等待已经结束了");
+    note(t, `用户关掉了等待「${ws[0].what}」`);
+    t.updatedAt = Date.now();
+    return { session: t.session, id: ws[0].id, what: ws[0].what };
+  });
+  const tell = (ctx.sessions as any).note;
+  if (ended.session && typeof tell === "function") {
+    try {
+      tell(ended.session, `wait-stopped:${ended.id}`, `[任务面板] 用户关掉了你的等待「${ended.what}」（${ended.id}）：不用再等它了，它也不会再叫醒你。还要等就按现在的情况重新 wait_for。`, {
+        fold: `用户关掉了等待「${cutLine(ended.what, 40)}」`,
+      });
+    } catch {}
+  }
+  return status({ id: input.id, waits: input.waits, since: input.since }, ctx);
+}
+
+/**
  * A wait shown in the worker's chat (ui/src/cards.tsx "task-wait"): what it waits on, what will wake it, and later how
  * it ended — a turn that just ends after "I'll wait" left the user unsure anything was going on (2026-11-04). Used by
  * wait_for (and older workers' task_update delivering: a wait_for on the MR).
