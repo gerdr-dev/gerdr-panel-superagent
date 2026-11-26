@@ -1,4 +1,4 @@
-import { Brain, Inbox, ScrollText, SlidersHorizontal, Timer, X, Zap } from "lucide-react";
+import { Brain, FastForward, Inbox, ScrollText, SlidersHorizontal, Timer, X, Zap } from "lucide-react";
 import clsx from "clsx";
 import { Sheet, SheetContent, SheetTitle } from "./ui/sheet";
 import Flow from "../settings/Flow";
@@ -7,20 +7,22 @@ import Settings from "../settings/Settings";
 import Schedules from "../settings/Schedules";
 import Triggers from "../settings/Triggers";
 import Log from "../settings/Log";
+import LetGo from "../settings/LetGo";
 import { Button } from "./Button";
 
 // Everything behind the board, in a shadcn Sheet over it: where each outside message went (去向: the Superagent's
 // log, local/superagent.ts), the values the code acts on (设置: who routes and works, repositories, merging, proactive
-// work; local/settings.ts), how the user wants things done (流程: their skill, prose the agents read), what the agents learned about each
+// work; local/settings.ts), when the agents carry on without the user (放行: local/letgo.ts), how the user wants things done (流程: their skill, prose the agents read), what the agents learned about each
 // repository (记忆: local/memory.ts), which outside
 // events come in (触发器: local/inbox.ts) and what runs by itself (定时任务: tasks.sync, waits.tick and the rest). Not pages of their own: the panel
 // is the board, these are what's behind it.
 
-export type SettingsTab = "log" | "settings" | "flow" | "memory" | "schedules" | "triggers";
+export type SettingsTab = "log" | "settings" | "letgo" | "flow" | "memory" | "schedules" | "triggers";
 
 export const TABS: { id: SettingsTab; label: string; icon: typeof Timer }[] = [
   { id: "log", label: "去向", icon: Inbox },
   { id: "settings", label: "设置", icon: SlidersHorizontal },
+  { id: "letgo", label: "放行", icon: FastForward },
   { id: "flow", label: "流程", icon: ScrollText },
   { id: "memory", label: "记忆", icon: Brain },
   { id: "triggers", label: "触发器", icon: Zap },
@@ -58,7 +60,7 @@ export function SettingsSheet({ tab, onTab, onClose, onTask }: { tab: SettingsTa
           <X className="size-4" />
         </Button>
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto">{tab === "log" ? <Log onTask={onTask} /> : tab === "settings" ? <Settings onFlow={() => onTab("flow")} /> : tab === "flow" ? <Flow /> : tab === "memory" ? <Memory /> : tab === "schedules" ? <Schedules /> : <Triggers />}</div>
+      <div className="min-h-0 flex-1 overflow-y-auto">{tab === "log" ? <Log onTask={onTask} /> : tab === "settings" ? <Settings onFlow={() => onTab("flow")} /> : tab === "letgo" ? <LetGo /> : tab === "flow" ? <Flow /> : tab === "memory" ? <Memory /> : tab === "schedules" ? <Schedules /> : <Triggers />}</div>
       </SheetContent>
     </Sheet>
   );

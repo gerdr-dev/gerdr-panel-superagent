@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { X, Activity, AlarmClock, BookmarkPlus, Check, CircleCheck, CornerUpLeft, Eye, FileText, Hourglass, Link2, MessageSquare, Pencil, Send, SquareTerminal, Undo2, UserPlus, Users } from "lucide-react";
+import { X, Activity, Gavel, AlarmClock, BookmarkPlus, Check, CircleCheck, CornerUpLeft, Eye, FileText, Hourglass, Link2, MessageSquare, Pencil, Send, SquareTerminal, Undo2, UserPlus, Users } from "lucide-react";
 import { DefaultCard, registerCard, usePanelChange, type CardProps } from "@gerdr/core";
 import { run } from "./lib/gerdr";
 import { jumpInCode } from "./lib/view";
@@ -283,6 +283,7 @@ const EVENT_ICON: Record<string, typeof Activity> = {
   tell: Send,
   handBack: CornerUpLeft,
   remember: BookmarkPlus,
+  decided: Gavel,
 };
 
 // The left edge says how much it matters: done green, review yellow (the user's turn), the rest the brand's

@@ -13,6 +13,7 @@
 
 /** mode: the permission mode its sessions start in (claude: default / acceptEdits / plan / auto; codex: ask / auto / read-only). */
 import { isColor } from "./repoColor";
+import { LETGO_DEFAULTS, normalizeLetGo, type LetGo } from "./letgo";
 
 export type Who = { agent: string; model: string; effort: string; mode: string };
 
@@ -75,6 +76,11 @@ export type Settings = {
    * worker: once sent, it acts on it. 0 = sent at once. Gerdr's own default is 3 (it was 6, which felt slow).
    */
   undoSeconds: number;
+  /**
+   * 放行 (Let it go, lib/letgo.ts): when, where and for whom the agents carry on without the user. inboxWork and
+   * replies above are what holds outside it (平时); the 放行 page edits all of them together.
+   */
+  letgo: LetGo;
 };
 
 // Just "收到。" (the person, 2026-11-25): the task number and title meant nothing to whoever asked, and the result comes
@@ -95,6 +101,7 @@ export const DEFAULTS: Settings = {
   workerCompact: { percent: 60, idleMinutes: 30 },
   archiveDays: 14,
   undoSeconds: 3,
+  letgo: LETGO_DEFAULTS,
 };
 
 const str = (v: unknown, d: string) => (typeof v === "string" ? v.trim() : d);
@@ -131,5 +138,6 @@ export function normalize(raw: any): Settings {
     },
     archiveDays: count(r.archiveDays, d.archiveDays),
     undoSeconds: Math.min(30, count(r.undoSeconds, d.undoSeconds)),
+    letgo: normalizeLetGo(r.letgo),
   };
 }

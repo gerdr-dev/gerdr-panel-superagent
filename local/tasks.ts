@@ -1,4 +1,5 @@
 import { tellInbox } from "./_inbox";
+import { opens } from "./_letgo";
 import { tellBadge } from "./_badge";
 import { DATA, skillFile } from "./_user";
 import { workflow } from "./_config";
@@ -670,7 +671,7 @@ export async function start(
       if (r.code !== 0) throw new Error(`开 worktree 失败：${r.stderr.trim()}`);
     }
   }
-  const who = workerOf(ctx, t, input);
+  const who = workerOf(ctx, t, input, repo);
   // Its rules and the user's memory go to its system prompt (a file Gerdr re-reads when the agent starts again), not
   // its first message: that one is the user's own words, shown whole in the chat they read (2026-11-12, the user: "我肯定
   // 是想要看到我发的消息的，下半段才是我不关心的"). Started empty, so we know whether this Gerdr took the file.
@@ -790,10 +791,25 @@ export async function switchAgent(input: { id: string; session: string; agent: s
  * Which agent / model / effort a worker runs on. The defaults (设置 → worker) go with their agent: a model named there is
  * that agent's (a claude model means nothing to codex), so a task on another agent only gets a model it names itself.
  */
-function workerOf(ctx: Ctx, t: Task, input: { agent?: string; model?: string; effort?: string; mode?: string }) {
+function workerOf(ctx: Ctx, t: Task, input: { agent?: string; model?: string; effort?: string; mode?: string }, repo?: string) {
   const w = workflow(ctx).worker;
   const agent = input.agent || t.agent || w.agent;
   const same = agent === w.agent;
+  // 放行 (permission): started while the policy lets this repository go, it runs in 放行's mode for its engine. Only at
+  // the start: a session's mode isn't changed under it, so one started before keeps its own
+  if (!input.mode && opens(ctx, "permission", repo ?? t.repo)) {
+    // A role runs on its base engine; no agent named is Gerdr's default, taken as claude (codex users name codex)
+    const info = agent ? ctx.sessions.agents().find((a) => a.id === agent) : undefined;
+    const engine = info?.base || agent || "claude";
+    const m = workflow(ctx).letgo.mode[engine as "claude" | "codex"];
+    if (m)
+      return {
+        agent: agent || undefined,
+        model: input.model || t.model || (same ? w.model : "") || undefined,
+        effort: input.effort || t.effort || (same ? w.effort : "") || undefined,
+        mode: m,
+      };
+  }
   return {
     agent: agent || undefined,
     model: input.model || t.model || (same ? w.model : "") || undefined,

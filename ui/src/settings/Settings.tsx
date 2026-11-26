@@ -159,14 +159,8 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
 
           <Section
             title="外面来的消息"
-            note="触发器收进来、找你的消息（私信、@ 你）。闲聊、道谢这类秘书不接，只记在「去向」里。"
+            note="触发器收进来、找你的消息（私信、@ 你）。闲聊、道谢这类秘书不接，只记在「去向」里。像是活的进不进待办、worker 回话先不先给你过目，在「放行」里：平时怎样、放行时怎样放在一起。"
           >
-            <Field
-              label="像是活的"
-              hint={{ review: "秘书在「待办」里建好任务，不派出去：你看过、改好再点「派出去」，不要就放弃", dispatch: "秘书接了就直接派出去" }[s.inboxWork]}
-            >
-              <Choice value={s.inboxWork} options={[["review", "放进待办等我过目"], ["dispatch", "直接派出去"]]} onChange={(v) => put("inboxWork", v)} />
-            </Field>
             <Field
               label="任务对话里的后续"
               hint={{ worker: "已有任务那段对话里又来的消息，直接交给那个任务的 worker。这些情况还是先给秘书判断：那段对话里有过不止一个任务、任务已经完成、worker 把消息交回过（交回后它就不再跟着这段对话）", secretary: "先交给秘书判断：可以不理，交给这个任务，或者交给别的任务" }[s.followUps]}
@@ -184,12 +178,6 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
                 <input className={input} value={s.ackText} placeholder={ACK_TEXT} onChange={(e) => put("ackText", e.target.value)} />
               </Field>
             )}
-            <Field
-              label="worker 回话"
-              hint={{ review: "worker 要回那段对话里的人时，先变成一张「待发送」卡片：你点发送才发出去，点不发就算了。worker 不等你、也不会知道你选了哪个", auto: "worker 写好就直接发出去" }[s.replies]}
-            >
-              <Choice value={s.replies} options={[["review", "先给我过目"], ["auto", "直接发"]]} onChange={(v) => put("replies", v)} />
-            </Field>
           </Section>
 
           <Section
@@ -210,7 +198,7 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
   );
 }
 
-function Section({ title, note, children }: { title: string; note: string; children: React.ReactNode }) {
+export function Section({ title, note, children }: { title: string; note: string; children: React.ReactNode }) {
   return (
     <section className="space-y-3 rounded-xl border bg-card p-4">
       <div>
@@ -222,7 +210,7 @@ function Section({ title, note, children }: { title: string; note: string; child
   );
 }
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+export function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="grid items-start gap-1.5 md:grid-cols-[160px_minmax(0,1fr)]">
       <span className="pt-1.5 text-[13px]">{label}</span>
@@ -234,7 +222,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
-function Choice<T extends string>({ value, options, onChange }: { value: T; options: [T, string][]; onChange: (v: T) => void }) {
+export function Choice<T extends string>({ value, options, onChange }: { value: T; options: [T, string][]; onChange: (v: T) => void }) {
   return (
     <div className="inline-flex rounded-md border p-0.5">
       {options.map(([v, label]) => (
@@ -247,7 +235,7 @@ function Choice<T extends string>({ value, options, onChange }: { value: T; opti
 }
 
 // Permission modes each engine takes (Gerdr doesn't list them for agents): claude's, codex's
-const MODES: Record<string, AgentChoice[]> = {
+export const MODES: Record<string, AgentChoice[]> = {
   claude: ["default", "acceptEdits", "plan", "auto"].map((id) => ({ id, name: id })),
   codex: ["ask", "auto", "read-only"].map((id) => ({ id, name: id })),
 };

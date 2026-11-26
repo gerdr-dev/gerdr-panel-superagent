@@ -5,6 +5,8 @@
 
 import { secIgnoredLead, state, toMain, updateState, type SecAsk } from "./_main";
 import { noteIgnored } from "./_store";
+import { logDone, NOTE, opens } from "./_letgo";
+import { skillFile } from "./_user";
 
 const SHOWN = "这个问题已经作为卡片显示在你的对话里，用户能直接在卡片上答，任务列表里「秘书」那一行也会亮着「等你」计数：回复里不要再把问题、选项写一遍，一句话说为什么要问就够了。";
 
@@ -24,6 +26,17 @@ export function secAsk(input: any, ctx: Ctx) {
   const title = String(input?.title ?? "").trim();
   if (!title) throw new Error("title 是要问的事");
   const options = Array.isArray(input?.options) ? input.options.map(String).filter(Boolean) : [];
+  // 放行 (unsure): a decision isn't asked — the secretary picks by the user's note. A step only the user can do still is
+  if (options.length && opens(ctx, "unsure")) {
+    const pick = String(input?.pick ?? "").trim();
+    if (!pick)
+      return {
+        asked: false,
+        note: `现在是放行时间，用户不在：这个问题不问他。照放行说明（${skillFile(ctx, NOTE)}）自己从选项里定，再调一次 ask_human 带上 pick（你选的）和 why（一句理由），会记进放行结束时的简报；然后照你选的接着做（比如 decide 给这条消息决定）。`,
+      };
+    logDone(ctx, { kind: "secretary", text: `${title}：${pick}${input?.why ? `（${String(input.why).trim()}）` : ""}` });
+    return { asked: false, note: `记下了：「${title}」你定了「${pick}」。照它接着做；用户回来会在简报里看到。` };
+  }
   const kind: SecAsk["kind"] = options.length ? "choice" : input?.handBack?.kind === "none" ? "none" : "value";
   const replaced = (Array.isArray(input?.replaces) ? input.replaces : input?.replaces ? [input.replaces] : []).map(String);
   const a = updateState(ctx, (x) => {

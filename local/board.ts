@@ -12,6 +12,7 @@ import { secAsk, secCancel } from "./_secask";
 import { GENERAL, MEMORY, nameOf } from "./_memory";
 import { skillFile } from "./_user";
 import { replyOrigin } from "./assign";
+import { agentText, confirmFor, current, logDone, NOTE, opens } from "./_letgo";
 
 const STEP = {
   type: "object",
@@ -42,6 +43,12 @@ const STEP = {
       description:
         "What you asked before that this replaces (ids as my_task / the earlier result give them: a5, or a5#1 for one question of several): taken back with this one, so the user only sees the current question. Use it whenever the situation moved on since you asked (you talked it over with the user, found something out) and the question changed.",
     },
+    pick: {
+      type: "string",
+      description:
+        "With options, only while the user lets go (放行: the result of an ask_human without it says so, and my_task's letgo): the option you pick yourself. Then nothing is asked: your pick stands, is recorded on the task for the user to see (and overturn) later, and you carry on with it.",
+    },
+    why: { type: "string", description: "With pick: why this one, in a sentence the user reads later" },
     verify: { type: "string", description: "How you will check it once the user says it's done" },
     minutes: { type: "number", description: "Roughly how long it takes the user" },
     expires: { type: "number", description: "Minutes until what you ask stops working (a sign-in link, a device code)" },
@@ -122,7 +129,10 @@ export function instructions(input: unknown, ctx: Ctx) {
     `the user name the question itself ("套餐商品配置那个问题"), never "卡片 a5" or "a5#1". ` +
     `What the user's memory says about this repository and all of them came in your first message; the files are ` +
     `${ctx.fs.root}/${MEMORY}/${t.repo ? nameOf(t.repo) : "…"}.md and ${GENERAL}.md there — add to them with remember ` +
-    `(when: ${skillFile(ctx, "superagent-panel/references/memory.md")}).` +
+    `(when: ${skillFile(ctx, "superagent-panel/references/memory.md")}). ` +
+    `The user may let go at times (放行: a policy by the clock, set on their panel): then you decide instead of asking ` +
+    `and messages may go without them looking first. Before asking them or writing to someone as them, my_task's ` +
+    `letgo says what holds right now (absent: nothing is let go, ask as usual); ask_human and reply_message follow it by themselves.` +
     (t.origin?.reply && !t.assigned
       ? ` It came from a chat (${t.origin.source}): to write to the people there, use reply_message, never another ` +
         `tool. ${workflow(ctx).replies === "review" ? "The user looks at each one and sends it or not; you are not told which, so carry on without waiting." : ""}`
@@ -204,6 +214,8 @@ export function ask_human(input: any, ctx: Ctx) {
     for (const id of replaced) takeBack(s, t, id, "换成了新的问题");
     input = { ...input, replaces: undefined };
     const decision = Array.isArray(input.options) && input.options.length > 0;
+    // 放行 (decide): the worker's own pick stands and is recorded; nobody is asked
+    if (decision && opens(ctx, "decide", t.repo)) return decideAlone(s, t, input, ctx);
     const human = decision ? { ...input, steps: input.steps ?? "", handBack: { kind: "choice", options: input.options.map(String), multi: input.multi === true || undefined, label: "你的决定" } } : input;
     const reviewed = t.status === "review";
     const h = addAsk(s, t, human);
@@ -263,6 +275,35 @@ export function ask_human(input: any, ctx: Ctx) {
           },
     };
   });
+}
+
+/**
+ * ask_human with options while 放行 opens `decide` for the task's repository: no card. Without a pick the worker is told
+ * to choose (by the user's note) and call again with it; with one, it's recorded on the task (decided) and in the feed,
+ * shown in the chat as a card the user reads later, and the worker carries on.
+ */
+function decideAlone(s: Store, t: Task, input: any, ctx: Ctx) {
+  const title = String(input.title || "要定的事");
+  const options: string[] = input.options.map(String);
+  const pick = String(input.pick ?? "").trim();
+  if (!pick)
+    return {
+      asked: false,
+      note:
+        `现在是放行时间，用户不在：这个问题不问他。照放行说明（${skillFile(ctx, NOTE)}）自己从选项里挑你会推荐的那个，` +
+        `再调一次 ask_human，原样带上 title 和 options，加上 pick（你选的）和 why（一句理由）：会记在任务上，用户回来能看到、能推翻。然后照你选的接着做。`,
+    };
+  const why = String(input.why ?? "").trim() || undefined;
+  t.decided = [...(t.decided ?? []), { title, options, pick, why, at: Date.now() }];
+  note(t, `放行中替用户定了「${title}」：${pick}${why ? `（${why}）` : ""}`);
+  activity(s, t, { kind: "progress", by: t.id, text: `放行中替你定了「${title}」：${pick}${why ? `（${why}）` : ""}` });
+  t.updatedAt = Date.now();
+  logDone(ctx, { kind: "decided", task: t.id, text: `${title}：${pick}` });
+  return {
+    asked: false,
+    note: "记下了，用户回来会看到。照你选的接着做；回复里一句话带过就行。",
+    gerdrCard: eventCard(ctx, t.id, "decided", `${title}：${pick}`, { body: [why, `可选的：${options.join(" / ")}`].filter(Boolean).join("\n") }),
+  };
 }
 
 export function cancel_human(input: { id: string; reason: string }, ctx: Ctx) {
@@ -376,6 +417,8 @@ export function my_task(input: unknown, ctx: Ctx) {
       handedBack: h.handBack.kind === "secret" ? (h.status === "done" ? `secret ${h.handBack.name} saved` : undefined) : h.handedBack,
       ...(h.questions ? { questions: h.questions.filter((q) => !q.dropped).map((q) => ({ id: `${h.id}#${q.id}`, title: q.title, answer: q.answer })) } : {}),
     })),
+    // 放行 now: what this worker may do without the user (it changes by the clock, so asked here, not told once)
+    ...(current(ctx).policy ? { letgo: agentText(ctx, "worker", t.repo) } : {}),
     // Its reply_message drafts still waiting for the user: drop_reply takes back the ones gone moot
     ...((t.outbox ?? []).some((o) => o.state === "pending")
       ? { outbox: (t.outbox ?? []).filter((o) => o.state === "pending").map((o) => ({ id: o.id, to: o.where, text: o.text, at: new Date(o.at).toISOString() })) }
@@ -473,8 +516,13 @@ export async function reply_message(input: { text: string; event?: string; repla
   // Taken back first: whether this one goes at once or waits, the old draft must not be sent after it
   const replaced = input.replaces?.trim();
   if (replaced) withdraw(ctx, t.id, replaced, "换成了新写的");
-  if (workflow(ctx).replies === "auto") {
+  // 放行 (message): sent at once in a repository the policy lets go, unless the policy keeps this person / conversation
+  // for the user to look at (a leader). Outside 放行, 设置 → worker 回话 decides
+  const kept = confirmFor(ctx, to as any);
+  const letgo = !kept && workflow(ctx).replies !== "auto" && opens(ctx, "message", t.repo);
+  if (!kept && (workflow(ctx).replies === "auto" || letgo)) {
     ev.reply(msg, text);
+    if (letgo) logDone(ctx, { kind: "sent", task: t.id, text: `${where}：${text}` });
     update(ctx, (s) => {
       const x = find(s, t.id);
       note(x, `发给了 ${where}：${text}`);
@@ -487,6 +535,7 @@ export async function reply_message(input: { text: string; event?: string; repla
   const others = pendingFor(find(load(ctx).store, t.id), msg).filter((x) => x.id !== o.id);
   return {
     note:
+      (kept ? `现在的放行策略里「${kept}」仍要用户过目，所以这条没直接发。` : "") +
       "交给用户过目了：他决定发不发，你不会收到结果。不用等、不用问，接着做你的事；这段话也不用在回复里再写一遍。" +
       (others.length ? `\n同一段对话里你还有没发的草稿：\n${draftLines(others)}\n被这条取代或已经过时的，现在就 drop_reply 撤掉。` : ""),
     gerdrCard: { type: "task-outgoing", ref: `${t.id}~${o.id}`, project: ctx.workspace.project, task: t.id, where, text },
