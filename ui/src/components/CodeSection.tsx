@@ -1,6 +1,6 @@
 import * as core from "@gerdr/core";
 import clsx from "clsx";
-import { Ban, Download, Bot, CheckCircle2, ChevronRight, Circle, CircleDashed, CircleDot, LayoutGrid, MessageSquare, Play, Plus, Settings } from "lucide-react";
+import { ArrowRight, Ban, Download, Bot, CheckCircle2, ChevronRight, Circle, CircleDashed, CircleDot, LayoutGrid, MessageSquare, Play, Plus, Settings } from "lucide-react";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { run } from "../lib/gerdr";
 import { colorOf } from "../lib/repoColor";
@@ -364,7 +364,8 @@ export function Fusion({ children }: { children: React.ReactNode }) {
             label: secOpen.length > 1 ? `等你 ${secOpen.length}` : "等你",
             tone: "warn",
             title: "秘书在等你的事：点一条跳过去",
-            items: secOpen.map((a) => ({ id: `sec-${a.id}`, label: a.title, onSelect: () => jumpInCode(session, a.id) })),
+            // Each with an arrow: bare titles in the menu didn't read as something that goes anywhere (the person, 2026-11-26)
+            items: secOpen.map((a) => ({ id: `sec-${a.id}`, label: a.title, icon: <ArrowRight />, onSelect: () => jumpInCode(session, a.id) })),
           }
         : null;
     const t = taskOf.get(session);
@@ -393,8 +394,8 @@ export function Fusion({ children }: { children: React.ReactNode }) {
       tone: "warn",
       title: "在等你的事：点一条跳过去",
       items: things.length
-        ? things.map((x, i) => ({ id: `wait-${i}`, label: x.label, onSelect: () => (x.own ? openAsk(x.own) : jumpInCode(session, x.ref)) }))
-        : [{ id: "wait-0", label: (t.live?.status === "error" && t.live.error) || t.live?.waiting || "等你审批", onSelect: () => showInCode(session) }],
+        ? things.map((x, i) => ({ id: `wait-${i}`, label: x.label, icon: <ArrowRight />, onSelect: () => (x.own ? openAsk(x.own) : jumpInCode(session, x.ref)) }))
+        : [{ id: "wait-0", label: (t.live?.status === "error" && t.live.error) || t.live?.waiting || "等你审批", icon: <ArrowRight />, onSelect: () => showInCode(session) }],
     };
     return [status, wait];
   });
