@@ -2,7 +2,7 @@
 // (Drawer: a card not handed out yet — what was asked and by whom, repository and agent, 备注, 回复对方, hand it out,
 // give it up) and the new-task form. The board itself (BoardPage) isn't drawn. Not cut down to those parts on
 // purpose: as the same file, Superagent's later changes to it merge in (git follows the rename).
-import { AlertTriangle, ArrowUp, Ban, Bot, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleHelp, Copy, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Plus, Search, Send, Settings, Undo2, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, Ban, Bot, Inbox, Check, CheckCircle2, Circle, CircleDashed, CircleDot, CircleDotDashed, CircleHelp, Copy, ExternalLink, Hand, KeyRound, Loader2, MessageSquare, Plus, Search, Send, Settings, Undo2, X } from "lucide-react";
 import { EditableTitle } from "../components/EditableTitle";
 import clsx from "clsx";
 import { type KeyboardEvent as ReactKeyEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -45,8 +45,8 @@ type Col = "todo" | "active" | "you" | "review" | "done";
 const COLS: { id: Col; title: string; icon: React.ReactNode }[] = [
   { id: "todo", title: "待办", icon: <Circle className="size-3.5 text-muted-foreground" /> },
   { id: "active", title: "进行中", icon: <CircleDashed className="size-3.5 text-brand" /> },
-  { id: "review", title: "待验收", icon: <CircleDot className="size-3.5 text-ok" /> },
-  { id: "done", title: "已完成", icon: <CheckCircle2 className="size-3.5 text-ok fill-ok [&_path]:fill-none [&_path]:stroke-background" /> },
+  { id: "review", title: "待验收", icon: <CircleDotDashed className="size-3.5 text-ok" /> },
+  { id: "done", title: "已完成", icon: <CheckCircle2 className="size-3.5 text-ok" /> },
 ];
 
 /** The status a column stands for (tasks.setStatus). */

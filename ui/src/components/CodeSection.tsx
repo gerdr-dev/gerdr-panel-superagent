@@ -1,6 +1,6 @@
 import * as core from "@gerdr/core";
 import clsx from "clsx";
-import { ArrowRight, Ban, Download, Bot, CheckCircle2, ChevronRight, Circle, CircleDashed, CircleDot, LayoutGrid, MessageSquare, Play, Plus, Settings } from "lucide-react";
+import { ArrowRight, Ban, Download, Bot, CheckCircle2, ChevronRight, Circle, CircleDashed, CircleDotDashed, LayoutGrid, MessageSquare, Play, Plus, Settings } from "lucide-react";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { run } from "../lib/gerdr";
 import { colorOf } from "../lib/repoColor";
@@ -56,8 +56,8 @@ function useFold(name: string, init = false): [boolean, () => void] {
 const STATUS_ICON: Record<Status, React.ReactNode> = {
   todo: <Circle className="size-3.5 shrink-0 text-muted-foreground max-md:size-4" />,
   running: <CircleDashed className="size-3.5 shrink-0 text-brand max-md:size-4" />,
-  review: <CircleDot className="size-3.5 shrink-0 text-ok max-md:size-4" />,
-  done: <CheckCircle2 className="size-3.5 shrink-0 text-ok fill-ok [&_path]:fill-none [&_path]:stroke-background max-md:size-4" />,
+  review: <CircleDotDashed className="size-3.5 shrink-0 text-ok max-md:size-4" />,
+  done: <CheckCircle2 className="size-3.5 shrink-0 text-ok max-md:size-4" />,
 };
 
 /**
@@ -98,11 +98,11 @@ const last: { main: Main; asks: number; secOpen: { id: string; title: string }[]
 type Status = "todo" | "running" | "review" | "done";
 const LABEL: Record<Status, string> = { todo: "待办", running: "进行中", review: "待验收", done: "已完成" };
 // In the groups' colours too, so a menu's 移到… rows (Code's ⋯, right click, ⌘W's) show the same icons as the groups.
-// 已完成 is filled (a solid green disc, the check cut out): outlined, it read as 待验收's twin, both green circles
+// 待验收 is dashed with a dot (the person, 2026-11-26): a plain outlined dot read as 已完成's twin, both green circles
 const ICON: Record<"running" | "review" | "done", React.ReactNode> = {
   running: <CircleDashed className="text-brand" />,
-  review: <CircleDot className="text-ok" />,
-  done: <CheckCircle2 className="text-ok fill-ok [&_path]:fill-none [&_path]:stroke-background" />,
+  review: <CircleDotDashed className="text-ok" />,
+  done: <CheckCircle2 className="text-ok" />,
 };
 /** A task row of ours being dragged (rows that are Code's own are dragged by Code: useCodeRowDrop). */
 const TASK_MIME = "text/x-gerdr-task";
