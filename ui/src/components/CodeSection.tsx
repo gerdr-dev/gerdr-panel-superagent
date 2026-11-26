@@ -7,9 +7,11 @@ import { colorOf } from "../lib/repoColor";
 import { WholeWindow } from "../lib/portal";
 import { AskDialog, NewTaskDialog, TaskDetail } from "./TaskDetail";
 import { ImportDialog } from "./ImportDialog";
+import { Button } from "./Button";
+import { Dialog, DialogContent, DialogTitle } from "./ui/dialog";
 import { RowMenu, type RowMenuItem } from "./RowMenu";
 import { openAsks, type Task, useTasks } from "../lib/tasks";
-import { CodeRow, type CodeRowInfo, closeCodeDrawer, newCodeTab, useCodeDirs, useCodeStart, useCodeOrder, useCodeOverview, useCodeNumber, openSettings, showInCode, useCodeRowDrop, useCodePaneTag, jumpInCode, useCodeRowMenu, useCodeRows, useCodeSession, type CodePaneTag } from "../lib/view";
+import { CodeRow, type CodeRowInfo, closeCodeDrawer, newCodeTab, useCodeDirs, useCodeStart, useCodeOrder, useCodeOverview, useCodeNumber, openSettings, showInCode, useCodeRowDrop, useCodePaneTag, jumpInCode, useCodeRowMenu, useCodeRows, useCodeSession, useCodeCloseFallback, type CodePaneTag } from "../lib/view";
 import { usePanelChange, usePanelVisible, useRefresh, useSessions } from "../lib/visible";
 
 // Code's whole list, drawn by this panel (lib/view.ts, layout.tsx; core CodeView list="replace"): not Code's
@@ -351,6 +353,14 @@ export function Fusion({ children }: { children: React.ReactNode }) {
     }
     return byId[session]?.tags?.panel ? [] : [{ id: "import", label: "导入为任务…", icon: <Download />, onSelect: () => setImporting(true) }];
   });
+  // ⌘W on a task alone on screen: Gerdr closes nothing there (a task isn't closed, it moves), so it asks where the
+  // task goes now (the person, 2026-11-26: done with it, ⌘W, pick 待验收 / 已完成). Not for the secretary or Code's
+  // conversations: they have no status here
+  const [closing, setClosing] = useState("");
+  useCodeCloseFallback(({ session }) => {
+    const t = session ? taskOf.get(session) : undefined;
+    if (t && t.status !== "todo") (closeCodeDrawer(), setClosing(t.id));
+  });
   // After the pane's title: the task's number and where it stands, in the groups' own icons and colours, and a tap on
   // it moves it. Two tasks side by side had the same title bar, and on a phone (the list in the drawer) an open
   // conversation said nothing of its status. The person's own conversations get it too, without a number
@@ -449,6 +459,7 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   const openAsk = (id: string) => (closeCodeDrawer(), setDetail(""), setAsk(id));
   const [creating, setCreating] = useState(false);
   const detailTask = detail ? all.find((t) => t.id === detail) : undefined;
+  const closingTask = closing ? all.find((t) => t.id === closing) : undefined;
   const byTask = useMemo(() => Object.fromEntries(all.map((t) => [t.id, t])), [tasks]);
   const openDetail = (id: string) => (closeCodeDrawer(), setDetail(id));
   // Handed out meanwhile (its ▶, or 派出去 in the card): the card gives way to its worker's conversation
@@ -457,13 +468,14 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   }, [detailTask?.session, detailTask?.status]);
   const panelShown = usePanelVisible();
   useEffect(() => {
-    if (!panelShown) (setDetail(""), setAsk(""), setCreating(false), setImporting(false));
+    if (!panelShown) (setDetail(""), setAsk(""), setCreating(false), setImporting(false), setClosing(""));
   }, [panelShown]);
   const overlays = (
     <WholeWindow>
       {detailTask && <TaskDetail t={detailTask} byId={byTask} act={act} onClose={() => setDetail("")} onGo={setDetail} onSession={(id) => (setDetail(""), showInCode(id))} />}
       {ask && <AskDialog id={ask} tasks={all} act={act} onClose={() => setAsk("")} onGo={(id) => (/^a\d/.test(id) ? openAsk(id) : (setAsk(""), setDetail(id)))} />}
       {creating && <NewTaskDialog act={act} onClose={() => setCreating(false)} />}
+      {closingTask && <CloseDialog t={closingTask} items={taskItems(closingTask)} onClose={() => setClosing("")} />}
       {importing && <ImportDialog repos={importRepos} sessions={importSessions} onClose={() => setImporting(false)} onDone={(w) => (setImporting(false), w && showInCode(w))} />}
     </WholeWindow>
   );
@@ -854,5 +866,45 @@ function TaskRow({
         }
       </div>
     </RowMenu>
+  );
+}
+
+/**
+ * ⌘W's question on a task alone on screen: where it goes now. Its menu's own moves (移到… and 放弃任务), one button
+ * each, numbered: 1–9 picks without the mouse, Enter takes the first (focused), Esc leaves it where it is.
+ */
+function CloseDialog({ t, items, onClose }: { t: Task; items: { id: string; label: string; icon?: React.ReactNode; danger?: boolean; onSelect: () => void }[]; onClose: () => void }) {
+  const pick = (i: number) => {
+    const it = items[i];
+    if (!it) return;
+    onClose();
+    it.onSelect();
+  };
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent
+        aria-describedby={undefined}
+        className="flex w-full flex-col gap-3 p-4 sm:max-w-sm"
+        onKeyDown={(e) => {
+          if (e.metaKey || e.ctrlKey || e.altKey || !/^[1-9]$/.test(e.key)) return;
+          e.preventDefault();
+          pick(Number(e.key) - 1);
+        }}
+      >
+        <DialogTitle className="text-[15px] font-medium">把这个任务放到…</DialogTitle>
+        <p className="-mt-1 truncate text-[12px] text-muted-foreground" title={t.title}>
+          {t.id} · {t.title || "（无标题）"}
+        </p>
+        <div className="flex flex-col gap-1.5">
+          {items.map((it, i) => (
+            <Button key={it.id} variant="outline" autoFocus={i === 0} className={clsx("justify-start gap-2 [&_svg]:size-4", it.danger && "text-bad")} onClick={() => pick(i)}>
+              {it.icon}
+              <span className="flex-1 text-left">{it.label}</span>
+              <kbd className="text-[11px] text-muted-foreground">{i + 1}</kbd>
+            </Button>
+          ))}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

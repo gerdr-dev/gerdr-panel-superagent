@@ -32,6 +32,7 @@ type Core = {
   useCodeRowDrop?: (fn: (row: { pane: string; session?: string }) => void) => (el: HTMLElement | null) => void;
   showInCodeView?: (session: string, replace?: string) => void;
   useCodeSession?: () => string | undefined;
+  useCodeCloseFallback?: (fn: (row: { pane: string; session?: string }) => void) => void;
 };
 const c = core as unknown as Core;
 
@@ -75,6 +76,8 @@ export const newCodeTab = (opts?: { cwd?: string }) => c.newCodeTab?.(opts);
 export const canHostCode = !!c.CodeView && !!c.showInCodeView && !!c.CodeRow && !!c.useCodeRows;
 export const showInCode = (session: string, replace?: string) => c.showInCodeView?.(session, replace);
 export const useCodeSession: () => string | undefined = c.useCodeSession ?? (() => undefined);
+/** ⌘W where Gerdr closes nothing (a task alone on screen): ours to answer. An older Gerdr: the key does nothing there. */
+export const useCodeCloseFallback: (fn: (row: { pane: string; session?: string }) => void) => void = c.useCodeCloseFallback ?? (() => {});
 
 /** The settings sheet's open tab; null = Code. Not kept across reloads: coming back, one wants Code. */
 let settings: SettingsTab | null = null;
