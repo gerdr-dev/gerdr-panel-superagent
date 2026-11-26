@@ -10,7 +10,7 @@ import { ALL_DAYS, ANY_REPO, DAY_NAMES, GATE_TEXT, GATES, type Policy, type Wind
 import { Field, MODES, Section } from "./Settings";
 
 // Let it go: policies for what the agents may do without the user (lib/letgo.ts has the rules and why, local/_letgo.ts
-// where each acts). Each policy is whole — its own times, gates, repositories, people still looked at first, permission
+// where each acts). Each policy is whole — its repositories first (the person, 2026-11-26: "先选择仓库"), its own times, gates, repositories, people still looked at first, permission
 // mode and note — and nothing here is global: when no policy is in effect, nothing is let go. DESIGN.md「Let it go」.
 
 type Status = { text: string; by: "manual" | "time" | "none"; until?: number; manual: { policy: string; until: number } | null; log: { at: number; kind: string; task?: string; text: string }[] };
@@ -75,8 +75,9 @@ export default function LetGoPage() {
       <header>
         <h1 className="text-[22px] font-semibold tracking-tight">Let it go</h1>
         <p className="mt-1 text-[13px] text-muted-foreground">
-          秘书和 worker 什么时候可以不问你自己往下做。每套策略是一整套规矩：在哪些时间生效、放开哪些环节、管哪些仓库、哪些人仍要你过目、worker 用什么权限模式、给它们的说明。
-          可以放开很多，也可以什么都不放。没有策略在生效的时候，什么都问你。没问你就做了的事都会记下来，换策略时秘书给你写一份简报。
+          秘书和 worker 什么时候可以不问你自己往下做。每套策略先选管哪些仓库，再定在哪些时间生效、各环节放不放开、哪些人仍要你过目、worker 用什么权限模式、给它们的说明。
+          几套可以同时生效、各管各的仓库（比如 a 仓库全天全放行，其余仓库只在白天放开一部分）；同一个仓库被几套管着时，排在上面的为准。没有策略管着的仓库，什么都问你。
+          没问你就做了的事都会记下来，策略一换秘书给你写一份简报。
         </p>
       </header>
       {err && <p role="alert" className="text-[13px] text-bad">{err}</p>}
@@ -111,7 +112,7 @@ export default function LetGoPage() {
               <Plus className="size-3.5" />
               加一套策略
             </Button>
-            {policies.length > 1 && <span className="text-[12px] text-muted-foreground">几套的时间重叠时，排在上面的为准。</span>}
+            {policies.length > 1 && <span className="text-[12px] text-muted-foreground">同一个仓库被几套同时管着时，排在上面的为准。</span>}
           </div>
         </>
       )}
@@ -159,7 +160,7 @@ function Now({ st, policies, onChange, onError }: { st: Status | null; policies:
           </Button>
         )}
       </div>
-      <p className="text-[11px] text-muted-foreground">临时换的盖过各策略自己的时间，到点自动回到按时间。点了就生效，只对这台电脑上的面板，不用保存。</p>
+      <p className="text-[11px] text-muted-foreground">临时换成一套：到点之前只有它生效，别的都暂停，到点自动回到按时间。点了就生效，不用保存。</p>
       {!!st?.log.length && (
         <div className="space-y-0.5 border-t pt-2">
           <p className="text-[12px] text-muted-foreground">这段时间没问你就做了的：</p>
@@ -188,7 +189,7 @@ function PolicyCard(props: { p: Policy; repos: string[]; first: boolean; last: b
     <section className="space-y-3 rounded-xl border bg-card p-4">
       <div className="flex items-center gap-1">
         <input className={clsx(input, "font-medium")} value={p.name} onChange={(e) => onChange({ ...p, name: e.target.value })} />
-        <Button variant="ghost" size="icon" disabled={props.first} aria-label="往上挪" title="往上挪（时间重叠时上面的为准）" onClick={props.onUp}>
+        <Button variant="ghost" size="icon" disabled={props.first} aria-label="往上挪" title="往上挪（同一个仓库被几套同时管着时，上面的为准）" onClick={props.onUp}>
           <ArrowUp className="size-3.5" />
         </Button>
         <Button variant="ghost" size="icon" disabled={props.last} aria-label="往下挪" onClick={props.onDown}>
@@ -198,6 +199,21 @@ function PolicyCard(props: { p: Policy; repos: string[]; first: boolean; last: b
           <Trash2 className="size-3.5" />
         </Button>
       </div>
+
+      <Field label="管哪些仓库" hint={p.repos.length ? "下面的环节和权限模式只管这些仓库。别的仓库归别的策略管，都不管的什么都问你。「秘书拿不准时」是派活前的事，不看仓库。" : "先选这套策略管哪些仓库：还没选时它什么都不管。"}>
+        <div className="flex flex-wrap gap-x-4 gap-y-1">
+          <label className="flex items-center gap-1.5 text-[13px] font-medium">
+            <input type="checkbox" checked={any} onChange={() => onChange({ ...p, repos: any ? p.repos.filter((r) => r !== ANY_REPO) : [...p.repos, ANY_REPO] })} />
+            所有仓库
+          </label>
+          {all.map((r) => (
+            <label key={r} className={clsx("flex items-center gap-1.5 text-[13px]", (any || !repos.includes(r)) && "text-muted-foreground", !repos.includes(r) && "line-through")} title={r}>
+              <input type="checkbox" disabled={any} checked={any || p.repos.includes(r)} onChange={() => toggle(r)} />
+              {name(r)}
+            </label>
+          ))}
+        </div>
+      </Field>
 
       <Field label="生效时间" hint="结束早于开始就是跨过午夜（19:00–09:00 到第二天早上）；结束填 24:00 是到当天结束。没有时间段的策略只在上面临时换成它时生效。">
         <div className="space-y-1.5">
@@ -228,21 +244,6 @@ function PolicyCard(props: { p: Policy; repos: string[]; first: boolean; last: b
                 ))}
               </div>
             </div>
-          ))}
-        </div>
-      </Field>
-
-      <Field label="管哪些仓库" hint="上面放开的环节和权限模式只在这些仓库里算；别的仓库的活什么都问你。「拿不准时自己定」是秘书派活前的事，不看仓库。">
-        <div className="flex flex-wrap gap-x-4 gap-y-1">
-          <label className="flex items-center gap-1.5 text-[13px] font-medium">
-            <input type="checkbox" checked={any} onChange={() => onChange({ ...p, repos: any ? p.repos.filter((r) => r !== ANY_REPO) : [...p.repos, ANY_REPO] })} />
-            所有仓库
-          </label>
-          {all.map((r) => (
-            <label key={r} className={clsx("flex items-center gap-1.5 text-[13px]", (any || !repos.includes(r)) && "text-muted-foreground", !repos.includes(r) && "line-through")} title={r}>
-              <input type="checkbox" disabled={any} checked={any || p.repos.includes(r)} onChange={() => toggle(r)} />
-              {name(r)}
-            </label>
           ))}
         </div>
       </Field>

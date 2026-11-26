@@ -1,15 +1,15 @@
 // Let it go: the page's and agents' commands. The policies themselves (each with its times, gates, repositories,
 // people still looked at first, mode, note) are `settings.letgo` (settings.get / settings.set); this is which one is in
-// effect right now, picking one by hand until a time, and the tick that hands what was done without asking to the
+// effect right now (several at once, each over its repositories), picking one by hand until a time, and the tick that hands what was done without asking to the
 // secretary for a briefing when the policy changes. DESIGN.md「Let it go」; the rules: ui/src/lib/letgo.ts, local/_letgo.ts.
 
 import { current, hhmm, policyText, state, updateState, type Done } from "./_letgo";
 import { toMain } from "./_main";
 
-/** → { policy (the one in effect) or null, by (manual / time / none), until, text, manual, log so far } */
+/** → { policies (those in effect, in order), by (manual / time / none), until, text, manual, log so far } */
 export function status(input: unknown, ctx: Ctx) {
   const c = current(ctx);
-  return { policy: c.policy ?? null, by: c.by, until: c.until, text: policyText(c), manual: state(ctx).manual ?? null, log: state(ctx).log ?? [] };
+  return { policies: c.policies, by: c.by, until: c.until, text: policyText(c), manual: state(ctx).manual ?? null, log: state(ctx).log ?? [] };
 }
 
 /**
@@ -46,17 +46,17 @@ function untilOf(v: unknown): number | undefined {
 const KIND: Record<Done["kind"], string> = { dispatched: "直接派出去", decided: "替你定了", sent: "直接发出去", secretary: "秘书自己定了" };
 
 /**
- * schedules/letgo.json, every few minutes: notes the policy in effect; when it changes and something was done without
+ * schedules/letgo.json, every few minutes: notes the policies in effect; when they change and something was done without
  * asking under the one before, hands that to the secretary for a briefing.
  */
 export async function tick(input: unknown, ctx: Ctx) {
   const c = current(ctx);
   const s = state(ctx);
-  const now = c.policy?.id ?? "";
+  const now = c.policies.map((p) => p.id).join();
   const was = s.last?.policy ?? "";
   if (s.last && was === now) return { policy: now };
   const log = s.log ?? [];
-  const before = c.letgo.policies.find((p) => p.id === was)?.name;
+  const before = was.split(",").map((id) => c.letgo.policies.find((p) => p.id === id)?.name).filter(Boolean).map((n) => `「${n}」`).join("、");
   updateState(ctx, (x) => {
     x.last = { policy: now, since: Date.now() };
     x.log = [];
@@ -68,7 +68,7 @@ export async function tick(input: unknown, ctx: Ctx) {
   await toMain(
     ctx,
     [
-      `[策略换了] ${before ? `策略「${before}」` : "上一段"}从 ${hhmm(s.last?.since)} 到现在结束了，现在是${policyText(c)}。\n` +
+      `[策略换了] ${before ? `策略${before}` : "上一段"}从 ${hhmm(s.last?.since)} 到现在结束了，现在是${policyText(c)}。\n` +
         `那段时间没问用户就做了的：\n${lines.join("\n")}\n\n` +
         `给用户写一份简报：做完了什么、替他定了什么（他可能想推翻）、以他的名义发了什么、还有哪些在等他（\`gerdr panel run tasks.list\` 里 column 是 you 的）。` +
         `按简报的写法写（secretary.md），只写要他知道的。`,

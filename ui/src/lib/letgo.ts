@@ -3,8 +3,10 @@
 // A policy is a whole set of rules, from letting a lot go to letting nothing go, and the times it is in effect are its
 // own (the person, 2026-11-26: "就是策略，然后再选一个时间段生效它"; someone may let some repositories go in the day
 // and nothing at all once off work). Each has its own times, gates, repositories, people still looked at first (a
-// leader), worker permission mode and note. Nothing is global, and there is no "as usual" policy: when none is in
-// effect nothing is let go — every gate closed, the careful default for whoever never set anything up.
+// leader), worker permission mode and note. Several may be in effect at once over different repositories (a: all let
+// go, all day; the rest: only in the day); for one repository the first in effect that holds there decides. Nothing
+// is global, and there is no "as usual" policy: where none decides, nothing is let go — every gate closed, the careful
+// default for whoever never set anything up.
 //
 // Pure: the shape, the defaults and "which policy is in effect now", for both the page (ui/src/settings/LetGo.tsx) and
 // local/_letgo.ts (the code that follows it).
@@ -47,7 +49,10 @@ export type Policy = {
   note: string;
 };
 
-/** The policies, in order: where two are in effect at once, the one higher up wins. */
+/**
+ * The policies, in order. Several can be in effect at once, each over its own repositories (2026-11-26, the person:
+ * "对于不同的仓库，我可以设计不同的权限"); where two in effect hold in one repository, the one higher up wins.
+ */
 export type LetGo = { policies: Policy[] };
 
 export const LETGO_DEFAULTS: LetGo = { policies: [] };
@@ -111,25 +116,42 @@ export function covers(w: Window, at: Date): boolean {
   return f < t ? w.days.includes(day) && now >= f && now < t : (w.days.includes(day) && now >= f) || (w.days.includes((day + 6) % 7) && now < t);
 }
 
-/** The first policy one of whose windows covers `at`. */
-export function byTime(l: LetGo, at: Date): Policy | undefined {
-  return l.policies.find((p) => p.times.some((w) => covers(w, at)));
+/** The policies one of whose windows covers `at`, in order. */
+export function byTime(l: LetGo, at: Date): Policy[] {
+  return l.policies.filter((p) => p.times.some((w) => covers(w, at)));
 }
 
-/** By hand, until a time: overrides the times. policy "": none (nothing let go). */
+/** By hand, until a time: only this policy is in effect (the others wait). policy "": none (nothing let go). */
 export type Manual = { policy: string; until: number };
 
-/** The policy in effect at `at` (none: nothing let go): by hand while that lasts, else by the times. */
-export function policyAt(l: LetGo, at: Date, manual?: Manual): { policy?: Policy; by: "manual" | "time" | "none"; until?: number } {
-  if (manual && manual.until > at.getTime()) return { policy: l.policies.find((p) => p.id === manual.policy), by: "manual", until: manual.until };
-  const p = byTime(l, at);
-  return { policy: p, by: p ? "time" : "none", until: nextChange(l, at) };
+/**
+ * The policies in effect at `at`, in order (several at once, each over its own repositories): the one picked by hand
+ * while that lasts, else every one whose times cover it. None: nothing let go.
+ */
+export function activeAt(l: LetGo, at: Date, manual?: Manual): { policies: Policy[]; by: "manual" | "time" | "none"; until?: number } {
+  if (manual && manual.until > at.getTime()) return { policies: l.policies.filter((p) => p.id === manual.policy), by: "manual", until: manual.until };
+  const ps = byTime(l, at);
+  return { policies: ps, by: ps.length ? "time" : "none", until: nextChange(l, at) };
 }
 
-/** When the policy by the times next changes (minute steps over the next 8 days); undefined: never. */
+const normRepo = (p?: string) => (p ?? "").trim().replace(/(.)\/+$/, "$1");
+
+/** Whether a policy holds in this repository ("*" = all). */
+export function holds(p: Policy, repo?: string): boolean {
+  if (p.repos.includes(ANY_REPO)) return true;
+  const r = normRepo(repo);
+  return !!r && p.repos.some((x) => normRepo(x) === r);
+}
+
+/** The policy that decides for work in `repo`: the first in effect holding there (the one higher up wins). */
+export function policyFor(active: Policy[], repo?: string): Policy | undefined {
+  return active.find((p) => holds(p, repo));
+}
+
+/** When the set of policies in effect by the times next changes (minute steps over the next 8 days); undefined: never. */
 export function nextChange(l: LetGo, at: Date): number | undefined {
   if (!l.policies.some((p) => p.times.length)) return undefined;
-  const of = (d: Date) => byTime(l, d)?.id ?? "";
+  const of = (d: Date) => byTime(l, d).map((p) => p.id).join();
   const now = of(at);
   const t = new Date(at.getTime());
   t.setSeconds(0, 0);

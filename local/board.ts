@@ -518,7 +518,7 @@ export async function reply_message(input: { text: string; event?: string; repla
   if (replaced) withdraw(ctx, t.id, replaced, "换成了新写的");
   // Let it go (message): sent at once when the policy in effect lets go this repository's messages, unless it keeps this
   // person / conversation for the user to look at (a leader). Otherwise a card for the user to send
-  const kept = confirmFor(ctx, to as any);
+  const kept = confirmFor(ctx, t.repo, to as any);
   if (!kept && opens(ctx, "message", t.repo)) {
     ev.reply(msg, text);
     logDone(ctx, { kind: "sent", task: t.id, text: `${where}：${text}` });
