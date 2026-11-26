@@ -3,6 +3,7 @@ import clsx from "clsx";
 import { useEffect, useState } from "react";
 import { run } from "../lib/gerdr";
 import { SaveBar } from "../components/SaveBar";
+import { useUnsaved } from "../components/unsaved";
 
 // 记忆: what the agents learned from the user about each repository (MR or straight push, who merges, who approves a
 // release), one file per repository plus one for all of them (local/memory.ts, user/memory/). The agents add lines
@@ -59,7 +60,7 @@ export default function MemoryPage() {
     if (l) show(l, n);
   }
 
-  async function save() {
+  async function save(): Promise<boolean> {
     setBusy(true);
     setErr("");
     try {
@@ -67,12 +68,15 @@ export default function MemoryPage() {
       setEtag(r.etag);
       setSaved(text);
       void loadList();
+      return true;
     } catch (e: any) {
       setErr(String(e.message || e));
+      return false;
     } finally {
       setBusy(false);
     }
   }
+  useUnsaved(dirty && !busy, save);
 
   useEffect(() => {
     const k = (e: KeyboardEvent) => {

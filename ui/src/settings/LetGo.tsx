@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Button } from "../components/Button";
 import { input } from "../components/pickers";
 import { SaveBar } from "../components/SaveBar";
+import { useUnsaved } from "../components/unsaved";
 import { run } from "../lib/gerdr";
 import { normalize, type Settings } from "../lib/settings";
 import { ALL_DAYS, ANY_REPO, DAY_NAMES, GATE_TEXT, GATES, type Policy, type Window } from "../lib/letgo";
@@ -33,8 +34,8 @@ export default function LetGoPage() {
     void status();
   }, []);
 
-  async function save() {
-    if (!s) return;
+  async function save(): Promise<boolean> {
+    if (!s) return false;
     setBusy(true);
     setErr("");
     try {
@@ -44,12 +45,15 @@ export default function LetGoPage() {
       setSaved(JSON.stringify(n));
       setEtag(r.etag);
       void status();
+      return true;
     } catch (e: any) {
       setErr(String(e.message || e));
+      return false;
     } finally {
       setBusy(false);
     }
   }
+  useUnsaved(dirty && !busy, save);
 
   useEffect(() => {
     const k = (e: KeyboardEvent) => {

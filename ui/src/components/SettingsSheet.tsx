@@ -1,6 +1,9 @@
-import { Brain, FastForward, Inbox, ScrollText, SlidersHorizontal, Timer, X, Zap } from "lucide-react";
+import { Brain, FastForward, Inbox, Loader2, ScrollText, SlidersHorizontal, Timer, X, Zap } from "lucide-react";
 import clsx from "clsx";
+import { useRef, useState } from "react";
 import { Sheet, SheetContent, SheetTitle } from "./ui/sheet";
+import { Dialog, DialogContent, DialogFooter, DialogTitle } from "./ui/dialog";
+import { UnsavedCtx, type Unsaved } from "./unsaved";
 import Flow from "../settings/Flow";
 import Memory from "../settings/Memory";
 import Settings from "../settings/Settings";
@@ -29,8 +32,26 @@ export const TABS: { id: SettingsTab; label: string; icon: typeof Timer }[] = [
   { id: "schedules", label: "定时任务", icon: Timer },
 ];
 
-export function SettingsSheet({ tab, onTab, onClose, onTask }: { tab: SettingsTab; onTab: (t: SettingsTab) => void; onClose: () => void; onTask: (id: string) => void }) {
+export function SettingsSheet({ tab, onTab: switchTab, onClose: close, onTask }: { tab: SettingsTab; onTab: (t: SettingsTab) => void; onClose: () => void; onTask: (id: string) => void }) {
+  // The page on show reports unsaved changes here (unsaved.tsx); leaving it then waits for the user's answer
+  const page = useRef<Unsaved | null>(null);
+  const [leaving, setLeaving] = useState<(() => void) | null>(null);
+  const [saving, setSaving] = useState(false);
+  const leave = (go: () => void) => (page.current?.dirty ? setLeaving(() => go) : go());
+  const onClose = () => leave(close);
+  const onTab = (t: SettingsTab) => t !== tab && leave(() => switchTab(t));
+  async function saveAndGo() {
+    if (!page.current || !leaving) return;
+    setSaving(true);
+    const ok = await page.current.save();
+    setSaving(false);
+    // A failed save stays on the page, its error in the save bar
+    const go = leaving;
+    setLeaving(null);
+    if (ok) go();
+  }
   return (
+    <UnsavedCtx.Provider value={page}>
     <Sheet open onOpenChange={(o) => !o && onClose()}>
       {/* pt: it reaches the window's top (layout.tsx WholeWindow), clear of a phone's status bar / notch */}
       <SheetContent
@@ -63,5 +84,26 @@ export function SettingsSheet({ tab, onTab, onClose, onTask }: { tab: SettingsTa
       <div className="min-h-0 flex-1 overflow-y-auto">{tab === "log" ? <Log onTask={onTask} /> : tab === "settings" ? <Settings onFlow={() => onTab("flow")} /> : tab === "letgo" ? <LetGo /> : tab === "flow" ? <Flow /> : tab === "memory" ? <Memory /> : tab === "schedules" ? <Schedules /> : <Triggers />}</div>
       </SheetContent>
     </Sheet>
+    {leaving && (
+      <Dialog open onOpenChange={(o) => !o && !saving && setLeaving(null)}>
+        <DialogContent showCloseButton={false} aria-describedby={undefined} className="gap-3 p-5 sm:max-w-sm">
+          <DialogTitle className="text-[15px] font-medium">有改动还没保存</DialogTitle>
+          <p className="text-[13px] text-muted-foreground">离开前要保存吗？不保存的话，这次的改动就没了。</p>
+          <DialogFooter className="mt-1">
+            <Button variant="ghost" disabled={saving} onClick={() => setLeaving(null)}>
+              继续改
+            </Button>
+            <Button variant="outline" disabled={saving} onClick={() => (setLeaving(null), leaving())}>
+              不保存
+            </Button>
+            <Button autoFocus disabled={saving} onClick={() => void saveAndGo()}>
+              {saving && <Loader2 className="size-3.5 animate-spin" />}
+              保存
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    )}
+    </UnsavedCtx.Provider>
   );
 }

@@ -7,6 +7,7 @@ import { run } from "../lib/gerdr";
 import { ACK_TEXT, normalize, type Repo, type Settings, type Who } from "../lib/settings";
 import { PRESETS } from "../lib/repoColor";
 import { SaveBar } from "../components/SaveBar";
+import { useUnsaved } from "../components/unsaved";
 
 // 设置: the values the code acts on (lib/settings.ts says why they're settings and not prose in the skill). Each field
 // carries its why as its description, which is what the sentence around a {{variable}} used to do. Stored as this
@@ -30,8 +31,8 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
     void load();
   }, []);
 
-  async function save() {
-    if (!s) return;
+  async function save(): Promise<boolean> {
+    if (!s) return false;
     setBusy(true);
     setErr("");
     try {
@@ -41,12 +42,15 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
       setSaved(JSON.stringify(n));
       setEtag(r.etag);
       setBroken(false);
+      return true;
     } catch (e: any) {
       setErr(String(e.message || e));
+      return false;
     } finally {
       setBusy(false);
     }
   }
+  useUnsaved(dirty && !busy, save);
 
   useEffect(() => {
     const k = (e: KeyboardEvent) => {

@@ -6,6 +6,7 @@ import { input } from "../components/pickers";
 import { run } from "../lib/gerdr";
 import { isSubmitEnter } from "../lib/utils";
 import { SaveBar } from "../components/SaveBar";
+import { useUnsaved } from "../components/unsaved";
 
 // 流程: the user's skills (skills/<name>/SKILL.md + references/). Prose in their own words, which Gerdr gives the panel
 // agent and every session the panel starts as a skill (they read what they need). Only prose: values the code acts
@@ -52,7 +53,7 @@ export default function FlowPage() {
     }
   }
 
-  async function save() {
+  async function save(): Promise<boolean> {
     setBusy(true);
     setErr("");
     try {
@@ -61,12 +62,15 @@ export default function FlowPage() {
       setSaved(text);
       if (base === undefined) void run<{ base?: string }>("playbooks.read", { name }).then((x) => setBase(x.base), () => {});
       void loadList();
+      return true;
     } catch (e: any) {
       setErr(String(e.message || e));
+      return false;
     } finally {
       setBusy(false);
     }
   }
+  useUnsaved(dirty && !busy, save);
 
   async function reset() {
     setBusy(true);
