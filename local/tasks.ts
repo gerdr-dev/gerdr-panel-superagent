@@ -638,7 +638,7 @@ export function remarkOf(t: Task) {
 }
 
 export async function start(
-  input: { id: string; prompt?: string; repo?: string; agent?: string; model?: string; effort?: string; worktree?: boolean; mode?: string; reply?: string; /** A conversation its worker carries on (local/import.ts): its chat comes along, and nothing is sent to it now */ continueFrom?: string; /** Nothing sent: the person types the first message themselves (local/blank.ts) */ quiet?: boolean },
+  input: { id: string; prompt?: string; repo?: string; agent?: string; model?: string; effort?: string; worktree?: boolean; mode?: string; reply?: string; /** A conversation its worker carries on (local/import.ts): its chat comes along, and nothing is sent to it now */ continueFrom?: string; /** With continueFrom: a fork the person asked for (local/blank.ts): the same engine copies the agent's session, and the original may still be running */ fork?: boolean; forkText?: boolean; /** Nothing sent: the person types the first message themselves (local/blank.ts) */ quiet?: boolean },
   ctx: Ctx,
 ) {
   // reply: the card's 回复对方 box, kept on the task until it's out (it may go to the secretary for a repository first);
@@ -686,7 +686,7 @@ export async function start(
     // sandbox write there)
     artifactsDir: folder({ id: t.id }, ctx)?.path,
     tags: { task: t.id },
-    ...(input.continueFrom ? { continueFrom: input.continueFrom } : {}),
+    ...(input.continueFrom ? { continueFrom: input.continueFrom, ...(input.fork ? { fork: true, forkText: !!input.forkText } : {}) } : {}),
     // Followed on the board (its drawer shows the chat), not in Code: no tab of it appears there
     workspace: "none",
     // No reportTo: the user follows the board, not the panel's agent, and the worker updates the board itself (panel

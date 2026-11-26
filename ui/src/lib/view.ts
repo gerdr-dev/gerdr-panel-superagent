@@ -27,7 +27,7 @@ type Core = {
   useCodeOrder?: (sessions: string[]) => void;
   useCodeOverview?: (sessions: string[]) => void;
   useCodeNumber?: (session?: string) => number | undefined;
-  useCodeStart?: (fn: (o: { agent: string; cwd: string; mode?: string; continueFrom?: string }) => Promise<string>) => void;
+  useCodeStart?: (fn: (o: { agent: string; cwd: string; mode?: string; continueFrom?: string; fork?: boolean; forkText?: boolean }) => Promise<string>) => void;
   useCodeRowMenu?: (fn: (row: { pane: string; session?: string }) => CodeMenuItem[]) => void;
   useCodeRowDrop?: (fn: (row: { pane: string; session?: string }) => void) => (el: HTMLElement | null) => void;
   showInCodeView?: (session: string, replace?: string) => void;
@@ -52,7 +52,7 @@ export const useCodeDirs: (dirs: { path: string; name?: string; color?: string }
  * Conversations started in Code while we show (Cmd+T, 进行中's +, ⌘D, a fork) start as ours: a task's worker. Without
  * it (an older Gerdr) they stay Code's, and show here only once imported.
  */
-export const useCodeStart: (fn: (o: { agent: string; cwd: string; mode?: string; continueFrom?: string }) => Promise<string>) => void = c.useCodeStart ?? (() => {});
+export const useCodeStart: (fn: (o: { agent: string; cwd: string; mode?: string; continueFrom?: string; fork?: boolean; forkText?: boolean }) => Promise<string>) => void = c.useCodeStart ?? (() => {});
 /**
  * Our list's order (the conversations of its rows, as shown): ⌘1–9, ⇧⌘] / ⇧⌘[, ⌘E and where ⌘W lands go by it
  * instead of Code's tabs and workspaces. An older Gerdr: Code's keys as they were.

@@ -2,13 +2,13 @@
 // secretary's (the person, 2026-11-25: 「我希望他就是任务」, and earlier: don't treat the ones I open differently from
 // the secretary's). Gerdr hands every start in Code to the panel (core useCodeStart): the new-conversation page
 // (Cmd+T, 进行中's +), ⌘D (a copy of the focused one: agent, folder, mode), the overview's new agent, a fork
-// (continueFrom). Here it becomes a task whose worker starts with the panel's tools and rules, sends nothing, and
+// (continueFrom, with fork / forkText: Gerdr's fork dialog, which may fork a running conversation). Here it becomes a task whose worker starts with the panel's tools and rules, sends nothing, and
 // waits for the person's first message.
 
 import { add, drop, start } from "./tasks";
 
-/** { cwd, agent?, mode?, continueFrom? } → { task, session }: the worker Code shows. */
-export async function run(input: { cwd: string; agent?: string; mode?: string; continueFrom?: string }, ctx: Ctx) {
+/** { cwd, agent?, mode?, continueFrom?, fork?, forkText? } → { task, session }: the worker Code shows. */
+export async function run(input: { cwd: string; agent?: string; mode?: string; continueFrom?: string; fork?: boolean; forkText?: boolean }, ctx: Ctx) {
   const cwd = String(input?.cwd ?? "").trim();
   if (!cwd) throw new Error("要给目录（cwd）");
   const agent = input?.agent || undefined;
@@ -24,7 +24,7 @@ export async function run(input: { cwd: string; agent?: string; mode?: string; c
   );
   try {
     const out: any = await start(
-      { id: t.id, repo: cwd, ...(agent ? { agent } : {}), ...(input?.mode ? { mode: input.mode } : {}), ...(from ? { continueFrom: from.id } : { quiet: true }) },
+      { id: t.id, repo: cwd, ...(agent ? { agent } : {}), ...(input?.mode ? { mode: input.mode } : {}), ...(from ? { continueFrom: from.id, fork: !!input.fork, forkText: !!input.forkText } : { quiet: true }) },
       ctx,
     );
     return { task: t.id, session: out?.session as string };
