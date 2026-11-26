@@ -1319,40 +1319,27 @@ export async function dispatch(input: { id: string; title?: string; parts: Part[
 }
 
 /**
- * A worker hands its own task over to a fresh agent (board.ts hand_over, when the user tells it "新建一个 agent 交接给他"):
- * a new task taking over this one (`from`, the same handover the secretary does with tasks.dispatch), sent out now in
- * the same repository, and this one stopped. Before 2026-11-26 the worker could only open a helper session for it
- * (task.md's 帮手会话): t11's handover came out as a helper reporting back to t11, not a task in the list. `keep`: the
- * calling worker, left open so its turn can end with a word to the user (closing it would cut the tool call off); it is
- * parked like any stopped worker, and 恢复 (restore) still works.
+ * A worker starts a new task when the user tells it to ("新建一个 agent 交接给他", "另开一个任务做 X"): { id: the
+ * worker's task, prompt, title?, repo? (default: the task's), agent?, model?, effort? }. A row of its own in the list,
+ * sent out now, `from` the worker's task. What it is for (taking over, a side job) is only in its prompt: the old task
+ * goes on as it was, and the user decides about it. Before 2026-11-26 the worker could only open a helper session:
+ * t11's "新建一个 agent 交接给他" came out as a helper reporting back to t11, not a task in the list. A dedicated
+ * handover (stopping the old task, moving its asks) was tried first and dropped the same day: "交接这个定义太窄了".
  */
-export async function handOver(input: { id: string; prompt: string; title?: string; agent?: string; model?: string; effort?: string; keep?: string }, ctx: Ctx) {
+export async function newFrom(input: { id: string; prompt: string; title?: string; repo?: string; agent?: string; model?: string; effort?: string }, ctx: Ctx) {
   const old = find(load(ctx).store, input?.id);
-  if (old.status === "done" || old.status === "dropped") throw new Error(`${old.id} 已经${old.status === "done" ? "完成" : "放弃"}了`);
-  if (!old.repo) throw new Error(`${old.id} 还没派出去，没有可交接的`);
-  if (!input.prompt?.trim()) throw new Error("prompt 写接手的 agent 要做什么：目标、做到哪了、接下来做什么、东西在哪");
-  const t = (await add({ title: input.title?.trim() || `${old.title}（接手 ${old.id}）`, prompt: input.prompt.trim(), attachments: old.attachments, worktree: old.worktree } as any, ctx)) as Task;
+  if (!input.prompt?.trim()) throw new Error("prompt 写新任务要做什么，写给没看过你对话的人：目标、背景、做到哪、接下来做什么、东西在哪");
+  const repo = (input.repo ?? old.repo ?? "").trim();
+  if (!repo) throw new Error("repo 写新任务的仓库绝对路径");
+  if (!ctx.dirs.stat(repo)?.dir) throw new Error(`仓库目录不存在：${repo}`);
+  const t = (await add({ title: input.title?.trim() || undefined, prompt: input.prompt.trim(), from: old.id } as any, ctx)) as Task;
   try {
-    await dispatch({ id: t.id, parts: [{ repo: old.repo, agent: input.agent, model: input.model, effort: input.effort, worktree: old.worktree }], from: old.id }, ctx);
+    return await start({ id: t.id, repo, agent: input.agent, model: input.model, effort: input.effort }, ctx);
   } catch (e) {
-    // No worker came of it: no card left behind, and the old task goes on as it was
+    // No worker came of it: no card left behind
     await drop({ id: t.id }, ctx).catch(() => {});
     throw e;
   }
-  const fresh = find(load(ctx).store, t.id);
-  // Started from the old worker's tool call, the new worker's parent is the old worker: not a helper to close with it
-  const theirs = new Set([fresh.session, ...(fresh.sessions ?? [])].filter(Boolean) as string[]);
-  const closing: string[] = [];
-  update(ctx, (s) => {
-    const x = find(s, old.id);
-    note(x, `交给了 ${t.id}`);
-    x.droppedFrom = x.status;
-    Object.assign(x, { status: "dropped", doneAt: Date.now(), updatedAt: Date.now() });
-    activity(s, x, { kind: "progress", by: x.id, text: `交接给了 ${t.id}「${fresh.title}」` });
-    for (const id of [x.session, ...helperSessions(ctx, x)]) if (id && id !== input.keep && !theirs.has(id)) closing.push(id);
-  });
-  for (const id of closing) if ((ctx.sessions as any).close) await (ctx.sessions as any).close(id).catch(() => {});
-  return fresh;
 }
 
 /**

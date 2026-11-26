@@ -13,7 +13,7 @@ import { GENERAL, MEMORY, nameOf } from "./_memory";
 import { skillFile } from "./_user";
 import { replyOrigin } from "./assign";
 import { agentText, confirmFor, logDone, NOTE, opens } from "./_letgo";
-import { handOver } from "./tasks";
+import { newFrom } from "./tasks";
 
 const STEP = {
   type: "object",
@@ -103,15 +103,16 @@ export const tools = {
       required: ["text"],
     },
   },
-  hand_over: {
+  new_task: {
     description:
-      "Only when the user tells you to hand this task over to a new agent (\"新建一个 agent 交接给他\", \"换个 agent 接着做\", \"上下文太长了，交给新的\"): a new task on their panel takes over this one, started now in the same repository with your prompt, its own row in their list; the user then talks to it there. This task stops (moved off the list as handed over; your questions still open for the user move to the new task, your waits end, sessions you started are closed). Not for help you need while you carry on yourself: that is a subagent or a helper session (task.md). After it, end your turn with a line telling the user which task took over; don't wait for the new one. The handover's background (what this task was for, how far it got, your conversation's id to read) is added for it by the panel.",
+      "Only when the user tells you to start a new task / a new agent (\"新建一个 agent 交接给他\", \"另开一个任务做 X\"): a new task on their panel, sent out now with your prompt, its own row in their list; the user then talks to it there. What it is for is only what your prompt says (taking this work over, a side job): this task goes on as it is, the user decides about it. Not for help you need while you carry on yourself: that is a subagent or a helper session (task.md). After it, say in your reply which task it is; don't wait for it.",
     input: {
       type: "object",
       properties: {
-        prompt: { type: "string", description: "What the new agent does from here, for someone who hasn't seen your chat: the goal, what's done and decided (with the user's rules for this work), what's next, where things are (files, links)" },
-        title: { type: "string", description: "The new task's name; default: this one's with （接手 tN）" },
-        agent: { type: "string", description: "Another agent (an id from gerdr session agents) when the user asked for one; default: the user's worker default" },
+        prompt: { type: "string", description: "Its first message, for someone who hasn't seen your chat: the goal, the background and what's decided (with the user's rules for this work), how far it got, what's next, where things are (files, links, your conversation id for `gerdr session read` when it carries on your work)" },
+        title: { type: "string", description: "Its name; default: worked out from the prompt" },
+        repo: { type: "string", description: "Absolute path of the repository it works in; default: this task's" },
+        agent: { type: "string", description: "An agent id (gerdr session agents) when the user asked for one; default: the user's worker default" },
         model: { type: "string" },
         effort: { type: "string" },
       },
@@ -454,10 +455,10 @@ function briefOf(t: Task) {
   return b;
 }
 
-export async function hand_over(input: { prompt: string; title?: string; agent?: string; model?: string; effort?: string }, ctx: Ctx) {
+export async function new_task(input: { prompt: string; title?: string; repo?: string; agent?: string; model?: string; effort?: string }, ctx: Ctx) {
   const t = mine(load(ctx).store, ctx);
-  const n = await handOver({ ...input, id: t.id, keep: ctx.caller.session }, ctx);
-  return { task: n.id, title: n.title, note: `${n.id} 接手了，已经开始做；${t.id} 停掉了。用一句话告诉用户去 ${n.id} 那里跟它说话，然后结束这一轮。` };
+  const n = await newFrom({ ...input, id: t.id }, ctx);
+  return { task: n.id, title: n.title, session: n.session, note: `${n.id} 已经派出去了。在回复里告诉用户是哪个任务，不用等它。` };
 }
 
 export async function hand_back(input: { event: string; reason: string }, ctx: Ctx) {
