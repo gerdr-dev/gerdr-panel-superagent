@@ -83,8 +83,6 @@ function FoldTitle({ open, onClick, icon, label, children }: { open: boolean; on
 }
 const base = (p?: string) => (p ?? "").replace(/\/+$/, "").split("/").pop() ?? "";
 
-/** The last conversation of ours in front, per device: what the panel shows again when it comes back on screen. */
-const LAST_PANE = "gerdr-panel-fusion.lastPane";
 type Main = { id: string; status: string; waiting?: string } | null;
 type Sess = { id: string; status: string; agent?: string; title?: string; cwd?: string; updatedAt?: number; turn?: { startedAt?: number }; tags?: Record<string, string> };
 /** What the functions last answered, for the next mount to start from. */
@@ -123,6 +121,9 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   const cur = useCodeSession();
   const switching = useRef(new Set<string>());
   const rows = useCodeRows();
+  // Code mode's panes: a Gerdr from 2026-11-26 gives this panel a layout of its own (its tasks' panes, its terminals),
+  // and Code's conversations, which 从 Code 导入 offers, are only in Code's. An older one has one layout: the same rows
+  const codeRows = useCodeRows("code");
   // From what was last known (see lib/tasks.ts lastTasks: this mounts anew with every opening of a phone's drawer)
   const [main, setMain] = useState<Main>(last.main);
   const [asks, setAsks] = useState(last.asks);
@@ -146,7 +147,7 @@ export function Fusion({ children }: { children: React.ReactNode }) {
     { poll: 10_000 },
   );
   // The conversations in Code's panes, and the secretary: what each is doing now
-  const open = new Set(rows.map((r) => r.session).filter(Boolean) as string[]);
+  const open = new Set([...rows, ...codeRows].map((r) => r.session).filter(Boolean) as string[]);
   const openKey = [...open].sort().join(",");
   // …and every worker's, pane or not: which agent it is (its row's icon)
   const live = useSessions((s) => open.has(s.id) || s.id === main?.id || !!s.tags?.task) as Sess[];
@@ -276,7 +277,7 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   // Code's conversations that aren't ours. Not listed (2026-11-25, the person: the panel shows its own tasks; Code is
   // 「一个可选的一次性导入」): they are what 从 Code 导入 offers, where one becomes a task like any other. Until then they
   // were listed in the groups beside the tasks, alike on the surface only: the secretary knew nothing of them.
-  const importable = rows.filter((r) => r.kind === "session" && !(r.session && (taskOf.has(r.session) || isMain(r.session) || unknownTask(r.session) || byId[r.session]?.tags?.panel)));
+  const importable = codeRows.filter((r) => r.kind === "session" && !(r.session && (taskOf.has(r.session) || isMain(r.session) || unknownTask(r.session) || byId[r.session]?.tags?.panel)));
   const own: CodeRowInfo[] = [];
   const needs = (r: CodeRowInfo) => !!r.session && (byId[r.session]?.status === "waiting" || byId[r.session]?.status === "error");
   const stands = (r: CodeRowInfo) => (r.session ? standing[r.session] : undefined);
@@ -290,40 +291,9 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   // list still says where one is), under 其他.
   // …and a conversation that isn't a task while it is the one in front, so the list still says where one is
   const other = rows.filter((r) => (r.kind !== "session" && (r.kind !== "new" || r.current)) || (r.current && importable.includes(r)));
-  // Coming here from Code mode, the pane in front is whatever Code had in front: the panes are one layout (core
-  // CodeView: a second copy would mean two composers per conversation), so a Code conversation opened there stayed on
-  // screen here, titled 不是任务 (the person, 2026-11-26: switching to this panel shouldn't keep showing Code's). So on
-  // each arrival, a conversation of Code's in front gives way to the last one of ours that was, else the secretary.
-  // Only on arrival: one opened here on purpose (⌘K, an import) stays
-  const shown = usePanelVisible();
-  const ours = (id?: string) => !!id && (taskOf.has(id) || isMain(id));
-  const arrived = useRef(true);
-  useEffect(() => {
-    if (!shown) return void (arrived.current = true);
-    if (ours(cur)) {
-      arrived.current = false;
-      try {
-        localStorage.setItem(LAST_PANE, cur!);
-      } catch {}
-      return;
-    }
-    if (!arrived.current) return;
-    // Not judged until it can be: the tasks known and the conversation in front loaded (its tags tell a panel's own)
-    if (cur && (tasks == null || !byId[cur])) return;
-    if (!cur || !importable.some((r) => r.current)) return void (arrived.current = false);
-    let back = "";
-    try {
-      back = localStorage.getItem(LAST_PANE) ?? "";
-    } catch {}
-    if (ours(back)) showInCode(back);
-    else if (main) void openMain();
-    // No secretary known yet either: wait for it
-    else return;
-    arrived.current = false;
-  }, [shown, cur, tasks == null, !!(cur && byId[cur]), main?.id]);
   // 从 Code 导入: this project's workspaces (as repositories) and those conversations
   const [importing, setImporting] = useState(false);
-  const wsDirs = [...new Map(rows.filter((r) => r.workspace.cwd).map((r) => [r.workspace.cwd!.replace(/\/+$/, ""), r.workspace.name])).entries()];
+  const wsDirs = [...new Map(codeRows.filter((r) => r.workspace.cwd).map((r) => [r.workspace.cwd!.replace(/\/+$/, ""), r.workspace.name])).entries()];
   const importRepos = wsDirs.filter(([path]) => path !== panelDir).map(([path, name]) => ({ path, name: name || base(path), have: repos.some((x) => x.path.replace(/\/+$/, "") === path) }));
   const importSessions = importable.map((r) => ({
     id: r.session!,

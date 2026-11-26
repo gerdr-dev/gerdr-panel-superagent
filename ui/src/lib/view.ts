@@ -18,7 +18,7 @@ export type CodeRowInfo = {
 type Core = {
   CodeView?: (props: { sidebar?: ReactNode; list?: "add" | "replace" }) => ReactNode;
   CodeRow?: (props: { pane: string; where?: ReactNode; below?: ReactNode }) => ReactNode;
-  useCodeRows?: () => CodeRowInfo[];
+  useCodeRows?: (of?: "here" | "code") => CodeRowInfo[];
   newCodeTab?: (opts?: { cwd?: string }) => void;
   closeCodeDrawer?: () => void;
   useCodePaneTag?: (fn: (row: { pane: string; session?: string }) => CodePaneTag | CodePaneTag[] | null) => void;
@@ -39,7 +39,8 @@ const c = core as unknown as Core;
 export const CodeView = c.CodeView;
 /** Code's own row for a pane: the rows here look and behave as in Code (its menu, dragging, unread). */
 export const CodeRow = c.CodeRow!;
-export const useCodeRows = c.useCodeRows!;
+/** "code": Code mode's panes rather than this panel's own (a Gerdr before 2026-11-26 has one layout and ignores it). */
+export const useCodeRows: (of?: "here" | "code") => CodeRowInfo[] = c.useCodeRows!;
 /** A place Code's rows can be dropped on (a group of ours). Without it (an older Gerdr): nothing lands, the buttons still move. */
 export const useCodeRowDrop: (fn: (row: { pane: string; session?: string }) => void) => (el: HTMLElement | null) => void = c.useCodeRowDrop ?? (() => () => {});
 export type CodeMenuItem = { id: string; label: string; icon?: ReactNode; disabled?: boolean; onSelect?: () => void; children?: CodeMenuItem[] };
