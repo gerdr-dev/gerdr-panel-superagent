@@ -13,6 +13,7 @@ import { GENERAL, MEMORY, nameOf } from "./_memory";
 import { skillFile } from "./_user";
 import { replyOrigin } from "./assign";
 import { agentText, confirmFor, logDone, NOTE, opens } from "./_letgo";
+import { handOver } from "./tasks";
 
 const STEP = {
   type: "object",
@@ -100,6 +101,21 @@ export const tools = {
         deliver: { type: "boolean", description: "true: the delivery note for the user to send; false (default): said to them now" },
       },
       required: ["text"],
+    },
+  },
+  hand_over: {
+    description:
+      "Only when the user tells you to hand this task over to a new agent (\"新建一个 agent 交接给他\", \"换个 agent 接着做\", \"上下文太长了，交给新的\"): a new task on their panel takes over this one, started now in the same repository with your prompt, its own row in their list; the user then talks to it there. This task stops (moved off the list as handed over; your questions still open for the user move to the new task, your waits end, sessions you started are closed). Not for help you need while you carry on yourself: that is a subagent or a helper session (task.md). After it, end your turn with a line telling the user which task took over; don't wait for the new one. The handover's background (what this task was for, how far it got, your conversation's id to read) is added for it by the panel.",
+    input: {
+      type: "object",
+      properties: {
+        prompt: { type: "string", description: "What the new agent does from here, for someone who hasn't seen your chat: the goal, what's done and decided (with the user's rules for this work), what's next, where things are (files, links)" },
+        title: { type: "string", description: "The new task's name; default: this one's with （接手 tN）" },
+        agent: { type: "string", description: "Another agent (an id from gerdr session agents) when the user asked for one; default: the user's worker default" },
+        model: { type: "string" },
+        effort: { type: "string" },
+      },
+      required: ["prompt"],
     },
   },
   my_task: {
@@ -436,6 +452,12 @@ function briefOf(t: Task) {
   if (!Object.keys(b).length) return undefined;
   b.note = "派活时的原话；之后在对话里改过的，以后来的为准。";
   return b;
+}
+
+export async function hand_over(input: { prompt: string; title?: string; agent?: string; model?: string; effort?: string }, ctx: Ctx) {
+  const t = mine(load(ctx).store, ctx);
+  const n = await handOver({ ...input, id: t.id, keep: ctx.caller.session }, ctx);
+  return { task: n.id, title: n.title, note: `${n.id} 接手了，已经开始做；${t.id} 停掉了。用一句话告诉用户去 ${n.id} 那里跟它说话，然后结束这一轮。` };
 }
 
 export async function hand_back(input: { event: string; reason: string }, ctx: Ctx) {
