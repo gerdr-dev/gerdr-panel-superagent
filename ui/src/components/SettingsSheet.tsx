@@ -33,7 +33,8 @@ export const TABS: { id: SettingsTab; label: string; icon: typeof Timer }[] = [
 ];
 
 export function SettingsSheet({ tab, onTab: switchTab, onClose: close, onTask }: { tab: SettingsTab; onTab: (t: SettingsTab) => void; onClose: () => void; onTask: (id: string) => void }) {
-  // The page on show reports unsaved changes here (unsaved.tsx); leaving it then waits for the user's answer
+  // The page on show reports unsaved changes here (unsaved.tsx); leaving it by ✕, Esc or another tab then waits for the
+  // user's answer
   const page = useRef<Unsaved | null>(null);
   const [leaving, setLeaving] = useState<(() => void) | null>(null);
   const [saving, setSaving] = useState(false);
@@ -60,6 +61,9 @@ export function SettingsSheet({ tab, onTab: switchTab, onClose: close, onTask }:
         // ⌘S saves the page here (Settings, 流程, 记忆): Gerdr leaves keys named so to what has focus inside (its ⌘S is
         // "stash a draft", which took the key and stopped it before the page's save heard it)
         data-own-keys="meta+s ctrl+s"
+        // A click beside the sheet with unsaved changes does nothing (no question either): it was most likely a
+        // stray click, and the sheet stays as it was. ✕ and Esc are deliberate, so those ask (leave above)
+        onInteractOutside={(e) => page.current?.dirty && e.preventDefault()}
         className="w-full gap-0 pt-[env(safe-area-inset-top)] sm:max-w-5xl">
         <SheetTitle className="sr-only">Superagent</SheetTitle>
       <header className="flex items-center gap-1 border-b px-3 py-2">

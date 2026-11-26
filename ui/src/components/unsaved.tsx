@@ -1,8 +1,8 @@
 import { createContext, useContext, useEffect, useRef } from "react";
 
-// A settings page with unsaved changes tells the sheet around it (SettingsSheet), so that closing the sheet (✕, a click
-// outside, Esc) or switching to another tab asks first instead of dropping the edit: a stray click beside the sheet
-// threw away a page of changes (the user's report). `save` resolves true once it went through.
+// A settings page with unsaved changes tells the sheet around it (SettingsSheet), so that a click beside the sheet
+// does nothing and closing it (✕, Esc) or switching to another tab asks first, instead of dropping the edit: a stray
+// click beside the sheet threw away a page of changes (the user's report). `save` resolves true once it went through.
 
 export type Unsaved = { dirty: boolean; save: () => Promise<boolean> };
 
