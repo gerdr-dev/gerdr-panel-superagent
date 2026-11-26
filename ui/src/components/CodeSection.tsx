@@ -7,7 +7,6 @@ import { colorOf } from "../lib/repoColor";
 import { WholeWindow } from "../lib/portal";
 import { AskDialog, NewTaskDialog, TaskDetail } from "./TaskDetail";
 import { ImportDialog } from "./ImportDialog";
-import { Button } from "./Button";
 import { Dialog, DialogContent, DialogTitle } from "./ui/dialog";
 import { RowMenu, type RowMenuItem } from "./RowMenu";
 import { openAsks, type Task, useTasks } from "../lib/tasks";
@@ -870,8 +869,11 @@ function TaskRow({
 }
 
 /**
- * ⌘W's question on a task alone on screen: where it goes now. Its menu's own moves (移到… and 放弃任务), one button
- * each, numbered: 1–9 picks without the mouse, Enter takes the first (focused), Esc leaves it where it is.
+ * ⌘W's question on a task alone on screen: where it goes now. Its menu's own moves, as menu rows rather than
+ * buttons (three outlined bold buttons read as three equal big decisions, the first one ringed): the statuses by
+ * their names and the list's own icons and colours, since the title already says "move"; 放弃任务 apart below a
+ * line, so the destructive one isn't a peer of the moves. Numbered: 1–9 picks without the mouse, Enter takes the
+ * first (focused), Esc leaves it where it is.
  */
 function CloseDialog({ t, items, onClose }: { t: Task; items: { id: string; label: string; icon?: React.ReactNode; danger?: boolean; onSelect: () => void }[]; onClose: () => void }) {
   const pick = (i: number) => {
@@ -880,30 +882,44 @@ function CloseDialog({ t, items, onClose }: { t: Task; items: { id: string; labe
     onClose();
     it.onSelect();
   };
+  const tone: Record<string, string> = { "move-running": "text-brand", "move-review": "text-ok", "move-done": "text-muted-foreground" };
+  const row = (it: (typeof items)[number], i: number) => (
+    <button
+      key={it.id}
+      autoFocus={i === 0}
+      className={clsx(
+        "flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-[13px] outline-none hover:bg-accent focus-visible:bg-accent [&_svg]:size-4 [&_svg]:shrink-0",
+        it.danger ? "text-bad" : "text-foreground",
+      )}
+      onClick={() => pick(i)}
+    >
+      <span className={clsx("flex", !it.danger && tone[it.id])}>{it.icon}</span>
+      <span className="flex-1 truncate">{it.label.replace(/^移到/, "")}</span>
+      <kbd className="font-mono text-[11px] text-muted-foreground">{i + 1}</kbd>
+    </button>
+  );
+  const moves = items.filter((x) => !x.danger);
+  const rest = items.filter((x) => x.danger);
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent
         aria-describedby={undefined}
-        className="flex w-full flex-col gap-3 p-4 sm:max-w-sm"
+        className="flex w-full flex-col gap-0 p-2 sm:max-w-xs"
         onKeyDown={(e) => {
           if (e.metaKey || e.ctrlKey || e.altKey || !/^[1-9]$/.test(e.key)) return;
           e.preventDefault();
           pick(Number(e.key) - 1);
         }}
       >
-        <DialogTitle className="text-[15px] font-medium">把这个任务放到…</DialogTitle>
-        <p className="-mt-1 truncate text-[12px] text-muted-foreground" title={t.title}>
-          {t.id} · {t.title || "（无标题）"}
-        </p>
-        <div className="flex flex-col gap-1.5">
-          {items.map((it, i) => (
-            <Button key={it.id} variant="outline" autoFocus={i === 0} className={clsx("justify-start gap-2 [&_svg]:size-4", it.danger && "text-bad")} onClick={() => pick(i)}>
-              {it.icon}
-              <span className="flex-1 text-left">{it.label}</span>
-              <kbd className="text-[11px] text-muted-foreground">{i + 1}</kbd>
-            </Button>
-          ))}
+        <div className="px-2.5 pt-1.5 pb-2 pr-8">
+          <DialogTitle className="text-[13px] font-medium">移到…</DialogTitle>
+          <p className="mt-0.5 truncate text-[12px] text-muted-foreground" title={t.title}>
+            {t.id} · {t.title || "（无标题）"}
+          </p>
         </div>
+        {moves.map((it) => row(it, items.indexOf(it)))}
+        {rest.length > 0 && <div className="mx-2.5 my-1 border-t" />}
+        {rest.map((it) => row(it, items.indexOf(it)))}
       </DialogContent>
     </Dialog>
   );
