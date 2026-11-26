@@ -5,6 +5,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import { run } from "../lib/gerdr";
 import { colorOf } from "../lib/repoColor";
 import { WholeWindow } from "../lib/portal";
+import { useSearchItems } from "../lib/search";
 import { AskDialog, NewTaskDialog, TaskDetail } from "./TaskDetail";
 import { ImportDialog } from "./ImportDialog";
 import { Dialog, DialogContent, DialogTitle } from "./ui/dialog";
@@ -461,6 +462,27 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   const closingTask = closing ? all.find((t) => t.id === closing) : undefined;
   const byTask = useMemo(() => Object.fromEntries(all.map((t) => [t.id, t])), [tasks]);
   const openDetail = (id: string) => (closeCodeDrawer(), setDetail(id));
+  // ⌘K finds any task (finished ones too, not only those listed), and opens it like a click on its row: its worker's
+  // conversation, or the card of one not handed out. This lived in the board (BoardPage), which isn't drawn since the
+  // panel hosts Code, so ⌘K had lost the tasks (2026-11-26). In the order the list goes by what matters, then newest
+  const rank = (t: Task) => (t.status === "running" ? (needsPerson(t) ? 0 : 1) : t.status === "review" ? 2 : t.status === "todo" ? 3 : 4);
+  useSearchItems(
+    all
+      .filter((t) => t.status !== "dropped")
+      .sort((a, b) => rank(a) - rank(b) || (b.doneAt ?? b.updatedAt) - (a.doneAt ?? a.updatedAt))
+      .map((t) => {
+        const you = t.status === "running" && needsPerson(t);
+        return {
+          id: t.id,
+          label: t.title,
+          detail: you ? "等你" : LABEL[t.status as Status],
+          ...(you ? { tone: "warn" as const, pill: true } : t.status === "running" ? { tone: "brand" as const } : t.status === "review" ? { tone: "ok" as const } : {}),
+          keywords: [t.id, t.repo, t.origin?.title, t.prompt?.slice(0, 300)].filter(Boolean).join(" "),
+          onSelect: () => (t.session && t.status !== "todo" ? showInCode(t.session) : openDetail(t.id)),
+        };
+      }),
+    { heading: "任务" },
+  );
   // Handed out meanwhile (its ▶, or 派出去 in the card): the card gives way to its worker's conversation
   useEffect(() => {
     if (detailTask?.session && detailTask.status !== "todo") (setDetail(""), showInCode(detailTask.session));
