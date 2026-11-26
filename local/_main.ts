@@ -398,7 +398,10 @@ async function brief(ctx: Ctx): Promise<string> {
     textOf(ctx, DISPATCH) || `判断规则（用户的 dispatch.md）不见了：只分派，不自己动手、不等待；拿不准就问用户。`,
     `## 外面来的消息 [消息 cN]：一条命令给出这一批的决定\n` +
       `gerdr panel run superagent.decide '${ex({ decisions: [{ item: "c3", decision: "accept", title: "十几个字的标题", parts: [{ repo: "/绝对路径" }] }, { item: "c4", decision: "ignore", reason: "道谢" }] })}'\n\n` +
-      `- attach：${ex({ item: "c5", decision: "attach", task: "t9", reason: "问的是 t9 那次建库" })}（reason 必填：为什么是这个任务，用户会在「去向」里看，也会回头问你；并进后这段对话之后的消息直接给 t9）；stop：${ex({ item: "c6", decision: "stop", task: "t9", reason: "…" })}\n` +
+      `- attach：${ex({ item: "c5", decision: "attach", task: "t9", reason: "问的是 t9 那次建库" })}（reason 必填：为什么是这个任务，用户会在「去向」里看，也会回头问你；并进后这段对话之后的消息直接给 t9）。` +
+        `t9 还在「待办」没派出去时再加 "prompt"：整段新的说明，把这条消息带来的材料（trace、预期值、谁说了什么）整理进去，原来的要求和材料都留着；` +
+        `用户派之前读的、worker 收到的都是它。消息是某张待办卡的材料就这样并进去，别判 ignore 说「派的时候带上」：你下一轮就不记得了。` +
+        `stop：${ex({ item: "c6", decision: "stop", task: "t9", reason: "…" })}\n` +
       `- decide 的 accept 会替你建任务；派不派出去看用户当前的策略（Let it go）：没放开「外面来的活」或者仓库不在策略里，就放进任务列表的「待办」等他看过、改好再派，parts 照常写，会成为任务上的仓库和 agent，拆成几份就是几个任务；放开了就直接派出去。decide 的结果会写明是哪种。` +
         `记下这条消息的去向；回不回原对话、什么时候回，按他的设置自动处理，你不用另外回。\n\n` +
       `- 要先问用户才定得了的 [消息 cN]（排期、该谁做、缺信息）：先 ask_human 问他（只写在回复里他看不到），再带上它返回的 sN 给这条 ${ex({ item: "c7", decision: "wait", ask: "s8", reason: "问用户：要不要估排期、哪个仓库" })}` +
