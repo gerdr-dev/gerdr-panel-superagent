@@ -29,6 +29,7 @@ type Core = {
   useCodeNumber?: (session?: string) => number | undefined;
   useCodeStart?: (fn: (o: { agent: string; cwd: string; mode?: string; continueFrom?: string; fork?: boolean; forkText?: boolean }) => Promise<string>) => void;
   useCodeRowMenu?: (fn: (row: { pane: string; session?: string }) => CodeMenuItem[]) => void;
+  codeSessionMenu?: (session: string) => CodeMenuItem[];
   useCodeRowDrop?: (fn: (row: { pane: string; session?: string }) => void) => (el: HTMLElement | null) => void;
   showInCodeView?: (session: string, replace?: string) => void;
   useCodeSession?: () => string | undefined;
@@ -46,6 +47,8 @@ export const useCodeRowDrop: (fn: (row: { pane: string; session?: string }) => v
 export type CodeMenuItem = { id: string; label: string; icon?: ReactNode; disabled?: boolean; onSelect?: () => void; children?: CodeMenuItem[] };
 /** Our items in a pane's ⋯ menu and its row's right-click menu (移到…). Without it (an older Gerdr): none there. */
 export const useCodeRowMenu: (fn: (row: { pane: string; session?: string }) => CodeMenuItem[]) => void = c.useCodeRowMenu ?? (() => {});
+/** Gerdr's own items for one of our conversations without a pane (标为已读, 在右侧分屏打开, 重命名会话): what Code's row has besides ours. Without it (an older Gerdr): none. */
+export const codeSessionMenu = (session: string): CodeMenuItem[] => c.codeSessionMenu?.(session) ?? [];
 /** The folders offered on Code's new-conversation page while we show: ours (设置 → 仓库), not Code's workspaces. */
 export const useCodeDirs: (dirs: { path: string; name?: string; color?: string }[]) => void = c.useCodeDirs ?? (() => {});
 /**

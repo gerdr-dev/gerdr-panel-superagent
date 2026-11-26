@@ -11,7 +11,7 @@ import { ImportDialog } from "./ImportDialog";
 import { Dialog, DialogContent, DialogTitle } from "./ui/dialog";
 import { RowMenu, type RowMenuItem } from "./RowMenu";
 import { openAsks, type Task, useTasks } from "../lib/tasks";
-import { CodeRow, type CodeRowInfo, closeCodeDrawer, newCodeTab, useCodeDirs, useCodeStart, useCodeOrder, useCodeOverview, useCodeNumber, openSettings, showInCode, useCodeRowDrop, useCodePaneTag, jumpInCode, useCodeRowMenu, useCodeRows, useCodeSession, useCodeCloseFallback, type CodePaneTag } from "../lib/view";
+import { CodeRow, type CodeRowInfo, closeCodeDrawer, newCodeTab, useCodeDirs, useCodeStart, useCodeOrder, useCodeOverview, useCodeNumber, openSettings, showInCode, useCodeRowDrop, useCodePaneTag, jumpInCode, useCodeRowMenu, codeSessionMenu, useCodeRows, useCodeSession, useCodeCloseFallback, type CodePaneTag } from "../lib/view";
 import { usePanelChange, usePanelVisible, useRefresh, useSessions } from "../lib/visible";
 
 // Code's whole list, drawn by this panel (lib/view.ts, layout.tsx; core CodeView list="replace"): not Code's
@@ -329,42 +329,45 @@ export function Fusion({ children }: { children: React.ReactNode }) {
       .map((to) => ({ id: `move-${to}`, label: t.status === "todo" ? "派出去" : `移到${LABEL[to]}`, icon: ICON[to], onSelect: () => onMove(to, { task: t.id }) })),
     { id: "drop", label: "放弃任务", icon: <Ban />, danger: true, onSelect: () => void act("drop", { id: t.id }).catch((e) => toast?.error?.(String(e?.message ?? e))) },
   ];
+  // A task's items with its conversation's agent: the pane's menus, and our own row's when it has no pane
+  const taskMenu = (t: Task, session: string) => {
+    const menu = agentMenu(session, byId[session]?.agent, async (id) => {
+      const next = (await act("switchAgent", { id: t.id, session, agent: id })) as Task;
+      if (next.session) showInCode(next.session, session);
+    });
+    return menu.children.length ? [...taskItems(t), menu] : taskItems(t);
+  };
+  // Which agent a conversation runs as (更换 agent...), in its menus
+  const agentMenu = (session: string, current: string | undefined, select: (id: string) => Promise<void>) => ({
+    id: "agent",
+    label: "更换 agent...",
+    icon: <Bot />,
+    disabled: switching.current.has(session),
+    children: agents
+      .filter((a) => a.id !== current)
+      .map((a) => ({
+        id: `agent-${a.id}`,
+        label: `换成 ${a.name}`,
+        icon: <core.AgentIcon agent={a.id} />,
+        onSelect: () => {
+          if (switching.current.has(session)) return;
+          switching.current.add(session);
+          void select(a.id).catch((e) => toast?.error?.(String(e?.message ?? e))).finally(() => switching.current.delete(session));
+        },
+      })),
+  });
   // The same moves in the pane's ⋯ menu and the row's right-click menu: the only way on a phone (no hover, no drag)
   useCodeRowMenu(({ session }) => {
     // The secretary's own conversation: which agent it runs as. Here, in its pane's ⋯ menu, rather than a dropdown on
     // its row in the list, where it took a third of the row for something changed once in a while (the person,
     // 2026-11-24). 设置 → 秘书 has it too, with the model and effort
     if (!session) return [];
-    const agentMenu = (current: string | undefined, select: (id: string) => Promise<void>) => ({
-      id: "agent",
-      label: "更换 agent...",
-      icon: <Bot />,
-      disabled: switching.current.has(session),
-      children: agents
-        .filter((a) => a.id !== current)
-        .map((a) => ({
-          id: `agent-${a.id}`,
-          label: `换成 ${a.name}`,
-          icon: <core.AgentIcon agent={a.id} />,
-          onSelect: () => {
-            if (switching.current.has(session)) return;
-            switching.current.add(session);
-            void select(a.id).catch((e) => toast?.error?.(String(e?.message ?? e))).finally(() => switching.current.delete(session));
-          },
-        })),
-    });
     if (isMain(session)) {
-      const menu = agentMenu(byId[session]?.agent || agent, pickAgent);
+      const menu = agentMenu(session, byId[session]?.agent || agent, pickAgent);
       return menu.children.length ? [menu] : [];
     }
     const t = taskOf.get(session);
-    if (t) {
-      const menu = agentMenu(byId[session]?.agent, async (id) => {
-        const next = await act("switchAgent", { id: t.id, session, agent: id }) as Task;
-        if (next.session) showInCode(next.session, session);
-      });
-      return menu.children.length ? [...taskItems(t), menu] : taskItems(t);
-    }
+    if (t) return taskMenu(t, session);
     return byId[session]?.tags?.panel ? [] : [{ id: "import", label: "导入为任务…", icon: <Download />, onSelect: () => setImporting(true) }];
   });
   // ⌘W on a task alone on screen: Gerdr closes nothing there (a task isn't closed, it moves), so it asks where the
@@ -436,7 +439,9 @@ export function Fusion({ children }: { children: React.ReactNode }) {
       agent={(t.session && byId[t.session]?.agent) || t.agent}
       running={t.session && byId[t.session] ? busy(t.session) : t.live?.status === "running"}
       where={repoLabel(t.repo)}
-      menu={taskItems(t)}
+      // No pane (its tab closed): the same menu as a row with one, Gerdr's items (标为已读, 在右侧分屏打开, 重命名会话)
+      // before ours. It had only 移到… / 放弃任务, its neighbours a whole menu more (the person, 2026-11-26)
+      menu={() => (t.session ? [...codeSessionMenu(t.session), ...taskMenu(t, t.session)] : taskItems(t))}
       onDetail={() => openDetail(t.id)}
     />
   );
@@ -890,7 +895,7 @@ function TaskRow({
   /** Its worker's turn is running: Gerdr's own session status (t.live, read by the panel's backend, lags it) */
   running: boolean;
   where: React.ReactNode;
-  menu: RowMenuItem[];
+  menu: () => RowMenuItem[];
   onDetail: () => void;
 }) {
   const you = needsPerson(t) && t.status === "running";
