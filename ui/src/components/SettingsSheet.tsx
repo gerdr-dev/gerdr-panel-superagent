@@ -12,7 +12,7 @@ import { Button } from "./Button";
 
 // Everything behind the board, in a shadcn Sheet over it: where each outside message went (去向: the Superagent's
 // log, local/superagent.ts), the values the code acts on (设置: who routes and works, repositories, merging, proactive
-// work; local/settings.ts), when the agents carry on without the user (放行: local/letgo.ts), how the user wants things done (流程: their skill, prose the agents read), what the agents learned about each
+// work; local/settings.ts), when the agents carry on without the user (Let it go: policies, local/letgo.ts), how the user wants things done (流程: their skill, prose the agents read), what the agents learned about each
 // repository (记忆: local/memory.ts), which outside
 // events come in (触发器: local/inbox.ts) and what runs by itself (定时任务: tasks.sync, waits.tick and the rest). Not pages of their own: the panel
 // is the board, these are what's behind it.
@@ -22,7 +22,7 @@ export type SettingsTab = "log" | "settings" | "letgo" | "flow" | "memory" | "sc
 export const TABS: { id: SettingsTab; label: string; icon: typeof Timer }[] = [
   { id: "log", label: "去向", icon: Inbox },
   { id: "settings", label: "设置", icon: SlidersHorizontal },
-  { id: "letgo", label: "放行", icon: FastForward },
+  { id: "letgo", label: "Let it go", icon: FastForward },
   { id: "flow", label: "流程", icon: ScrollText },
   { id: "memory", label: "记忆", icon: Brain },
   { id: "triggers", label: "触发器", icon: Zap },

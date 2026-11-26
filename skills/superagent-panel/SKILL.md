@@ -24,5 +24,5 @@ description: 用户的工作方式（面板带的默认做法，用户在「流�
 | [references/proactive.md](references/proactive.md) | Superagent 判断「不是找我的」事要不要主动接的时候 |
 | [references/memory.md](references/memory.md) | 我告诉你、纠正你、回答你的话里有对这个仓库以后都适用的（走不走 MR、谁来合、发布找谁批、默认开 worktree）：要不要记、怎么记 |
 | [references/mid-memory.md](references/mid-memory.md) | 等某个人、查出谁在推进一件事、我说我去问了谁、要把一条消息或一个人对上已有的事：中期记忆怎么记、怎么查 |
-| [references/letgo.md](references/letgo.md) | 放行的时候（秘书的消息开头有 [放行]，worker 的 `my_task` 里有 `letgo`）：哪些可以不问我自己做、哪些是红线 |
+| [references/letgo.md](references/letgo.md) | 我的策略（Let it go）让你不问我自己做的时候（秘书的消息开头有 [Let it go]，worker 的 `my_task` 里有 `letgo`）：工具怎么配合、照什么做 |
 | [references/human.md](references/human.md) | 有一步得我亲手做的时候（点授权、建账号、在后台开开关、交密码） |

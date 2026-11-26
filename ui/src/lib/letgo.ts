@@ -1,130 +1,135 @@
-// 放行 (Let it go): times when the agents carry on without the user — the secretary sends work out instead of putting it
-// in 待办, a worker decides instead of asking, messages go without the user looking first. DESIGN.md「放行」.
+// Let it go: policies for what the agents may do without the user, each in effect at its own times. DESIGN.md「Let it go」.
 //
-// Pure: the shape, the defaults and "which policy holds now", for both the 放行 page (it shows what holds right now) and
-// local/_letgo.ts (the code that follows it). Why it is shaped like this (the person, 2026-11-26): not one switch but
-// policies — each says what is let go and in which repositories (a complicated or unfamiliar one never is) — and a
-// week of times, each picking a policy (a light one in the day, the whole of it at night). Each policy has its own
-// repositories, its own people still looked at first (a leader) and its own note: nothing is special-cased outside them.
+// A policy is a whole set of rules, from letting a lot go to letting nothing go, and the times it is in effect are its
+// own (the person, 2026-11-26: "就是策略，然后再选一个时间段生效它"; someone may let some repositories go in the day
+// and nothing at all once off work). Each has its own times, gates, repositories, people still looked at first (a
+// leader), worker permission mode and note. Nothing is global, and there is no "as usual" policy: when none is in
+// effect nothing is let go — every gate closed, the careful default for whoever never set anything up.
+//
+// Pure: the shape, the defaults and "which policy is in effect now", for both the page (ui/src/settings/LetGo.tsx) and
+// local/_letgo.ts (the code that follows it).
 
-/** What can be let go. Each is one place where an agent would otherwise stop for the user. */
+/** What a policy can let go. Each is one place where an agent would otherwise stop for the user; closed = it does. */
 export type Gate =
-  /** An outside message the secretary takes as work: sent out, not a 待办 card. */
+  /** An outside message the secretary takes as work: sent out, not a 待办 card for the user to look over first. */
   | "inbox"
   /** The secretary unsure (take it or not, which repository): it decides by the policy's note, doesn't ask. */
   | "unsure"
   /** A worker's decision (ask_human with options): it picks, the pick is recorded, nobody is asked. */
   | "decide"
-  /** What a worker writes as the user (reply_message): sent at once, not a card to send. */
-  | "message"
-  /** A worker started in this time runs in the 放行 permission mode (no approval prompts). */
-  | "permission";
+  /** What a worker writes as the user (reply_message): sent at once, not a card for the user to send. */
+  | "message";
 
-export const GATES: Gate[] = ["inbox", "unsure", "decide", "message", "permission"];
+export const GATES: Gate[] = ["inbox", "unsure", "decide", "message"];
 
-/** One way of letting go: what is open, where, and what the agents are told on top. */
+/** "*" in a policy's repos: every repository. */
+export const ANY_REPO = "*";
+
+/** A time of the week: from–to on these days (0 = Sunday); to before from runs past midnight; 00:00–24:00 is all day. */
+export type Window = { days: number[]; from: string; to: string };
+
 export type Policy = {
   id: string;
   name: string;
+  /** When it is in effect. Empty: only when picked by hand. */
+  times: Window[];
   gates: Gate[];
-  /** Repositories it lets go (paths, as in 设置 → 仓库). Work elsewhere is as usual. `unsure` needs none. */
+  /** Repositories its gates hold in (paths as in 设置 → 仓库, or "*" for all). Work elsewhere: every gate closed. */
   repos: string[];
   /**
-   * People and conversations still looked at first under this policy (a leader, a big channel): a member id, a name
-   * as the source shows it, or a conversation / channel id. Writing to them stays a card for the user to send.
+   * People and conversations still looked at first under it (a leader, a big channel): a member id, a name as the
+   * source shows it, or a conversation / channel id. Writing to them stays a card for the user to send.
    */
   confirm: string[];
-  /** Said to the secretary and the workers while it holds ("有八成把握就直接派"), after the shared note (letgo.md). */
+  /** The permission mode a worker starts in, in its repositories, per engine. "": 设置 → 干活's. */
+  mode: { claude: string; codex: string };
+  /** Said to the secretary and the workers while it is in effect (red lines, "有八成把握就直接派"). */
   note: string;
 };
 
-/** A time of the week with a policy: from–to on these days (0 = Sunday); to before from runs past midnight. */
-export type Window = { days: number[]; from: string; to: string; policy: string };
+/** The policies, in order: where two are in effect at once, the one higher up wins. */
+export type LetGo = { policies: Policy[] };
 
-export type LetGo = {
-  policies: Policy[];
-  /** When which policy holds. The first that covers a moment wins. Empty: never by time (only by hand). */
-  times: Window[];
-  /** The permission mode a worker starts in while `permission` is open, per engine. */
-  mode: { claude: string; codex: string };
-};
+export const LETGO_DEFAULTS: LetGo = { policies: [] };
 
-export const LETGO_DEFAULTS: LetGo = {
-  policies: [
-    { id: "day", name: "部分放行", gates: ["inbox"], repos: [], confirm: [], note: "" },
-    { id: "night", name: "全放行", gates: [...GATES], repos: [], confirm: [], note: "" },
-  ],
-  times: [],
-  mode: { claude: "auto", codex: "auto" },
-};
+export const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
 
-const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+const HHMM = /^(([01]\d|2[0-3]):[0-5]\d|24:00)$/;
 const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 const strings = (v: unknown) => [...new Set((Array.isArray(v) ? v : []).map(str).filter(Boolean))];
 
-export function normalizeLetGo(raw: any): LetGo {
-  const d = LETGO_DEFAULTS;
+function windows(v: unknown): Window[] {
+  const out: Window[] = [];
+  for (const w of Array.isArray(v) ? (v as any[]) : []) {
+    const from = str(w?.from);
+    const to = str(w?.to);
+    if (!HHMM.test(from) || from === "24:00" || !HHMM.test(to) || from === to) continue;
+    const days = [...new Set((Array.isArray(w?.days) ? w.days : []).map(Number).filter((n: number) => Number.isInteger(n) && n >= 0 && n <= 6))].sort() as number[];
+    if (days.length) out.push({ days, from, to });
+  }
+  return out;
+}
+
+/**
+ * Whatever is stored → complete. `legacy`: the settings' old inboxWork / replies (before policies, 2026-11-26): someone
+ * who had "直接派出去" or "直接发" and no policies gets one in effect all the time doing just that, so nothing changes for them.
+ */
+export function normalizeLetGo(raw: any, legacy?: { inboxWork?: unknown; replies?: unknown }): LetGo {
   const r = raw && typeof raw === "object" ? raw : {};
+  let list: any[] = Array.isArray(r.policies) ? r.policies : [];
+  if (!Array.isArray(r.policies)) {
+    const gates = [...(legacy?.inboxWork === "dispatch" ? ["inbox"] : []), ...(legacy?.replies === "auto" ? ["message"] : [])];
+    if (gates.length) list = [{ id: "always", name: "一直", times: [{ days: ALL_DAYS, from: "00:00", to: "24:00" }], gates, repos: [ANY_REPO] }];
+  }
   const policies: Policy[] = [];
-  for (const p of Array.isArray(r.policies) ? r.policies : d.policies) {
+  for (const p of list) {
     const id = str(p?.id).replace(/[^\w-]/g, "") || `p${policies.length + 1}`;
     if (policies.some((x) => x.id === id)) continue;
     policies.push({
       id,
       name: str(p?.name) || id,
+      times: windows(p?.times),
       gates: GATES.filter((g) => Array.isArray(p?.gates) && p.gates.includes(g)),
       repos: strings(p?.repos).map((x) => x.replace(/(.)\/+$/, "$1")),
       confirm: strings(p?.confirm),
+      mode: { claude: str(p?.mode?.claude), codex: str(p?.mode?.codex) },
       note: typeof p?.note === "string" ? p.note.trim() : "",
     });
   }
-  const times: Window[] = [];
-  for (const w of Array.isArray(r.times) ? r.times : []) {
-    const from = str(w?.from);
-    const to = str(w?.to);
-    const policy = str(w?.policy);
-    if (!HHMM.test(from) || !HHMM.test(to) || from === to || !policies.some((p) => p.id === policy)) continue;
-    const days = [...new Set((Array.isArray(w?.days) ? w.days : []).map(Number).filter((n: number) => Number.isInteger(n) && n >= 0 && n <= 6))].sort() as number[];
-    if (!days.length) continue;
-    times.push({ days, from, to, policy });
-  }
-  return {
-    policies,
-    times,
-    mode: { claude: str(r.mode?.claude) || d.mode.claude, codex: str(r.mode?.codex) || d.mode.codex },
-  };
+  return { policies };
 }
 
 const mins = (hhmm: string) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3));
 
-/** The first window covering `at` (local time), if any. */
-export function windowAt(times: Window[], at: Date): Window | undefined {
+/** Whether a window covers `at` (local time). */
+export function covers(w: Window, at: Date): boolean {
   const now = at.getHours() * 60 + at.getMinutes();
   const day = at.getDay();
-  const yesterday = (day + 6) % 7;
-  return times.find((w) => {
-    const f = mins(w.from);
-    const t = mins(w.to);
-    // Same day, or one that started yesterday and runs past midnight
-    return f < t ? w.days.includes(day) && now >= f && now < t : (w.days.includes(day) && now >= f) || (w.days.includes(yesterday) && now < t);
-  });
+  const f = mins(w.from);
+  const t = mins(w.to);
+  // Same day, or one that started yesterday and runs past midnight
+  return f < t ? w.days.includes(day) && now >= f && now < t : (w.days.includes(day) && now >= f) || (w.days.includes((day + 6) % 7) && now < t);
 }
 
-/** By hand, until a time: overrides the times. policy "": not let go ("not tonight"). */
+/** The first policy one of whose windows covers `at`. */
+export function byTime(l: LetGo, at: Date): Policy | undefined {
+  return l.policies.find((p) => p.times.some((w) => covers(w, at)));
+}
+
+/** By hand, until a time: overrides the times. policy "": none (nothing let go). */
 export type Manual = { policy: string; until: number };
 
-/** The policy holding at `at` (none: as usual): by hand while that lasts, else by the times. */
+/** The policy in effect at `at` (none: nothing let go): by hand while that lasts, else by the times. */
 export function policyAt(l: LetGo, at: Date, manual?: Manual): { policy?: Policy; by: "manual" | "time" | "none"; until?: number } {
-  const byId = (id?: string) => l.policies.find((p) => p.id === id);
-  if (manual && manual.until > at.getTime()) return { policy: byId(manual.policy), by: "manual", until: manual.until };
-  const w = windowAt(l.times, at);
-  return { policy: byId(w?.policy), by: w ? "time" : "none", until: nextChange(l, at) };
+  if (manual && manual.until > at.getTime()) return { policy: l.policies.find((p) => p.id === manual.policy), by: "manual", until: manual.until };
+  const p = byTime(l, at);
+  return { policy: p, by: p ? "time" : "none", until: nextChange(l, at) };
 }
 
 /** When the policy by the times next changes (minute steps over the next 8 days); undefined: never. */
 export function nextChange(l: LetGo, at: Date): number | undefined {
-  if (!l.times.length) return undefined;
-  const of = (d: Date) => windowAt(l.times, d)?.policy ?? "";
+  if (!l.policies.some((p) => p.times.length)) return undefined;
+  const of = (d: Date) => byTime(l, d)?.id ?? "";
   const now = of(at);
   const t = new Date(at.getTime());
   t.setSeconds(0, 0);
@@ -135,19 +140,20 @@ export function nextChange(l: LetGo, at: Date): number | undefined {
   return undefined;
 }
 
-export const GATE_NAME: Record<Gate, string> = {
-  inbox: "外面来的活直接派出去，不进待办",
-  unsure: "秘书拿不准时按说明自己定，不问你",
-  decide: "worker 要你拍板时自己选，记成「替你定了」",
-  message: "以你的名义发的消息直接发，不出待发送卡片",
-  permission: "worker 用放行的权限模式开（不弹批准）",
+/** Each gate open / closed, in words for the page and the agents. */
+export const GATE_TEXT: Record<Gate, { label: string; open: string; closed: string }> = {
+  inbox: { label: "外面来的活", open: "直接派出去", closed: "放进待办等我过目" },
+  unsure: { label: "秘书拿不准时", open: "按说明自己定", closed: "问我" },
+  decide: { label: "worker 要拍板时", open: "自己选，记成「替你定了」", closed: "问我" },
+  message: { label: "以我的名义发消息", open: "直接发", closed: "出待发送卡片，我点了才发" },
 };
 
 export const DAY_NAMES = ["日", "一", "二", "三", "四", "五", "六"];
 
-/** One window's days and hours in words: "工作日 19:00–09:00（次日）". */
-export function windowText(w: Pick<Window, "days" | "from" | "to">): string {
+/** One window in words: "工作日 19:00–09:00（次日）", "每天 全天". */
+export function windowText(w: Window): string {
   const d = w.days.join();
   const days = w.days.length === 7 ? "每天" : d === "1,2,3,4,5" ? "工作日" : d === "0,6" ? "周末" : `周${w.days.map((x) => DAY_NAMES[x]).join("、")}`;
+  if (w.from === "00:00" && w.to === "24:00") return `${days} 全天`;
   return `${days} ${w.from}–${w.to}${mins(w.to) < mins(w.from) ? "（次日）" : ""}`;
 }

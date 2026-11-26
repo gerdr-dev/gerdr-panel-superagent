@@ -21,9 +21,9 @@
   其余的由秘书判断：接（建任务派出）、并进已有任务、停掉某个任务、不接。每条去了哪，看「去向」。
 - MR 有人盯：新的 review 意见、挂掉的流水线作为 MR 上的新消息交给 worker，按你的规则变基、合并。
 - 主动工作：不是找你的事（频道闲聊、告警）只按你在「流程 → proactive」里写的规则接；「设置 → 主动工作」默认只记录它本来会怎么做，看对了再放开。
-- 放行（Let it go）：你不在的时候让它们自己往下做。建几套策略，每套定放开哪些环节（活直接派、秘书和 worker 自己拍板、消息直接发、
-  worker 不弹批准）、放行哪些仓库、哪些人仍要你过目（比如 leader）、额外说明；再用时间表给每个时间段挑一套（白天部分放行、夜里全放行），
-  也能手动选一套到某个钟点。放行期间替你做的都记下来，结束时秘书写一份简报。
+- Let it go：秘书和 worker 什么时候可以不问你。建几套策略，每套是一整套规矩：在哪些时间生效、各环节放不放开（外面来的活直接派还是进待办、
+  拿不准和要拍板时自己定还是问你、以你的名义发消息直接发还是先给你过目）、管哪些仓库、哪些人仍要你过目（比如 leader）、worker 的权限模式、说明。
+  可以放开很多，也可以什么都不放（下班后一律问你）；没有策略在生效时什么都问你。也能临时换成某一套到某个钟点。没问你就做了的都记下来，换策略时秘书写简报。
 - 要你处理的标黄：组名、任务行、秘书那一行上的「等你 N」，点开列出是哪几件，点一件跳到那张卡片。
 - 秘书那一行的齿轮：「设置」是代码照着做的值（谁派活、谁干活、仓库列表、MR 合不合、主动工作开不开），默认都是手动的，按需改；
   「流程」是你用自己的话写的做事方式（`skills/superagent-panel/`：怎么交付、review 意见怎么处理、怎么挑仓库），agent 读它。
@@ -61,9 +61,9 @@
 用户找你，是要改这个面板：设置（`settings.get` / `settings.set`）、流程（`skills/superagent-panel/`）、触发器、定时任务（`schedules/`）、
 记忆，或者页面和函数的代码（先读 `DESIGN.md`）。怎么加东西，照 Gerdr 给每个面板的 AGENTS.md「Adding to this panel」。
 
-- 放行：策略、时间表、权限模式是设置里的 `letgo`（`settings.set '{"letgo":{"policies":[…],"times":[…]}}'`，一个列表整个替换；
-  形状见 `ui/src/lib/letgo.ts`）；共用的放行说明是流程里的 `superagent-panel/references/letgo.md`。现在是哪一套：`letgo.status`；
-  手动选一套到某个钟点：`letgo.set '{"policy":"night","until":"09:00"}'`（`"policy":""` 是今晚不放行，`{"clear":true}` 回到时间表）。
+- Let it go：策略在设置里的 `letgo.policies`（`settings.set '{"letgo":{"policies":[…]}}'`，整个列表替换；每套的形状见
+  `ui/src/lib/letgo.ts`：times、gates、repos（`"*"` 是所有仓库）、confirm、mode、note）。现在是哪一套：`letgo.status`；
+  临时换成一套到某个钟点：`letgo.set '{"policy":"p2","until":"09:00"}'`（`"policy":""` 是不用策略、什么都问，`{"clear":true}` 回到按时间）。
 - 流程是用户自己的副本：改一份写进 `user/skills/<同一路径>`（`playbooks.save`），不改仓库里的 `skills/`；
   用户自己的 skill 用 `playbooks.addSkill '{"name":"weekly-report","description":"什么时候读"}'`，
   在已有 skill 里加参考用 `playbooks.addReference`。`playbooks.read` 的 `base` 是改过的文件的默认内容。

@@ -1,1 +1,1 @@
-{ "fn": "letgo.tick", "every": "5m", "name": "放行：记下现在是哪一档，放行时间结束时让秘书写简报" }
+{ "fn": "letgo.tick", "every": "5m", "name": "Let it go：记下现在是哪套策略；换了策略时，把没问你就做了的交给秘书写简报" }

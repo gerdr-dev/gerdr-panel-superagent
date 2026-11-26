@@ -399,11 +399,8 @@ async function brief(ctx: Ctx): Promise<string> {
     `## 外面来的消息 [消息 cN]：一条命令给出这一批的决定\n` +
       `gerdr panel run superagent.decide '${ex({ decisions: [{ item: "c3", decision: "accept", title: "十几个字的标题", parts: [{ repo: "/绝对路径" }] }, { item: "c4", decision: "ignore", reason: "道谢" }] })}'\n\n` +
       `- attach：${ex({ item: "c5", decision: "attach", task: "t9", reason: "问的是 t9 那次建库" })}（reason 必填：为什么是这个任务，用户会在「去向」里看，也会回头问你；并进后这段对话之后的消息直接给 t9）；stop：${ex({ item: "c6", decision: "stop", task: "t9", reason: "…" })}\n` +
-      (workflow(ctx).inboxWork === "review"
-        ? `- decide 的 accept 会替你建任务，但**不派出去**：放进任务列表的「待办」，用户看过、改好再派（他的设置）。parts 照常写，会成为任务上的仓库和 agent；拆成几份就是几个任务。` +
-          `记下这条消息的去向；回不回原对话、什么时候回，按他的设置自动处理，你不用另外回。` +
-          `放行的时候（消息开头有 [放行] 那一段），parts 的仓库都在放行范围里的会直接派出去，decide 的结果会写明。\n\n`
-        : `- decide 会替你建任务、派出去、记下这条消息的去向；回不回原对话按用户的设置自动处理。\n`) +
+      `- decide 的 accept 会替你建任务；派不派出去看用户当前的策略（Let it go）：没放开「外面来的活」或者仓库不在策略里，就放进任务列表的「待办」等他看过、改好再派，parts 照常写，会成为任务上的仓库和 agent，拆成几份就是几个任务；放开了就直接派出去。decide 的结果会写明是哪种。` +
+        `记下这条消息的去向；回不回原对话、什么时候回，按他的设置自动处理，你不用另外回。\n\n` +
       `- 要先问用户才定得了的 [消息 cN]（排期、该谁做、缺信息）：先 ask_human 问他（只写在回复里他看不到），再带上它返回的 sN 给这条 ${ex({ item: "c7", decision: "wait", ask: "s8", reason: "问用户：要不要估排期、哪个仓库" })}` +
       `（几条消息为同一件事等他，就共用一个 sN）。它在「去向」里标着「等你」，不会当成没判断成；没有开着的问题卡，wait 会被拒。一轮里什么决定都没给的，标着没判断成。` +
       `两种都一样：用户答了以后照样用 superagent.decide 给这条 cN 决定：` +
@@ -552,7 +549,7 @@ export async function toMain(ctx: Ctx, blocks: string[], why: Why = "route", att
   void why;
   // Questions of its own the user ignored since: said first, so it neither waits on them nor asks again
   const lead = secIgnoredLead(ctx);
-  // 放行: said on every message while it lasts (the level changes by the clock; its system prompt is written once)
+  // Let it go: the policy in effect, on every message (it changes by the clock; its system prompt is written once)
   const body = [agentText(ctx, "secretary"), lead, ...blocks].filter(Boolean).join("\n\n");
   const { id, changed, hash: h } = await ensureMain(ctx, body, attachments, fold);
   if (id.fresh) return id.id;

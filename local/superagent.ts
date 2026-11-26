@@ -256,9 +256,9 @@ async function accept(ctx: Ctx, it: Item, title: string | undefined, parts: Part
   const scope = it.inferred && rule ? `\n\n这件事没人找你做，是按主动工作的规则接的：「${rule}」。只做这条规则允许的，超出的用 ask_human 问用户。` : "";
   // Taken under a proactive rule nobody asked: no one to tell. Otherwise when 设置 → 回复对方 says
   const ack = it.inferred ? "never" : w.ack;
-  // 放行 (inbox): sent out instead of a 待办 card, when every part is in a repository that may be let go
-  const letgo = w.inboxWork === "review" && parts.length > 0 && parts.every((p) => opens(ctx, "inbox", p.repo));
-  const review = w.inboxWork === "review" && !letgo;
+  // Let it go (inbox): sent out instead of a 待办 card when the policy in effect lets go every part's repository
+  const review = !(parts.length > 0 && parts.every((p) => opens(ctx, "inbox", p.repo)));
+  const letgo = !review;
   const [first, ...rest] = parts;
   const split = parts.length > 1;
   const named = (split ? first?.title : undefined) || title;
@@ -294,10 +294,10 @@ async function accept(ctx: Ctx, it: Item, title: string | undefined, parts: Part
     settle({ state: "accepted", tasks: ids, rule, reason: undefined });
     throw new Error(`建了任务 ${t.id}，但没派出去：${err?.message ?? err}。改了用 tasks.dispatch {"id":"${t.id}","parts":[…]} 再派`);
   }
-  settle({ state: "accepted", tasks: ids, rule, reason: letgo ? "放行中：直接派出去了" : undefined });
+  settle({ state: "accepted", tasks: ids, rule, reason: undefined });
   if (ack !== "never") ackOrigin(ctx, find(load(ctx).store, t.id));
   if (letgo) logDone(ctx, { kind: "dispatched", task: ids.join("、"), text: `${e.who ? `${e.who} 的` : ""}${firstLine(text) || e.title || "消息"}` });
-  return { item: it.id, tasks: ids, ...(letgo ? { note: "放行中：没进待办，直接派出去了" } : {}) };
+  return { item: it.id, tasks: ids, ...(letgo ? { note: "当前策略放开了外面来的活：没进待办，直接派出去了" } : {}) };
 }
 
 /** 照做: what the main session would have done with an observed event, done now by the user's say-so. { id } */

@@ -1,5 +1,5 @@
 import { tellInbox } from "./_inbox";
-import { opens } from "./_letgo";
+import { modeFor } from "./_letgo";
 import { tellBadge } from "./_badge";
 import { DATA, skillFile } from "./_user";
 import { workflow } from "./_config";
@@ -795,13 +795,12 @@ function workerOf(ctx: Ctx, t: Task, input: { agent?: string; model?: string; ef
   const w = workflow(ctx).worker;
   const agent = input.agent || t.agent || w.agent;
   const same = agent === w.agent;
-  // 放行 (permission): started while the policy lets this repository go, it runs in 放行's mode for its engine. Only at
-  // the start: a session's mode isn't changed under it, so one started before keeps its own
-  if (!input.mode && opens(ctx, "permission", repo ?? t.repo)) {
+  // Let it go: the policy in effect may give workers in its repositories their own permission mode. Only at the start:
+  // a session's mode isn't changed under it, so one started before keeps its own
+  if (!input.mode) {
     // A role runs on its base engine; no agent named is Gerdr's default, taken as claude (codex users name codex)
     const info = agent ? ctx.sessions.agents().find((a) => a.id === agent) : undefined;
-    const engine = info?.base || agent || "claude";
-    const m = workflow(ctx).letgo.mode[engine as "claude" | "codex"];
+    const m = modeFor(ctx, info?.base || agent || "claude", repo ?? t.repo);
     if (m)
       return {
         agent: agent || undefined,

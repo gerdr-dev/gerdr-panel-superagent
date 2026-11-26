@@ -34,12 +34,6 @@ export type Settings = {
   /** Work nobody asked for: off, observe (judged and recorded, not done: dsh's observe mode) or on. */
   proactive: "off" | "observe" | "on";
   /**
-   * An outside message the secretary takes as work: "review" = a 待办 card (a card per part) the user looks at, edits
-   * and sends out; "dispatch" = sent out right away (2026-11-11: the user wants to see it first, and fix what the
-   * secretary made of it).
-   */
-  inboxWork: "review" | "dispatch";
-  /**
    * A message in a conversation a task follows: "worker" = straight to that task's worker; "secretary" = judged first,
    * so it can be left alone or go to another task.
    */
@@ -48,11 +42,6 @@ export type Settings = {
   ack: "accept" | "dispatch" | "never";
   /** What they hear: {id} and {title} are the task's. */
   ackText: string;
-  /**
-   * What a worker writes to the people in a chat its task follows (board.ts reply_message): "review" = a card the user
-   * sends or lets go (local/outbox.ts), the worker carrying on without hearing which; "auto" = sent right away.
-   */
-  replies: "review" | "auto";
   /**
    * The secretary's conversation is compacted (schedules/compact.json, hourly by default, once it has sat idle an
    * hour) when its context holds at least this many tokens. 0 = whenever the schedule runs and something was said
@@ -77,8 +66,9 @@ export type Settings = {
    */
   undoSeconds: number;
   /**
-   * 放行 (Let it go, lib/letgo.ts): when, where and for whom the agents carry on without the user. inboxWork and
-   * replies above are what holds outside it (平时); the 放行 page edits all of them together.
+   * Let it go (lib/letgo.ts): the policies for what the agents may do without the user, and the times that pick one.
+   * Whether outside work goes to 待办 and whether a worker's messages wait for the user are gates of a policy now
+   * (they were inboxWork / replies here until 2026-11-26).
    */
   letgo: LetGo;
 };
@@ -92,11 +82,9 @@ export const DEFAULTS: Settings = {
   worker: { agent: "", model: "", effort: "", mode: "" },
   repos: [],
   proactive: "observe",
-  inboxWork: "review",
   followUps: "worker",
   ack: "dispatch",
   ackText: ACK_TEXT,
-  replies: "review",
   compactTokens: 80_000,
   workerCompact: { percent: 60, idleMinutes: 30 },
   archiveDays: 14,
@@ -126,11 +114,9 @@ export function normalize(raw: any): Settings {
     worker: who(r.worker, d.worker),
     repos,
     proactive: oneOf(r.proactive, ["off", "observe", "on"] as const, d.proactive),
-    inboxWork: oneOf(r.inboxWork, ["review", "dispatch"] as const, d.inboxWork),
     followUps: oneOf(r.followUps, ["worker", "secretary"] as const, d.followUps),
     ack: oneOf(r.ack, ["accept", "dispatch", "never"] as const, d.ack),
     ackText: str(r.ackText, "") || d.ackText,
-    replies: oneOf(r.replies, ["review", "auto"] as const, d.replies),
     compactTokens: Number.isFinite(Number(r.compactTokens)) && Number(r.compactTokens) >= 0 && r.compactTokens !== "" && r.compactTokens != null ? Math.round(Number(r.compactTokens)) : d.compactTokens,
     workerCompact: {
       percent: Math.min(100, count(r.workerCompact?.percent, d.workerCompact.percent)),
@@ -138,6 +124,6 @@ export function normalize(raw: any): Settings {
     },
     archiveDays: count(r.archiveDays, d.archiveDays),
     undoSeconds: Math.min(30, count(r.undoSeconds, d.undoSeconds)),
-    letgo: normalizeLetGo(r.letgo),
+    letgo: normalizeLetGo(r.letgo, { inboxWork: r.inboxWork, replies: r.replies }),
   };
 }

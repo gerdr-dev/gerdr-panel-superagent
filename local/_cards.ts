@@ -22,7 +22,7 @@ const KICKER: Record<EventKind, string> = {
   remember: "记住了",
   message: "发给你",
   reply: "发出去了",
-  decided: "放行中替你定了",
+  decided: "按策略替你定了",
 };
 
 const LOUD: Record<EventKind, "card" | "line"> = {

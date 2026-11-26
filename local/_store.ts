@@ -158,7 +158,7 @@ export type Task = {
    * "review": each waits as a card for the user to send or not (local/outbox.ts). The worker never hears which.
    */
   outbox?: Outgoing[];
-  /** What its worker decided itself while let go (放行, board.ts ask_human with pick): for the user to see and overturn. */
+  /** What its worker decided itself because the policy in effect let it (Let it go, board.ts ask_human with pick): for the user to see and overturn. */
   decided?: { title: string; options: string[]; pick: string; why?: string; at: number }[];
   /**
    * A member of requirement `team` (the task whose card the user sees; its own worker is the lead, 负责人): it works

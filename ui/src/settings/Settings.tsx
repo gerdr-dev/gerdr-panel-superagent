@@ -159,7 +159,7 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
 
           <Section
             title="外面来的消息"
-            note="触发器收进来、找你的消息（私信、@ 你）。闲聊、道谢这类秘书不接，只记在「去向」里。像是活的进不进待办、worker 回话先不先给你过目，在「放行」里：平时怎样、放行时怎样放在一起。"
+            note="触发器收进来、找你的消息（私信、@ 你）。闲聊、道谢这类秘书不接，只记在「去向」里。像是活的进不进待办、worker 回话要不要先给你过目，在「Let it go」的策略里定。"
           >
             <Field
               label="任务对话里的后续"
