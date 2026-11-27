@@ -179,14 +179,13 @@ function Row({ s, info, onSaved }: { s: Source; info?: TriggerInfo; onSaved: () 
   const allowNow = (s.allow ?? []).join(", ");
   const [deny, setDeny] = useState((s.deny ?? []).join(", "));
   const denyNow = (s.deny ?? []).join(", ");
-  const [inferred, setInferred] = useState(!!s.inferred);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const save = async (enabled: boolean) => {
     setBusy(true);
     setErr("");
     try {
-      await run("inbox.setSource", { on: s.on, enabled, key, title: s.title, allow, deny, inferred });
+      await run("inbox.setSource", { on: s.on, enabled, key, title: s.title, allow, deny });
       onSaved();
     } catch (e: any) {
       setErr(String(e.message || e));
@@ -212,6 +211,7 @@ function Row({ s, info, onSaved }: { s: Source; info?: TriggerInfo; onSaved: () 
           {s.description && <p className="mt-1 text-[12px] text-muted-foreground">{s.description}</p>}
           {/* Every source picked here goes through inbox.onEvent (local/inbox.ts setSource) */}
           <Dest fn="inbox.onEvent" />
+          {s.inferred && <p className="mt-1 text-[12px] text-muted-foreground">旧触发器只接已有任务的后续消息。</p>}
         </div>
         {s.by ? (
           // Taken by one of the panel's own triggers already: a second one would take each event twice
@@ -232,12 +232,7 @@ function Row({ s, info, onSaved }: { s: Source; info?: TriggerInfo; onSaved: () 
           <input className="h-7 w-56 rounded-md border bg-background px-2 font-mono text-[12px]" value={allow} placeholder="比如 U012ABCD" onChange={(e) => setAllow(e.target.value)} />
           <span className="text-muted-foreground">不收这些人（同上，在「只收」之后再排除）</span>
           <input className="h-7 w-56 rounded-md border bg-background px-2 font-mono text-[12px]" value={deny} placeholder="比如群发机器人的 ID" onChange={(e) => setDeny(e.target.value)} />
-          <span className="text-muted-foreground">这些消息是</span>
-          <select className="h-7 rounded-md border bg-background px-1.5 text-[12px]" value={inferred ? "inferred" : "explicit"} onChange={(e) => setInferred(e.target.value === "inferred")}>
-            <option value="explicit">找我的（私信、@ 我）</option>
-            <option value="inferred">不是找我的（只按主动工作的规则接）</option>
-          </select>
-          {(key !== (s.key ?? "") || allow !== allowNow || deny !== denyNow || inferred !== !!s.inferred) && (
+          {(key !== (s.key ?? "") || allow !== allowNow || deny !== denyNow) && (
             <Button disabled={busy} onClick={() => save(true)}>
               保存
             </Button>

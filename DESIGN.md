@@ -43,6 +43,10 @@
 - **列表从上到下**：秘书那一行（状态点、「等你 N」、齿轮）；待办、进行中（等你的排最前、标黄）、待验收、已完成（最近 30 个），
   一行一个任务，行下面是它 worker 最新的一段话；「其他」放不是对话的窗格（终端、文件、网页）；最底下「从 Code 导入」。
   待办排在最前（2026-11-25 用户要的）。⌘1–9、⇧⌘] / ⇧⌘[ 按这份列表的顺序走（`useCodeOrder`），不按 Code 的 Tab。
+- **Code and the task sidebar both load a snapshot and follow changes over Gerdr's socket.** Superagent keeps the tasks
+  in its own files. The sidebar reads only the changed parts and takes live worker and helper changes from Code's session
+  summaries. Task status changes update the affected rows locally while the write finishes. The panel's session triggers
+  and scheduled sync still do the inbox, archive and worker maintenance separately.
 - **点一行就是 worker 的对话，在 Code 的窗格里**（`showInCode`）；从通知、收件箱点进来也一样（`onShowSession`）。
   窗格标题上是任务编号和状态（点它可以移）、「等你」（列出等用户的几件，点一件跳到对话里那张卡片，`jumpInCode`）。
   没派出去的任务没有对话，点开是原来看板上的那张卡（`TaskDetail`，盖在整个窗口上）；待办、进行中的 + 是新任务。
@@ -771,11 +775,7 @@ t123（PortAI 计费税率，portai 仓库）要在新后台 portai-console 加�
   和 Slack 的追问走同一条路：「去向」里看得到，不归它的也能 `hand_back`。
   变基、合并、合并之后的事都归 worker（照 `mr.md`）。
   **被否掉的做法：MR 的来源自己 `sessions.send` 给 worker。** 另一条路：看不到记录，worker 也交不回。
-- **主动工作**（dsh 的 inferred + observe）：触发器里把一个来源设成「不是找我的」（频道闲聊、告警），它的事件只按
-  `skills/superagent-panel/references/proactive.md` 里用户自己写的规则接，接的时候写明是哪条规则，worker 只做那条允许的，
-  也不在原对话里说「收到」（没人在等）。模式在「设置 → 主动工作」：关 / 只记录（默认）/ 照做。只记录时，决定记成
-  「本来会接」，连同它会怎么派；「去向」里点「照做」就照那样建任务。新规则先只记录、看着对了再放开，dsh 的建议。
-  `triggers/mr.json` 也标成「不是找我的」：没人跟的 MR 上的动静，没有规则就不接。
+- **旧触发器**：以前标成「不是找我的」的来源，仍然只接已有任务的后续消息。「去向」保留以前的判断记录。
 - **要人管的就地突出，不另开一页**：现在是列表里的黄色「等你」：进行中组名上的「等你 N」、等用户的任务排最前、
   行上和窗格标题上的「等你」、秘书那一行的「等你 N」（它在问你的）。正常时什么都不显示（dsh：健康的状态不占地方）。
   看板时期另有：「等你」一列整列高亮、没派出去的卡片描黄边，Superagent 自己的问题（调度会话在问你 / 出错、没判断成的消息、
@@ -789,10 +789,10 @@ t123（PortAI 计费税率，portai 仓库）要在新后台 portai-console 加�
 用户的选择分两种，按**谁照着它做**分：
 
 - **只有代码照着做的值**是「设置」（`user/settings.json`，结构和默认值在 `ui/src/lib/settings.ts`）：调度会话和 worker
-  用哪个 agent / 模型、仓库列表、GitLab 地址、主动工作的模式。
+  用哪个 agent / 模型、仓库列表、GitLab 地址。
   有类型、能校验；为什么这么选写在页面上每一项的说明里。只存和默认不同的那些，以后改了默认值，没选过的人能拿到。
 - **agent 拿来判断的**是「流程」，用户自己的话（`skills/superagent-panel/`）：怎么交付、review 意见怎么处理、怎么挑仓库、
-  主动工作的规则、要用户亲手做的事怎么交给他。
+  要用户亲手做的事怎么交给他。
 - **两边都要的**放在设置里，只有一份，代码把它写进给 agent 的消息：调度会话的第一条消息里有仓库（带说明）和 worker 的默认模型。
   agent 不读设置文件。
 - **某个仓库的具体情况**是「记忆」（`user/memory/<仓库文件夹名>.md`，对所有仓库成立的在 `_general.md`，`local/memory.ts`）：

@@ -7,7 +7,6 @@
 // trigger's `allow`), a task following its conversation, or the main session's judgement.
 
 import { load } from "./_store";
-import { workflow } from "./_config";
 import { compact, evaluate, followUp, followWhy, record, routeOf, state } from "./_main";
 import { onAssignEvent } from "./assign";
 
@@ -135,18 +134,16 @@ export function sources(input: unknown, ctx: Ctx) {
 }
 
 /**
- * Turns a source on (writes its trigger) or off (removes it): { on, enabled, key?, title?, allow?, inferred? }.
- * `inferred`: its events aren't someone asking the agent (a channel's chatter, alerts): only the proactive rules take
- * them. `allow`: who may
- * ask for work through it, as the source names them (event.actor: a Slack member id; a display name works too).
+ * Turns a source on (writes its trigger) or off (removes it): { on, enabled, key?, title?, allow?, deny? }.
+ * `allow`: who may ask for work through it, as the source names them (event.actor: a Slack member id or display name).
  * Empty = whoever the source lets through (the Slack add-on has its own list). `deny`: who never may, named the same
  * way, checked after `allow` (2026-11-11: most let through, a few bots or people kept out).
  */
-export function setSource(input: { on: string; enabled: boolean; key?: string; title?: string; allow?: string[] | string; deny?: string[] | string; inferred?: boolean }, ctx: Ctx) {
+export function setSource(input: { on: string; enabled: boolean; key?: string; title?: string; allow?: string[] | string; deny?: string[] | string }, ctx: Ctx) {
   if (!/^[A-Za-z0-9._*-]+\/[A-Za-z0-9._*-]+$/.test(input?.on ?? "")) throw new Error(`事件写成 来源/类型：${input?.on}`);
-  const p = fileOf(input.on);
+  const cur = ours(ctx)[input.on];
+  const p = cur?.path ?? fileOf(input.on);
   if (!input.enabled) {
-    const cur = ours(ctx)[input.on];
     if (cur) ctx.fs.trash(cur.path);
     return { on: input.on, enabled: false };
   }
@@ -158,20 +155,19 @@ export function setSource(input: { on: string; enabled: boolean; key?: string; t
   const extra: Record<string, unknown> = {};
   if (allow.length) extra.allow = allow;
   if (deny.length) extra.deny = deny;
-  if (input.inferred) extra.inferred = true;
+  // Editing an old trigger must preserve its intake restriction.
+  if (cur?.inferred) extra.inferred = true;
   if (Object.keys(extra).length) t.input = extra;
   ctx.fs.write(p, JSON.stringify(t, null, 2) + "\n");
-  return { on: input.on, enabled: true, key: t.key, allow, deny, inferred: !!input.inferred };
+  return { on: input.on, enabled: true, key: t.key, allow, deny, inferred: cur?.inferred };
 }
 
 /**
  * A trigger's run (dsh-superagent's flow, _main.ts). A message in a conversation some task follows goes to that
  * task's worker first, whoever sent it: it's context for work already allowed, and grants nothing new (dsh: a
  * Subscription bypasses the gate). Anything else passes the gate (`allow` / `deny` in the trigger file: who may ask
- * through this source) and goes to the main session, which decides whether it's work. A trigger marked `inferred` (its
- * events aren't addressed to the agent: a channel's chatter, alerts, an MR nobody follows) is judged only by the
- * proactive rules, and not at all while proactive work is off. Every event is logged with where it went (去向). The
- * same event twice (a source re-sending) is handled once.
+ * through this source) and goes to the main session, which decides whether it's work. Old triggers marked `inferred`
+ * only handle followed conversations. Every event is logged in 去向, and a repeated event is handled once.
  */
 export async function onEvent(input: { event: GerdrEvent; trigger?: string; allow?: string[]; deny?: string[]; inferred?: boolean; off?: boolean }, ctx: Ctx) {
   const e = input?.event;
@@ -209,12 +205,11 @@ export async function onEvent(input: { event: GerdrEvent; trigger?: string; allo
     const it = record(ctx, ev, { state: "filtered", reason: `${ev.who || ev.actor} 在「不收这些人」里` });
     return { item: it.id, filtered: true };
   }
-  const inferred = !!input.inferred;
-  if (inferred && workflow(ctx).proactive === "off") {
-    const it = record(ctx, ev, { state: "filtered", inferred, reason: "不是找你的，主动工作关着（流程 → 主动工作）" });
+  if (input.inferred) {
+    const it = record(ctx, ev, { state: "filtered", inferred: true, reason: "旧触发器只接已有任务的后续消息" });
     return { item: it.id, filtered: true };
   }
-  const it = record(ctx, ev, { state: "pending", inferred: inferred || undefined, sentAt: Date.now() });
+  const it = record(ctx, ev, { state: "pending", sentAt: Date.now() });
   await evaluate(ctx, [it.id], store.tasks);
   return { item: it.id, pending: true };
 }

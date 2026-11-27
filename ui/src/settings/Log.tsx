@@ -1,4 +1,4 @@
-import { ExternalLink, Link2Off, Loader2, Play, RotateCcw, Send, X } from "lucide-react";
+import { ExternalLink, Link2Off, Loader2, RotateCcw, Send, X } from "lucide-react";
 import clsx from "clsx";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "../components/Button";
@@ -65,7 +65,7 @@ export default function Log({ onTask }: { onTask: (id: string) => void }) {
           {view === "items" ? (
             <>
               外面来的每条消息去了哪。已有任务的对话里的后续直接交给那个任务；其余的由 Superagent 判断是不是活、派给谁。
-              「不是找你的」只按主动工作的规则接；规则还在「只记录」时，记成「本来会接」，看对了点「照做」。你自己在任务列表里建的任务不在这里。
+              你自己在任务列表里建的任务不在这里。
             </>
           ) : (
             <>哪段对话有任务跟着、那里下一条消息会给谁。跟着的任务会直接收到那里的消息，不经过秘书；跟错了点「解绑」，之后那里的消息先给秘书判断。</>
@@ -86,7 +86,7 @@ function Items({ onTask }: { onTask: (id: string) => void }) {
       (e) => setErr(String(e.message || e)),
     );
   useRefresh(load, [usePanelChange("user/data")], { poll: 10_000 });
-  const top = (x: Item) => x.state === "waiting" || x.state === "unavailable" || x.state === "observed";
+  const top = (x: Item) => x.state === "waiting" || x.state === "unavailable";
   const first = (items ?? []).filter(top);
   const rest = (items ?? []).filter((x) => !top(x));
   return (
@@ -113,8 +113,7 @@ function Row({ x, onTask, onRetried }: { x: Item; onTask: (id: string) => void; 
   const [hint, setHint] = useState("");
   const st = STATE[x.state] ?? { label: x.state, tone: "" };
   const e = x.event;
-  const again = x.state === "ignored" || x.state === "filtered" || x.state === "unavailable";
-  const doIt = x.state === "observed" && !!x.would;
+  const again = !x.inferred && (x.state === "ignored" || x.state === "filtered" || x.state === "unavailable");
   const close = x.state === "pending" || x.state === "unavailable" || x.state === "waiting";
   const call = async (fn: string, input: unknown) => {
     setBusy(true);
@@ -196,14 +195,8 @@ function Row({ x, onTask, onRetried }: { x: Item; onTask: (id: string) => void; 
           </div>
         </div>
       )}
-      {!asking && (again || doIt || close || err) && (
+      {!asking && (again || close || err) && (
         <div className="flex items-center gap-2">
-          {doIt && (
-            <Button disabled={busy} onClick={() => call("superagent.execute", { id: x.id })} title="照它判断的建任务、派出去">
-              {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
-              照做
-            </Button>
-          )}
           {again && (
             <Button variant="outline" disabled={busy} onClick={() => setAsking(true)} title="交给 Superagent 重新判断，可以附一句意见">
               <RotateCcw className="size-3.5" />

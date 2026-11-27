@@ -71,7 +71,7 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
         <div>
           <h1 className="text-[22px] font-semibold tracking-tight">设置</h1>
           <p className="mt-1 text-[13px] text-muted-foreground">
-            代码照着做的值：谁来派活、谁来干活、有哪些仓库、主动工作开不开。只存在你这里，不会随面板分享出去。
+            代码照着做的值：谁来派活、谁来干活、有哪些仓库。只存在你这里，不会随面板分享出去。
             怎么做事（怎么交付、review 意见怎么处理、怎么挑仓库）是你用自己的话写的，在
             <button className="mx-0.5 text-brand hover:underline" onClick={onFlow}>
               流程
@@ -182,18 +182,6 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
                 <input className={input} value={s.ackText} placeholder={ACK_TEXT} onChange={(e) => put("ackText", e.target.value)} />
               </Field>
             )}
-          </Section>
-
-          <Section
-            title="主动工作"
-            note="不是找你的事（触发器里设成「不是找我的」的来源：频道闲聊、告警、没人跟的 MR）。照「流程 → proactive」里你写的规则判断；新加一条规则时，先改回「只记录」看几天。"
-          >
-            <Field
-              label="模式"
-              hint={{ off: "这类事一律不看", observe: "照规则判断但不做：「去向」里看得到本来会接哪些、怎么派，看对了点「照做」", on: "符合规则的直接接了派出去" }[s.proactive]}
-            >
-              <Choice value={s.proactive} options={[["off", "关"], ["observe", "只记录"], ["on", "照做"]]} onChange={(v) => put("proactive", v)} />
-            </Field>
           </Section>
         </>
       )}

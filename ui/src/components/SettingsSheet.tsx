@@ -14,7 +14,7 @@ import LetGo from "../settings/LetGo";
 import { Button } from "./Button";
 
 // Everything behind the board, in a shadcn Sheet over it: where each outside message went (去向: the Superagent's
-// log, local/superagent.ts), the values the code acts on (设置: who routes and works, repositories, merging, proactive
+// log, local/superagent.ts), the values the code acts on (设置: who routes and works, repositories, merging,
 // work; local/settings.ts), when the agents carry on without the user (Let it go: policies, local/letgo.ts), how the user wants things done (流程: their skill, prose the agents read), what the agents learned about each
 // repository (记忆: local/memory.ts), which outside
 // events come in (触发器: local/inbox.ts) and what runs by itself (定时任务: tasks.sync, waits.tick and the rest). Not pages of their own: the panel

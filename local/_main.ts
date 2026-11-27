@@ -81,15 +81,8 @@ export type Item = {
   at: number;
   event: Ev;
   state: "filtered" | "delivered" | "pending" | "accepted" | "attached" | "stopped" | "ignored" | "unavailable" | "observed" | "waiting";
-  /**
-   * Not addressed to the agent (the trigger says so: a channel message without @, an alert, an MR nobody follows):
-   * dsh's inferred strength. Taken only under a rule from skills/…/proactive.md, and in observe mode only recorded.
-   */
+  /** Retired trigger marker, kept on intake records so they cannot be dispatched. */
   inferred?: boolean;
-  /** The proactive rule it was (or would have been) taken under. */
-  rule?: string;
-  /** Observe mode: what accepting it would have been, so 去向's 照做 can do exactly that. */
-  would?: { title?: string; parts: unknown[]; team?: boolean };
   reason?: string;
   tasks?: string[];
   /** Workers that gave a delivered message back (not their task's business), with why. */
@@ -435,7 +428,6 @@ async function brief(ctx: Ctx): Promise<string> {
     rules && `## 怎么派（用户自己写的规则）\n${rules}`,
     forRouter(ctx),
     textOf(ctx, MIDMEM).replace(/^## /gm, "### ").replace(/^# /, "## "),
-    proactiveText(ctx),
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -446,7 +438,6 @@ const SECRETARY = "superagent-panel/references/secretary.md";
 const ROUTING = "superagent-panel/references/routing.md";
 const DISPATCH = "superagent-panel/references/dispatch.md";
 const COMPACT = "superagent-panel/references/compact.md";
-const PROACTIVE = "superagent-panel/references/proactive.md";
 const MIDMEM = "superagent-panel/references/mid-memory.md";
 
 /**
@@ -502,18 +493,6 @@ function talkText(ctx: Ctx) {
   ]
     .filter(Boolean)
     .join("\n\n");
-}
-
-/** The proactive rules for the brief, when proactive work is on at all. */
-function proactiveText(ctx: Ctx) {
-  const mode = workflow(ctx).proactive;
-  if (mode === "off") return "";
-  const rules = textOf(ctx, PROACTIVE);
-  return (
-    `## 不是找你的事：主动工作（用户自己写的规则）\n` +
-    `标着「不是找你的」的 [消息 cN]：只有符合下面某条规则才 accept，并且在决定里写 "rule"（是哪一条，用规则原话的开头）；不符合任何一条就 ignore（reason 写「没有对应的规则」），不回复。` +
-    `${mode === "observe" ? "现在是「只记录」：你照常给出决定，系统只记下来不执行。" : ""}\n\n${rules || "（还没写规则：一律 ignore）"}`
-  );
 }
 
 function oneLine(text: string, max: number) {
@@ -733,7 +712,7 @@ function eventBlock(ctx: Ctx, it: Item, tasks: Task[], hint?: string) {
   // No list of recent tasks any more (2026-11-12): it hung under every message, a dozen lines under a one-line "ok";
   // the secretary looks tasks up when a message is about one (dispatch: attach / stop)
   return [
-    `[消息 ${it.id}]${it.inferred ? "（不是找你的：只按主动工作的规则判断）" : ""} ${e.source}/${e.kind}${e.place ? ` · ${e.place}` : ""}${who(e) ? ` · ${who(e)}` : ""}`,
+    `[消息 ${it.id}] ${e.source}/${e.kind}${e.place ? ` · ${e.place}` : ""}${who(e) ? ` · ${who(e)}` : ""}`,
     e.context?.length ? `这段对话之前说的（「用户本人」是用户自己说的，判断这条是在回什么）：\n${contextLines(e)}\n\n这一条：` : "",
     e.text || e.title || "",
     e.files?.length ? `附件：\n${e.files.map((f) => `- ${f.name}：${f.path}`).join("\n")}` : "",

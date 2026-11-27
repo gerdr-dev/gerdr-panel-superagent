@@ -1,5 +1,5 @@
 // The panel's settings: values the code acts on (who runs the router and the workers, the repositories, which GitLab
-// the MR watcher asks, whether proactive work runs). One file for both sides: the 设置 page edits with it, local/_config.ts reads
+// the MR watcher asks). One file for both sides: the 设置 page edits with it, local/_config.ts reads
 // with it. What a person stores (user/settings.json) is only what they set; everything else is the default here,
 // the careful one, so a later default reaches whoever never chose. How MRs are merged / rebased was a setting here
 // until 2026-11-04, when the watcher still did it; now the worker does, so it's prose in the skill (mr.md). Which
@@ -31,8 +31,6 @@ export type Settings = {
   /** Workers' defaults; a task's own agent / model wins, and these models only go with this agent. */
   worker: Who;
   repos: Repo[];
-  /** Work nobody asked for: off, observe (judged and recorded, not done: dsh's observe mode) or on. */
-  proactive: "off" | "observe" | "on";
   /**
    * A message in a conversation a task follows: "worker" = straight to that task's worker; "secretary" = judged first,
    * so it can be left alone or go to another task.
@@ -81,7 +79,6 @@ export const DEFAULTS: Settings = {
   router: { agent: "", model: "", effort: "", mode: "" },
   worker: { agent: "", model: "", effort: "", mode: "" },
   repos: [],
-  proactive: "observe",
   followUps: "worker",
   ack: "dispatch",
   ackText: ACK_TEXT,
@@ -113,7 +110,6 @@ export function normalize(raw: any): Settings {
     router: who(r.router, d.router),
     worker: who(r.worker, d.worker),
     repos,
-    proactive: oneOf(r.proactive, ["off", "observe", "on"] as const, d.proactive),
     followUps: oneOf(r.followUps, ["worker", "secretary"] as const, d.followUps),
     ack: oneOf(r.ack, ["accept", "dispatch", "never"] as const, d.ack),
     ackText: str(r.ackText, "") || d.ackText,
