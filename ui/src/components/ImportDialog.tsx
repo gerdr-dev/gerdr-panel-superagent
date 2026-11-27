@@ -41,7 +41,7 @@ export function ImportDialog({ repos, sessions, onClose, onDone }: { repos: Impo
     setBusy(true);
     try {
       const r = await run<{ repos: string[]; tasks: { task: string; worker?: string }[]; failed: { session: string; why: string }[] }>("import.run", { repos: [...pickRepos], sessions: [...pick] });
-      const said = [r.repos.length && `${r.repos.length} 个仓库`, r.tasks.length && `${r.tasks.length} 个对话`].filter(Boolean).join("、");
+      const said = [r.repos.length && `${r.repos.length} 个工作目录`, r.tasks.length && `${r.tasks.length} 个对话`].filter(Boolean).join("、");
       if (said) toast?.(`导入了 ${said}`);
       for (const f of r.failed) toast?.error?.(`「${sessions.find((s) => s.id === f.session)?.title ?? f.session}」没导入：${f.why}`);
       onDone(r.tasks[0]?.worker);
@@ -58,7 +58,7 @@ export function ImportDialog({ repos, sessions, onClose, onDone }: { repos: Impo
         <DialogTitle className="text-[15px]">从 Code 导入</DialogTitle>
         <p className="text-[12px] text-muted-foreground">这个面板只列它自己的任务。Code 里已有的东西，选了才带进来，只做这一次；之后在 Code 里新开的，不会自己出现在这里。</p>
         <div className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1">
-          <Section title="仓库" hint="这个项目的工作空间，加进「设置 → 仓库」：秘书从里面挑，⌘T 页也列它们" none="没有工作空间">
+          <Section title="工作目录" hint="这个项目的工作空间，加进「设置 → 工作目录」：秘书从里面挑，⌘T 页也列它们" none="没有工作空间">
             {repos.map((r) => (
               <Line key={r.path} on={r.have || pickRepos.has(r.path)} disabled={r.have} onClick={() => toggle(pickRepos, setPickRepos, r.path)} title={r.path}>
                 <Folder className="size-3.5 shrink-0 text-muted-foreground" />
@@ -101,8 +101,8 @@ export function ImportDialog({ repos, sessions, onClose, onDone }: { repos: Impo
             {busy && <Loader2 className="size-3.5 animate-spin" />}
             {busy
               ? "在导入…"
-              : [pickRepos.size && `${pickRepos.size} 个仓库`, pick.size && `${pick.size} 个对话`].filter(Boolean).join("、")
-                ? `导入 ${[pickRepos.size && `${pickRepos.size} 个仓库`, pick.size && `${pick.size} 个对话`].filter(Boolean).join("、")}`
+              : [pickRepos.size && `${pickRepos.size} 个工作目录`, pick.size && `${pick.size} 个对话`].filter(Boolean).join("、")
+                ? `导入 ${[pickRepos.size && `${pickRepos.size} 个工作目录`, pick.size && `${pick.size} 个对话`].filter(Boolean).join("、")}`
                 : "导入"}
           </Button>
         </div>

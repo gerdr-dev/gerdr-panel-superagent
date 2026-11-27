@@ -180,7 +180,7 @@ function Row({ x, onTask, onRetried }: { x: Item; onTask: (id: string) => void; 
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) call("superagent.retry", { ids: [x.id], hint });
               if (e.key === "Escape") setAsking(false);
             }}
-            placeholder="给 Superagent 的意见，可不填（比如：这是活，导入到 xx 表，派给 yy 仓库）"
+            placeholder="给 Superagent 的意见，可不填（比如：这是活，导入到 xx 表，派给 yy 工作目录）"
             className="w-full rounded-md border bg-background px-2 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]"
           />
           <div className="flex items-center gap-2">

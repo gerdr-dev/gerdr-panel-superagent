@@ -3,7 +3,7 @@ import { modeFor } from "./_letgo";
 import { tellBadge } from "./_badge";
 import { DIR as PARTS, pathOf, type PartFile } from "./_parts";
 import { DATA, skillFile } from "./_user";
-import { workflow } from "./_config";
+import { makeGeneral, workflow } from "./_config";
 import { forWorker } from "./memory";
 import { activity, blockersDone, going, draftOf, find, findAsk, ignoredLead, load, noteIgnored, noticeAgent, members, newTask, note, reqOf, update, type Ask, type Question, type Store, type Task } from "./_store";
 import { open, syncAgents, syncSessions, wakeText } from "./_waits";
@@ -724,6 +724,7 @@ export async function start(
     if (t.routing) throw new Error(`${t.id} 要给 repo（仓库绝对路径）：tasks.start {"id":"${t.id}","repo":"…"}`);
     return route(t.id, prompt, ctx);
   }
+  await makeGeneral(ctx, repo);
   const st = ctx.dirs.stat(repo);
   if (!st?.dir) throw new Error(`仓库目录不存在：${repo}`);
   repo = st.path;
@@ -1343,7 +1344,8 @@ export async function dispatch(input: { id: string; title?: string; parts: Part[
   const parts = input?.parts ?? [];
   if (!parts.length) throw new Error(`parts 至少一份：{"id":"${input?.id}","parts":[{"repo":"/绝对路径"}]}`);
   for (const p of parts) {
-    if (!p?.repo?.trim()) throw new Error("parts 里每一份都要有 repo（仓库绝对路径）");
+    if (!p?.repo?.trim()) throw new Error("parts 里每一份都要有 repo（工作目录的绝对路径；不属于任何仓库的活用设置里的通用工作目录）");
+    await makeGeneral(ctx, p.repo);
     if (!ctx.dirs.stat(p.repo)?.dir) throw new Error(`仓库目录不存在：${p.repo}`);
   }
   const split = parts.length > 1;

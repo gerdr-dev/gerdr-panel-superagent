@@ -94,8 +94,8 @@ export default function MemoryPage() {
       <header>
         <h1 className="text-[22px] font-semibold tracking-tight">记忆</h1>
         <p className="mt-1 text-[13px] text-muted-foreground">
-          每个仓库的具体情况：走不走 MR、谁来合、发布找谁批。worker 做事时从你的话里学到、你确认过的，会一条条记在这里，以后派到这个仓库的 worker 一开始就带着。
-          「通用」是对所有仓库都成立的，秘书派活时也看。「中期」是眼下的事和人（谁在等什么、谁在跟你对接什么），agent 自己记、了结了就删，秘书靠它把消息对上任务。
+          每个工作目录的具体情况：走不走 MR、谁来合、发布找谁批。worker 做事时从你的话里学到、你确认过的，会一条条记在这里，以后派到这个工作目录的 worker 一开始就带着。
+          「通用」是对所有工作目录都成立的，秘书派活时也看。「中期」是眼下的事和人（谁在等什么、谁在跟你对接什么），agent 自己记、了结了就删，秘书靠它把消息对上任务。
           错了直接改，一行一条；只存在你这里，不随面板分享。
         </p>
       </header>
@@ -111,7 +111,7 @@ export default function MemoryPage() {
             <button
               key={f.name}
               onClick={() => open(f.name)}
-              title={f.repo ?? (f.name === "_mid" ? "眼下的事和人" : "对所有仓库都成立的")}
+              title={f.repo ?? (f.name === "_mid" ? "眼下的事和人" : "对所有工作目录都成立的")}
               className={clsx("flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] hover:bg-accent", f.name === name && "bg-accent font-medium")}
             >
               {f.name === "_mid" ? <Radar className="size-3.5 shrink-0 text-muted-foreground" /> : f.repo || f.name !== "_general" ? <FolderGit2 className="size-3.5 shrink-0 text-muted-foreground" /> : <Brain className="size-3.5 shrink-0 text-muted-foreground" />}
@@ -132,9 +132,9 @@ export default function MemoryPage() {
               ) : cur.name === "_mid" ? (
                 "眼下的事和人：agent 自己记、自己改，事情了结就删；括号里是哪天、哪个任务、到哪天、谁记的。每天早上会把任务已结束、已过期的交给秘书整理。"
               ) : cur.name === "_general" ? (
-                "对所有仓库都成立的；没单独写的仓库照这里做。"
+                "对所有工作目录都成立的；没单独写的工作目录照这里做。"
               ) : (
-                "这个仓库不在「设置 → 仓库」里了，记忆还留着。"
+                "这个工作目录不在「设置 → 工作目录」里了，记忆还留着。"
               )}
             </p>
           )}

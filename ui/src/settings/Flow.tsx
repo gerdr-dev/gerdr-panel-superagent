@@ -109,7 +109,7 @@ export default function FlowPage() {
           <p className="mt-1 text-[13px] text-muted-foreground">
             秘书和它派出去的 worker 读的 skill：面板自带的默认做法，按你的习惯改，也可以加你自己的 skill。改动和你加的只存在你这里，不会随面板分享出去
             （实心点是你改过的，圈是只有你有的；改过的能「对比默认」看哪些是你的）。
-            代码照着做的值（用哪个模型、有哪些仓库、MR 自动合不合）在「设置」里，不写在这里。
+            代码照着做的值（用哪个模型、有哪些工作目录、MR 自动合不合）在「设置」里，不写在这里。
           </p>
         </div>
         <div className="flex items-center gap-2">

@@ -577,7 +577,7 @@ export function Fusion({ children }: { children: React.ReactNode }) {
         )}
         <button
           className="flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
-          title="秘书背后的东西：设置（谁干活、仓库）、流程、记忆、触发器、定时任务、外面来的消息的去向"
+          title="秘书背后的东西：设置（谁干活、工作目录）、流程、记忆、触发器、定时任务、外面来的消息的去向"
           onClick={(e) => (e.stopPropagation(), openSettings("settings"))}
         >
           <Settings className="size-3.5" />
@@ -661,7 +661,7 @@ export function Fusion({ children }: { children: React.ReactNode }) {
       {toImport > 0 && (
         <button
           className="mt-1 flex h-7 w-full items-center gap-2 rounded-md pr-1 pl-1.5 text-[11px] text-muted-foreground select-none hover:bg-accent/60 hover:text-foreground max-md:h-9"
-          title="这个面板只列自己的任务。Code 里已有的工作空间和对话，选了才带进来：工作空间成为仓库，对话成为任务"
+          title="这个面板只列自己的任务。Code 里已有的工作空间和对话，选了才带进来：工作空间成为工作目录，对话成为任务"
           onClick={() => (closeCodeDrawer(), setImporting(true))}
         >
           <span className="flex size-3.5 shrink-0 items-center justify-center max-md:size-4">

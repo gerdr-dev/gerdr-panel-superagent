@@ -17,6 +17,10 @@ import { LETGO_DEFAULTS, normalizeLetGo, type LetGo } from "./letgo";
 
 export type Who = { agent: string; model: string; effort: string; mode: string };
 
+/**
+ * A working directory (工作目录) a task's worker starts in: usually a repository, but any folder will do, empty or not
+ * under git (only a worktree needs git). Called repos in the code and the file since before that was so.
+ */
 export type Repo = {
   path: string;
   /** One line for the router: what this repository is (which service / product). */
@@ -69,6 +73,11 @@ export type Settings = {
    * (they were inboxWork / replies here until 2026-11-26).
    */
   letgo: LetGo;
+  /**
+   * The general working directory (local/_config.ts seedGeneral) was put in `repos` once. Kept so a person who removed
+   * it doesn't get it back: it is an entry like any other, theirs to change, remove or copy.
+   */
+  generalSeeded: boolean;
 };
 
 // Just "收到。" (the person, 2026-11-25): the task number and title meant nothing to whoever asked, and the result comes
@@ -87,6 +96,7 @@ export const DEFAULTS: Settings = {
   archiveDays: 14,
   undoSeconds: 3,
   letgo: LETGO_DEFAULTS,
+  generalSeeded: false,
 };
 
 const str = (v: unknown, d: string) => (typeof v === "string" ? v.trim() : d);
@@ -121,5 +131,6 @@ export function normalize(raw: any): Settings {
     archiveDays: count(r.archiveDays, d.archiveDays),
     undoSeconds: Math.min(30, count(r.undoSeconds, d.undoSeconds)),
     letgo: normalizeLetGo(r.letgo, { inboxWork: r.inboxWork, replies: r.replies }),
+    generalSeeded: r.generalSeeded === true,
   };
 }

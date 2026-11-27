@@ -649,7 +649,7 @@ function AssignBox({ t, act, save }: { t: Task; act: Act; save: () => Promise<bo
           <Button variant="outline" disabled={!!busy} title="变成你自己的任务：你来安排，可以再拆成几个交给 agent" onClick={async () => (await save()) && go("self", "agree", { id: t.id, how: "self" })}>
             {busy === "self" ? <Loader2 className="size-3.5 animate-spin" /> : <Hand className="size-3.5" />}同意，我自己安排
           </Button>
-          <Button disabled={!!busy} title={t.repo ? `交给 agent，在 ${t.repo.split("/").pop()} 里做` : "交给 agent；仓库由秘书挑"} onClick={async () => (await save()) && go("agent", "agree", { id: t.id, how: "agent" })}>
+          <Button disabled={!!busy} title={t.repo ? `交给 agent，在 ${t.repo.split("/").pop()} 里做` : "交给 agent；工作目录由秘书挑"} onClick={async () => (await save()) && go("agent", "agree", { id: t.id, how: "agent" })}>
             {busy === "agent" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}同意，交给 agent 做
           </Button>
         </div>
@@ -1122,7 +1122,7 @@ function NewTask({ onClose, act }: { onClose: () => void; act: Act }) {
             />
             {more ? (
               <>
-                <input className={input} list="board-repos" placeholder="仓库目录" value={f.repo} onChange={set("repo")} />
+                <input className={input} list="board-repos" placeholder="工作目录" value={f.repo} onChange={set("repo")} />
                 <datalist id="board-repos">
                   {repos.map((r) => (
                     <option key={r.path} value={r.path}>
@@ -1141,7 +1141,7 @@ function NewTask({ onClose, act }: { onClose: () => void; act: Act }) {
               </>
             ) : (
               <button className="self-start text-[12px] text-muted-foreground hover:text-foreground" onClick={() => setMore(true)}>
-                指定仓库 / agent / 模型（不填就照「设置」里的，仓库由 Superagent 来定）
+                指定工作目录 / agent / 模型（不填就照「设置」里的，工作目录由 Superagent 来定）
               </button>
             )}
           </>

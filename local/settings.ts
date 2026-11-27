@@ -2,11 +2,12 @@
 // plus the pickers the page needs (folders, agents).
 
 import { DEFAULTS, normalize, type Settings } from "../ui/src/lib/settings";
-import { diff, FILE, stored } from "./_config";
+import { diff, FILE, seedGeneral, stored } from "./_config";
 import { allAgents } from "./_agents";
 
 /** → { settings (complete), defaults, etag, broken (the file isn't JSON: defaults in use) } */
 export function get(input: unknown, ctx: Ctx) {
+  seedGeneral(ctx);
   const s = stored(ctx);
   return { settings: normalize(s.raw), defaults: DEFAULTS, etag: s.etag, broken: !!s.broken };
 }

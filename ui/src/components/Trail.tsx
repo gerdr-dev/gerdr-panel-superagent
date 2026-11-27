@@ -149,7 +149,7 @@ export function Trail({
       {rules && (
         <button className="mb-1 inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground" onClick={onRules}>
           <Settings2 className="size-3.5" />
-          派得不对？改仓库、模型或派活规则
+          派得不对？改工作目录、模型或派活规则
         </button>
       )}
     </div>

@@ -71,8 +71,8 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
         <div>
           <h1 className="text-[22px] font-semibold tracking-tight">设置</h1>
           <p className="mt-1 text-[13px] text-muted-foreground">
-            代码照着做的值：谁来派活、谁来干活、有哪些仓库。只存在你这里，不会随面板分享出去。
-            怎么做事（怎么交付、review 意见怎么处理、怎么挑仓库）是你用自己的话写的，在
+            代码照着做的值：谁来派活、谁来干活、有哪些工作目录。只存在你这里，不会随面板分享出去。
+            怎么做事（怎么交付、review 意见怎么处理、怎么挑工作目录）是你用自己的话写的，在
             <button className="mx-0.5 text-brand hover:underline" onClick={onFlow}>
               流程
             </button>
@@ -86,7 +86,7 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
 
       {s && (
         <>
-          <Section title="秘书" note="点任务列表最上面的「秘书」跟它说话；没指定仓库的任务、外面来的消息，也都由它判断接不接、挑仓库和 agent 再派出去。它只说话和派活、不写代码；它要听懂你、写简报，别用太弱的模型。">
+          <Section title="秘书" note="点任务列表最上面的「秘书」跟它说话；没指定工作目录的任务、外面来的消息，也都由它判断接不接、挑工作目录和 agent 再派出去。它只说话和派活、不写代码；它要听懂你、写简报，别用太弱的模型。">
             <WhoFields who={s.router} onChange={(v) => put("router", v)} />
             <Field
               label="压缩对话"
@@ -143,8 +143,8 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
           </Section>
 
           <Section
-            title="仓库"
-            note="新任务弹窗的仓库下拉、⌘T 页上的文件夹和秘书都只看这份。说明写给秘书看（这是哪个服务、哪个产品），它靠这个挑仓库。空着时，拿最近用过的目录当建议。"
+            title="工作目录"
+            note="worker 在这里开工：可以是仓库，也可以是普通文件夹（「通用」那个给不属于任何仓库的活）。新任务弹窗的工作目录下拉、⌘T 页上的文件夹和秘书都只看这份。说明写给秘书看（这是哪个服务、哪个产品），它靠这个挑工作目录。空着时，拿最近用过的目录当建议。"
           >
             <Repos repos={s.repos} onChange={(v) => put("repos", v)} />
           </Section>
@@ -283,7 +283,7 @@ function Repos({ repos, onChange }: { repos: Repo[]; onChange: (r: Repo[]) => vo
   };
   return (
     <div className="space-y-2">
-      {!repos.length && <p className="text-[12px] text-muted-foreground">还没有仓库。</p>}
+      {!repos.length && <p className="text-[12px] text-muted-foreground">还没有工作目录。</p>}
       {repos.map((r, i) => (
         // The folder's name leads (the full paths mostly share their start, so a cut-off path showed the same few words
         // on every row); the full path sits under it, wrapped rather than cut
@@ -306,7 +306,7 @@ function Repos({ repos, onChange }: { repos: Repo[]; onChange: (r: Repo[]) => vo
       ))}
       <div className="flex items-start gap-1.5">
         <div className="min-w-0 flex-1">
-          <PathPick value={add} onChange={setAdd} onEnter={push} placeholder="加一个仓库的绝对路径，或输入名字找最近用过的项目" />
+          <PathPick value={add} onChange={setAdd} onEnter={push} placeholder="加一个工作目录的绝对路径，或输入名字找最近用过的项目" />
         </div>
         <Button variant="outline" disabled={!add.trim()} onClick={push}>
           <Plus className="size-3.5" />
@@ -335,7 +335,7 @@ function RepoColor({ value, onChange }: { value?: string; onChange: (c: string |
     <div ref={ref} className="relative">
       <button
         type="button"
-        title="颜色：列表里这个仓库的名字、⌘T 页上它的文件夹按钮用它"
+        title="颜色：列表里这个工作目录的名字、⌘T 页上它的文件夹按钮用它"
         className={clsx(dot, "flex items-center justify-center", !value && "border-dashed text-muted-foreground")}
         style={value ? { background: value, borderColor: value } : undefined}
         onClick={() => setOpen((o) => !o)}
