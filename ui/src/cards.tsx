@@ -164,6 +164,17 @@ export function TaskStep({ card, session }: CardProps) {
   // Changing an answer already sent: the built-in card again, its pick going to tasks.reanswer (with its few seconds
   // of undo too). The card's own undo only covers the seconds before a pick is sent.
   const [changing, setChanging] = useState<string | false>(false); // the answer it had when the change was opened
+  // Not known yet, or not found (asked before the ask was written): ask again soon, a few times, not on the 30 s poll
+  const tries = useRef(0);
+  const unknown = !st || st.status === "missing";
+  useEffect(() => {
+    if (!board || !id || !unknown || tries.current >= 5) return;
+    const timer = setTimeout(() => {
+      tries.current++;
+      void refresh();
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [board, id, unknown, st]);
   // The new answer arrived (a poll after tasks.reanswer): back to the settled card, showing it
   useEffect(() => {
     if (changing !== false && st?.handedBack !== changing) setChanging(false);
@@ -207,11 +218,14 @@ export function TaskStep({ card, session }: CardProps) {
     );
   }
   // Still open: an ✕ in its corner ignores it (tasks.ignore, 2026-11-19) — mostly a question gone moot that the agent
-  // never took back. Nobody is woken; the agent hears at the start of its next turn
+  // never took back. Nobody is woken; the agent hears at the start of its next turn. Shown while its state isn't known
+  // yet too: it was shown only once the status said "todo", and a card whose first ask failed or came back "missing"
+  // (asked a moment too early) waited 30 s or more without one — "the ✕ is often missing until I reload" (t150,
+  // 2026-11-27). An ✕ on a card already settled elsewhere just brings its real state (the ignore fails, it asks again).
   return (
     <div className="relative">
       <DefaultCard card={card} undoMs={undoMs} />
-      {board && st?.status === "todo" && <IgnoreButton id={id} board={board} onDone={refresh} />}
+      {board && id && (!st || st.status === "todo" || st.status === "missing") && <IgnoreButton id={id} board={board} onDone={refresh} />}
     </div>
   );
 }
@@ -244,7 +258,8 @@ function IgnoreButton({ id, board, onDone }: { id: string; board: string; onDone
       disabled={busy}
       onClick={() => {
         setBusy(true);
-        run("tasks.ignore", { id }, { project: board }).then(onDone, () => setBusy(false));
+        // Failed (most often: it was settled meanwhile): its real state, which draws the card settled
+        run("tasks.ignore", { id }, { project: board }).then(onDone, () => (setBusy(false), void onDone()));
       }}
       className="absolute top-5 right-2.5 flex size-6 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground disabled:opacity-40"
     >
