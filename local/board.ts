@@ -117,7 +117,7 @@ export const tools = {
       properties: {
         prompt: { type: "string", description: "Its first message, for someone who hasn't seen your chat: the goal, the background and what's decided (with the user's rules for this work), how far it got, what's next, where things are (files, links, your conversation id for `gerdr session read` when it carries on your work)" },
         title: { type: "string", description: "Its name; default: worked out from the prompt" },
-        repo: { type: "string", description: "Absolute path of the repository it works in; default: this task's" },
+        repo: { type: "string", description: "Absolute path of the repository it works in; default: this task's. \"secretary\": the Superagent (the secretary) picks the working directory and agent, as for any task without one" },
         agent: { type: "string", description: "An agent id (gerdr session agents) when the user asked for one; default: the user's worker default" },
         model: { type: "string" },
         effort: { type: "string" },

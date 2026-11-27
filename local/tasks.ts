@@ -1397,6 +1397,12 @@ export async function dispatch(input: { id: string; title?: string; parts: Part[
 export async function newFrom(input: { id: string; prompt: string; title?: string; repo?: string; agent?: string; model?: string; effort?: string }, ctx: Ctx) {
   const old = find(load(ctx).store, input?.id);
   if (!input.prompt?.trim()) throw new Error("prompt 写新任务要做什么，写给没看过你对话的人：目标、背景、做到哪、接下来做什么、东西在哪");
+  // "secretary": the new task goes to the secretary, which picks its working directory and agent like any task the
+  // user adds without one (the user, 2026-11-27, on work in another repository: "也可以交给秘书呀")
+  if ((input.repo ?? "").trim() === "secretary") {
+    const t = (await add({ title: input.title?.trim() || undefined, prompt: input.prompt.trim(), from: old.id } as any, ctx)) as Task;
+    return await start({ id: t.id }, ctx);
+  }
   const repo = (input.repo ?? old.repo ?? "").trim();
   if (!repo) throw new Error("repo 写新任务的仓库绝对路径");
   if (!ctx.dirs.stat(repo)?.dir) throw new Error(`仓库目录不存在：${repo}`);
