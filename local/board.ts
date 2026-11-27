@@ -12,7 +12,7 @@ import { secAsk, secCancel } from "./_secask";
 import { GENERAL, MEMORY, nameOf } from "./_memory";
 import { skillFile } from "./_user";
 import { replyOrigin } from "./assign";
-import { agentText, confirmFor, logDone, NOTE, opens } from "./_letgo";
+import { agentText, confirmFor, logDone, NOTE, opens, policyFor } from "./_letgo";
 import { newFrom } from "./tasks";
 
 const STEP = {
@@ -75,12 +75,18 @@ export const tools = {
   },
   reply_message: {
     description:
-      "Say something to the people in a chat your task follows (a Slack DM or thread it came from): an answer to them, a question, the result. This is the only way to write to them: never send it with another command-line tool or an API. event: the message id you answer (given with each message passed to you); left out, the message the task came from. The user's settings decide whether it goes at once or waits as a card for them to send or not; either way you get no word back on it: don't wait for it, don't ask about it, carry on. Not for a task someone asked of the user through another panel (my_task shows requestedBy): that's reply_requester.",
+      "Say something to the people in a chat your task follows (a Slack DM or thread it came from): an answer to them, a question, the result. This is the only way to write to them: never send it with another command-line tool or an API. event: the message id you answer (given with each message passed to you); left out, the message the task came from. The applicable Let it go policy decides first. If none covers this repository, use delivery to choose between sending now with the user's explicit authorization and showing them a draft. When it becomes a draft, carry on without waiting for their choice. Not for a task someone asked of the user through another panel (my_task shows requestedBy): that's reply_requester.",
     input: {
       type: "object",
       properties: {
         text: { type: "string", description: "What they read, as you'd write it in that chat (they don't see your conversation)" },
         event: { type: "string", description: "The message you answer; default: the one the task came from" },
+        delivery: {
+          type: "string",
+          enum: ["send", "review"],
+          description:
+            "Used when no Let it go policy covers this repository. Choose send only if the user explicitly asked you to send this message to this recipient. Choose review to show a draft for the user to send, which is also the default. An applicable policy takes precedence over either value, including its recipients who always require review.",
+        },
         replaces: { type: "string", description: "A draft of yours still waiting for the user (o1) that this one replaces: it is taken back" },
       },
       required: ["text"],
@@ -152,7 +158,7 @@ export function instructions(input: unknown, ctx: Ctx) {
     `letgo says what holds right now (absent: nothing is let go, ask as usual); ask_human and reply_message follow it by themselves.` +
     (t.origin?.reply && !t.assigned
       ? ` It came from a chat (${t.origin.source}): to write to the people there, use reply_message, never another ` +
-        `tool. Unless the policy in effect lets your messages go (my_task's letgo), the user looks at each one and sends it or not; you are not told which, so carry on without waiting.`
+        `tool. If no policy applies, use delivery: send when the user explicitly tells you to send that message to that recipient. Otherwise use review to show a draft and carry on without waiting. An applicable policy takes precedence.`
       : "") +
     (t.assigned
       ? ` ${t.assigned.by ?? "Someone"} asked the user for this task (through ${t.origin?.source ?? "another panel"}): they ` +
@@ -523,14 +529,16 @@ export async function reply_requester(input: { text: string; deliver?: boolean }
 }
 
 /**
- * The worker writes to the people in a chat its task follows (outbox.ts): sent now (设置 → 回话 "auto"), or held as a
- * card for the user to send or not ("review"). The worker isn't told what became of it either way.
+ * The active policy for the repository decides how to deliver a reply. Without one, the worker can send a message
+ * explicitly authorized by the user, or leave a draft.
  */
-export async function reply_message(input: { text: string; event?: string; replaces?: string }, ctx: Ctx) {
+export async function reply_message(input: { text: string; event?: string; replaces?: string; delivery?: "send" | "review" }, ctx: Ctx) {
   const t = mine(load(ctx).store, ctx);
   if (t.assigned) throw new Error(`${t.id} 是别人通过另一个面板请用户做的任务：回发起人用 reply_requester`);
   const text = input?.text?.trim();
   if (!text) throw new Error("text 不能为空");
+  if (input.delivery !== undefined && input.delivery !== "send" && input.delivery !== "review")
+    throw new Error("delivery 必须是 send 或 review");
   const to = replyTarget(ctx, t, input.event?.trim());
   const where = placeOf(to);
   const ev = (ctx as any).events;
@@ -539,12 +547,13 @@ export async function reply_message(input: { text: string; event?: string; repla
   // Taken back first: whether this one goes at once or waits, the old draft must not be sent after it
   const replaced = input.replaces?.trim();
   if (replaced) withdraw(ctx, t.id, replaced, "换成了新写的");
-  // Let it go (message): sent at once when the policy in effect lets go this repository's messages, unless it keeps this
-  // person / conversation for the user to look at (a leader). Otherwise a card for the user to send
-  const kept = confirmFor(ctx, t.repo, to as any);
-  if (!kept && opens(ctx, "message", t.repo)) {
+  const policy = policyFor(ctx, t.repo);
+  const kept = confirmFor(policy, to);
+  const policySends = policy?.gates.includes("message");
+  const send = policySends ?? (input.delivery === "send");
+  if (!kept && send) {
     ev.reply(msg, text);
-    logDone(ctx, { kind: "sent", task: t.id, text: `${where}：${text}` });
+    if (policySends) logDone(ctx, { kind: "sent", task: t.id, text: `${where}：${text}` });
     update(ctx, (s) => {
       const x = find(s, t.id);
       note(x, `发给了 ${where}：${text}`);

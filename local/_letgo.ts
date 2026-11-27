@@ -78,9 +78,9 @@ export function modeFor(ctx: Ctx, agent: string, base: string | undefined, repo?
  * for the user. Matched on the member id, the conversation (a channel id covers its threads), the name as the source
  * shows it (contained, any case) and the link.
  */
-export function confirmFor(ctx: Ctx, repo: string | undefined, to: { actor?: string; who?: string; key?: string; url?: string }) {
+export function confirmFor(policy: Policy | undefined, to: { actor?: string; who?: string; key?: string; url?: string }) {
   const low = (s?: string) => (s ?? "").toLowerCase();
-  return policyFor(ctx, repo)?.confirm.find((c) => {
+  return policy?.confirm.find((c) => {
     const x = low(c);
     if (!x) return false;
     if (low(to.actor) === x) return true;
