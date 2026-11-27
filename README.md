@@ -25,5 +25,5 @@ Gerdr 设置 → 面板 → 从 GitHub 安装面板，填 `https://github.com/ge
 ## 更多
 
 - [功能细节](docs/features.md)：任务怎么分组、外面来的活怎么分、MR、主动工作、Let it go、设置 / 流程 / 记忆
-- [两个 agent](docs/secretary-and-assistant.md)：秘书和面板助手各是谁、各做什么。**你是这个面板里的 agent，就接着读这篇**
+- [秘书](docs/secretary-and-assistant.md)：秘书做什么（包括改面板的设置、流程），面板的代码谁改。**你是这个面板里的 agent，就接着读这篇**
 - [开发](docs/development.md)：在哪改、代码在哪（改之前先读 [DESIGN.md](DESIGN.md)）
