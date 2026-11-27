@@ -253,7 +253,7 @@ function IgnoreButton({ id, board, onDone }: { id: string; board: string; onDone
   const [busy, setBusy] = useState(false);
   return (
     <button
-      title="忽略：不答了（多半已经过时），它下一轮开头会知道"
+      title="忽略：尽快通知 Agent，空闲时随下条消息送达"
       aria-label="忽略"
       disabled={busy}
       onClick={() => {

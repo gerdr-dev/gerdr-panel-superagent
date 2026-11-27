@@ -140,7 +140,7 @@ type State = {
 /**
  * A question the secretary put to the user (ask_human from its own conversation, _secask.ts). Its own, not an ask on a
  * task: the secretary has no task. Open ones light the 秘书 button with their count; the user answers one on its card
- * or closes it without an answer (told to the secretary with its next message, not as a turn of its own).
+ * or closes it without an answer (the secretary is notified without starting a turn).
  */
 export type SecAsk = {
   id: string;
@@ -155,7 +155,7 @@ export type SecAsk = {
   answer?: string;
   /** Why it was dropped: the secretary's reason (cancel_human, replaces) or the user closing it. */
   reason?: string;
-  /** Closed by the user, and whether the secretary has been told yet (the start of its next message). */
+  /** Closed by the user, and whether the notice has been sent or left on its conversation. */
   closedByUser?: boolean;
   told?: boolean;
   at: number;
