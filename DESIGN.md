@@ -61,10 +61,11 @@
   从秘书那一行的齿轮打开。用户（2026-11-24）：设置不该像一页卡在另一页里面。
 - **worker 照旧 `workspace: "none"`**：不进 Code 面板的工作区，只在这个面板自己的 Code 里显示。
 - **要能显示在 Code 里的 Gerdr**：没有 `CodeView` 的旧 Gerdr 上只提示升级。中间试过在旧 Gerdr 上退回看板，用户不要这个退路。
-- **看板的代码留了一份**：`pages/board.tsx` 整个改名成 `components/TaskDetail.tsx`，只用它的任务详情（没派出去的卡）
-  和新任务表单，看板本身不画。当时没删成只剩这两块，是为了 fusion 分支还能按同一个文件合进 Superagent 的改动。
+- **看板的代码只剩用得上的**：`pages/board.tsx` 改名成 `components/TaskDetail.tsx`，留着它的任务详情（没派出去的卡）、
+  等你的那张（密码、过期链接）和新任务表单。一开始整份留着，好让 fusion 分支按同一个文件合进改动；2026-11-27 用户说看板和
+  对话抽屉是遗留的，看板页（`BoardPage`）、对话抽屉（`ChatDrawer.tsx`）和只有它们用的部分都删了。要看旧样子翻 git 历史。
 - **随看板一起没了的**：看板上方「Superagent 自己需要你看的」那一行（没判断成的消息、主动工作记下的，现在只在「去向」里）、
-  任务抽屉里的「链路」和「对话 / 文件」（`ChatDrawer` 只在没派出去的卡里还用）、「已完成」底下的已归档搜索。
+  任务抽屉里的「链路」和「对话 / 文件」、「已完成」底下的已归档搜索。
 - **流程和说明里还有「任务面板」**：用户自己改过的流程（`user/skills/`）可能还按看板写，所以秘书的说明末尾补了一段
   （`_main.ts`）：「任务面板 / 看板 / 卡片」指的是这份列表和背后的任务数据，别让用户去一个不存在的页面。
 
@@ -872,7 +873,7 @@ agent 复盘也要整条链。所以：
 ## 用户在对话里
 
 **2026-11-25 起 worker 的对话在 Code 的窗格里打开**（见「没有任务面板了」），顶上的东西是窗格标题上的任务编号、状态和「等你」；
-`ChatDrawer` 只在没派出去的卡里还用。下面是看板时期的做法，「正文写内容，按钮只写动作」「消息立即发送」照旧适用。
+看板和它的对话抽屉（`ChatDrawer`）2026-11-27 删了。下面是看板时期的做法，「正文写内容，按钮只写动作」「消息立即发送」照旧适用。
 
 点 agent 任务的卡片，打开的是 worker 的对话：看板自己的抽屉（`ui/src/components/ChatDrawer.tsx`），
 里面是 Gerdr 原生的聊天（`@gerdr/core` 的 `SessionChat`，和 Code 里一模一样：图片、文件、审批、卡片），按 Esc 或点外面关闭。
@@ -984,10 +985,9 @@ worker 在看板上怎么做（每次停下要汇报、自己开的会话来问�
 | `ui/src/layout.tsx` | 面板就是 Code（`CodeView list="replace"`）；太旧的 Gerdr 上提示升级 |
 | `ui/src/components/CodeSection.tsx` | Code 左边的列表：秘书、按状态分组的任务、其他、从 Code 导入；窗格标题、菜单、拖动 |
 | `ui/src/lib/view.ts` | 从 Gerdr 拿的 Code 部件（`CodeView`、`CodeRow`、`useCode…`），旧 Gerdr 上的退路 |
-| `ui/src/components/TaskDetail.tsx` | 原来的看板页（`pages/board.tsx` 改名），只用它的任务详情（没派出去的卡）和新任务表单 |
+| `ui/src/components/TaskDetail.tsx` | 原来的看板页剩下的：任务详情（没派出去的卡）、等你的那张、新任务表单 |
 | `ui/src/pages/index.tsx` | 空页：面板显示在 Code 里 |
 | `ui/src/components/SettingsSheet.tsx`、`ui/src/settings/` | 「去向」「设置」「流程」「记忆」「触发器」「定时任务」：秘书那一行的齿轮打开，盖在整个窗口上 |
-| `ui/src/components/ChatDrawer.tsx` | 对话抽屉（`SessionChat`），现在只在没派出去的卡里用 |
 | `ui/src/cards.tsx` | 对话里的 `task-step` 卡片 |
 | `skills/superagent-panel/` | 用户本人的做事方式（给所有 agent 看） |
 | `local/_clues.ts` | 外面来的消息的线索：编号、链接在哪个 worker 的对话里出现过（秘书看的消息、`tasks.search` 都用它） |

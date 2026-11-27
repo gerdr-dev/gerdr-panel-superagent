@@ -22,7 +22,7 @@ import { Button } from "./Button";
 
 export type SettingsTab = "log" | "settings" | "letgo" | "flow" | "memory" | "schedules" | "triggers";
 
-export const TABS: { id: SettingsTab; label: string; icon: typeof Timer }[] = [
+const TABS: { id: SettingsTab; label: string; icon: typeof Timer }[] = [
   { id: "log", label: "去向", icon: Inbox },
   { id: "settings", label: "设置", icon: SlidersHorizontal },
   { id: "letgo", label: "Let it go", icon: FastForward },

@@ -303,17 +303,6 @@ export function ago(ms?: number) {
   return s === "刚刚" || !s ? s : `${s}前`;
 }
 
-/**
- * Since when a card in 等你 has been waiting on the user: its newest open ask since it was asked, else since its worker
- * started waiting / stopped. The card shows this time and the column is sorted by it, so the two agree.
- */
-export function waitedSince(t: Task) {
-  const asks = openAsks(t);
-  if (asks.length) return Math.max(...asks.map((a) => Math.max(a.createdAt, ...(a.questions ?? []).filter((q) => !q.dropped && q.answer == null).map((q) => q.at ?? 0))));
-  const l = t.live;
-  return (l?.status === "waiting" ? l.waitingSince : l?.updatedAt) ?? t.updatedAt;
-}
-
 export function day(ms: number) {
   return new Date(ms).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric", weekday: "short" });
 }
