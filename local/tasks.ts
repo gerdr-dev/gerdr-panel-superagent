@@ -5,11 +5,11 @@ import { DIR as PARTS, pathOf, type PartFile } from "./_parts";
 import { DATA, skillFile } from "./_user";
 import { workflow } from "./_config";
 import { forWorker } from "./memory";
-import { activity, blockersDone, going, draftOf, find, findAsk, ignoredLead, load, noteIgnored, members, newTask, note, reqOf, update, type Ask, type Question, type Store, type Task } from "./_store";
+import { activity, blockersDone, going, draftOf, find, findAsk, ignoredLead, load, noteIgnored, noticeAgent, members, newTask, note, reqOf, update, type Ask, type Question, type Store, type Task } from "./_store";
 import { open, syncAgents, syncSessions, wakeText } from "./_waits";
 import { cutLine, wake } from "./_wake";
 import { askState, cardStates } from "./_cardstate";
-import { closeSec, isSecAsk, secretaryIgnored, secStatus } from "./_secask";
+import { closeSec, isSecAsk, secStatus } from "./_secask";
 import { allAgents, defaultAgent, mentionsIn } from "./_agents";
 import { archived as archivedGroups, archivedCount, archiveOld, latest, revive, unarchive as bringBack } from "./_archive";
 import { isMain, mains, rerouteTask, routeTask, sweep, toMain } from "./_main";
@@ -103,12 +103,9 @@ export async function list(input: unknown, ctx: Ctx) {
   const nudge: { session: string; id: string; out: string[] }[] = [];
   // Answers to questions the secretary passed on (tasks.message): into its chat, where the user asked
   const answered: { id: string; asked: string; text: string }[] = [];
-  // What the user ignored, for a worker whose turn started without the board (the user typed in its chat)
-  const ignored: { session: string; text: string }[] = [];
   const s = update(ctx, (s) => {
     nudge.length = 0; // update retries this function on a write race: decide afresh each time
     answered.length = 0;
-    ignored.length = 0;
     for (const t of s.tasks) {
       const sess = t.session && live[t.session];
       // What the user typed in its chat (Gerdr's personSaid): the feed shows it, or the lines after it make no sense
@@ -125,14 +122,6 @@ export async function list(input: unknown, ctx: Ctx) {
       }
       syncSessions(t, kids[t.id] ?? []);
       syncAgents(t, t.session, (sess?.tasks ?? []) as any[]);
-      // A turn started with a slash command (/compact) is no answer to anything and no going on with the work
-      if (sess?.status === "running" && !upkeep(t, sess)) {
-        // The worker is at it again. What it waits on stays open: it takes back what it no longer waits for itself
-        // (cancel_wait, cancel_human), the board doesn't guess it from a new turn (2026-11-23). The task's status stays
-        // where the user put it (DESIGN.md「状态只由用户改」).
-        const lead = ignoredLead(t);
-        if (lead) ignored.push({ session: sess.id, text: lead });
-      }
       // Stopped by the user (or Gerdr restarting): theirs, not a worker that went quiet. No reminder — it would start
       // it again against their stop
       const cancelled = (sess as any)?.stopReason === "cancelled";
@@ -164,9 +153,6 @@ export async function list(input: unknown, ctx: Ctx) {
     }
     return s;
   });
-  // Into the turn it is in: now, so it hears it before it acts on the question (the board's own messages carry it first)
-  for (const n of ignored) await ctx.sessions.send(n.session, n.text, { now: true, fold: "你忽略了它问的问题" } as any).catch(() => {});
-  await secretaryIgnored(ctx);
   for (const n of nudge) {
     await ctx.sessions
       .send(n.session, `[任务面板] 你把活派出去了，但没有等它（任务 ${n.id}）：${n.out.join("；")}。照 task.md「等别人」用 wait_for 等它（带超时），然后结束这一轮。`, {
@@ -1607,7 +1593,7 @@ function finish(s: Store, t: Task, h: Ask) {
 }
 
 /** The answers of a finished ask go to its worker, with the questions the user set aside. */
-async function deliver(ctx: Ctx, t: Task, h: Ask) {
+async function deliver(ctx: Ctx, t: Task, h: Ask, noticeOnly = false) {
   if (!worker(t)) return;
   const skipped = (h.questions ?? []).filter((q) => q.skipped);
   const text =
@@ -1618,6 +1604,12 @@ async function deliver(ctx: Ctx, t: Task, h: Ask) {
   // message the user typed themselves (2026-11-25); the folded row's own look says it came from the panel, so the line
   // is just 「你答了：…」 (a 「[任务面板]」 in front made the user's answer read as the panel's)
   const how = asked(h).length ? `你答了：${asked(h).map((q) => q.answer).join("；")}` : `你说「${h.title}」都不用答了`;
+  if (noticeOnly) {
+    if (!noticeAgent(ctx, t.session, `ignored:${h.id}`, text, how)) {
+      update(ctx, (s) => void (findAsk(s, h.id).a.ignoredReply = text));
+    }
+    return;
+  }
   await wake(ctx, t.id, { how, text }).catch(() => {});
 }
 
@@ -1625,7 +1617,11 @@ async function deliver(ctx: Ctx, t: Task, h: Ask) {
  * The user sets a question aside (不用答了): it went moot and the worker didn't take it back (t63#1, 2026-11-05).
  * { id, q }. When the rest are answered, everything goes to the worker now, saying this one was set aside.
  */
-export async function skipQuestion(input: { id: string; q: string }, ctx: Ctx) {
+export function skipQuestion(input: { id: string; q: string }, ctx: Ctx) {
+  return setAsideQuestion(input, ctx, false);
+}
+
+async function setAsideQuestion(input: { id: string; q: string }, ctx: Ctx, noticeOnly: boolean) {
   let finished = false;
   const { t, h } = update(ctx, (s) => {
     const { t, a: h } = findAsk(s, input.id);
@@ -1649,17 +1645,11 @@ export async function skipQuestion(input: { id: string; q: string }, ctx: Ctx) {
     h.updatedAt = Date.now();
     return { t, h };
   });
-  if (finished) await deliver(ctx, t, h);
+  if (finished) await deliver(ctx, t, h, noticeOnly);
   return { ok: true };
 }
 
-/**
- * The ✕ on a question card (2026-11-19): the user ignores it — usually it went moot and the agent that asked never took
- * it back. { id: a5, a5#2 (one question of several) or sN (the secretary's) }. Nobody is woken for it: the agent hears
- * at the start of its next turn (ignoredLead; the secretary's: _main.ts secIgnoredLead). One question of several while
- * others are open or answered: set aside as 不用答了, and once the rest are answered they go to the worker saying so
- * (skipQuestion); the last one open makes the whole ask ignored.
- */
+/** The ✕ sets a question aside and tells its agent without starting a turn. */
 export async function ignore(input: { id: string }, ctx: Ctx) {
   const id = String(input?.id ?? "");
   if (isSecAsk(id)) return closeSec({ id }, ctx);
@@ -1668,17 +1658,17 @@ export async function ignore(input: { id: string }, ctx: Ctx) {
     const h = findAsk(load(ctx).store, aid).a;
     const left = (h.questions ?? []).filter((q) => !q.dropped && q.answer == null && q.id !== qid);
     const answered = (h.questions ?? []).some((q) => !q.dropped && q.answer != null);
-    if (left.length || answered) return skipQuestion({ id: aid, q: qid }, ctx);
+    if (left.length || answered) return setAsideQuestion({ id: aid, q: qid }, ctx, true);
   }
-  update(ctx, (s) => {
+  const { session, ask } = update(ctx, (s) => {
     const { t, a: h } = findAsk(s, aid);
     if (h.status !== "open") throw new Error(`「${h.title}」已经不在等你了`);
     for (const q of h.questions ?? []) if (!q.dropped && q.answer == null) Object.assign(q, { dropped: "你忽略了", skipped: true });
-    // Said with the worker's next message, whoever sends it (noteIgnored); untold only on a Gerdr without notes
-    const told = noteIgnored(ctx, t.session, h);
-    Object.assign(h, { status: "dropped", dropReason: "你忽略了", ignored: true, told, doneAt: Date.now(), updatedAt: Date.now() });
+    Object.assign(h, { status: "dropped", dropReason: "你忽略了", ignored: true, told: true, doneAt: Date.now(), updatedAt: Date.now() });
     activity(s, t, { kind: "user", by: t.id, of: h.id, text: `你忽略了「${h.title}」` });
+    return { session: t.session, ask: h };
   });
+  if (!noteIgnored(ctx, session, ask)) update(ctx, (s) => void (findAsk(s, aid).a.told = false));
   return { ignored: id };
 }
 

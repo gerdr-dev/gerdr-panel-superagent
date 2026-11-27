@@ -77,10 +77,12 @@ export type Ask = {
   dropReason?: string;
   /**
    * The user ignored it (the card's ✕, tasks.ignore): usually moot and its worker never took it back. Not a wake of its
-   * own; `told` once its worker heard, at the start of its next turn (ignoredLead).
+   * own; `told` once its notice was sent or left on the conversation.
    */
   ignored?: boolean;
   told?: boolean;
+  /** A group of answers completed by ignoring a question, if the session could not take a note. */
+  ignoredReply?: string;
   /** When the user asked its worker to bring it up to date (tasks.refreshAsk): the drawer says so until it changes. */
   refreshing?: number;
   createdAt: number;
@@ -401,9 +403,15 @@ export function draftOf(t: Task) {
  */
 export function ignoredLead(t: Task): string {
   const asks = (t.asks ?? []).filter((a) => a.ignored && !a.told);
-  if (!asks.length) return "";
+  const replies = [];
+  for (const a of t.asks ?? []) {
+    if (a.ignoredReply) {
+      replies.push(a.ignoredReply);
+      delete a.ignoredReply;
+    }
+  }
   for (const a of asks) a.told = true;
-  return ignoredText(asks);
+  return [...(asks.length ? [ignoredText(asks)] : []), ...replies].join("\n\n");
 }
 
 /** What an agent is told about its questions the user ignored. */
@@ -416,22 +424,20 @@ export function ignoredText(asks: { id: string; title: string }[], waiting: stri
   return `[任务面板] 用户忽略了你问的${asks.map((a) => `「${a.title}」（${a.id}）`).join("、")}：多半已经过时了。别等它，也别原样再问；还需要的话按现在的情况重新 ask_human。${also}`;
 }
 
-/**
- * Leaves an ignored question as a note on its conversation (Gerdr's ctx.sessions.note): it goes in front of the next
- * message that conversation gets, the user's own typing included, as one folded line above it. It used to be a
- * message of its own, sent once a turn had started: the user typed, and "用户忽略了你问的问题" came after their message
- * as a second one, starting a turn of its own when the first had ended (2026-11-24). false on a Gerdr without notes:
- * the caller leaves it untold, for ignoredLead / secIgnoredLead.
- */
-export function noteIgnored(ctx: Ctx, session: string | undefined, a: { id: string; title: string }, waiting: string[] = []): boolean {
-  const note = (ctx.sessions as any).note;
-  if (!session || typeof note !== "function") return false;
+/** Try to tell the agent in this turn, or leave the notice for its next message. */
+export function noticeAgent(ctx: Ctx, session: string | undefined, key: string, text: string, fold: string): boolean {
+  const note = ctx.sessions.note as ((id: string, key: string, text: string, opts: { fold: string; now: boolean }) => void) | undefined;
+  if (!session || !note) return false;
   try {
-    note(session, `ignored:${a.id}`, ignoredText([a], waiting), { fold: `你忽略了「${cutTitle(a.title)}」` });
+    note(session, key, text, { fold, now: true });
     return true;
   } catch {
     return false;
   }
+}
+
+export function noteIgnored(ctx: Ctx, session: string | undefined, a: { id: string; title: string }, waiting: string[] = []): boolean {
+  return noticeAgent(ctx, session, `ignored:${a.id}`, ignoredText([a], waiting), `你忽略了「${cutTitle(a.title)}」`);
 }
 
 const cutTitle = (t: string) => ([...t].length > 30 ? [...t].slice(0, 30).join("") + "…" : t);

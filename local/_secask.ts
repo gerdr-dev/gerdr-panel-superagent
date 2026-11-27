@@ -3,7 +3,7 @@
 // ended, nothing marked it, and the user missed it (2026-11-19: "我会漏看"). Same card as a worker's ask (cards.tsx
 // TaskStep, ref sN); the 秘书 button counts the open ones; the user answers on the card or closes one unanswered.
 
-import { secIgnoredLead, state, toMain, updateState, type SecAsk } from "./_main";
+import { state, toMain, updateState, type SecAsk } from "./_main";
 import { noteIgnored } from "./_store";
 import { logDone, NOTE, opens } from "./_letgo";
 import { skillFile } from "./_user";
@@ -144,27 +144,15 @@ export async function answerSec(input: { id: string; value?: string }, ctx: Ctx)
   return { ask: a.id, answer: a.answer };
 }
 
-/** The user ignored it (the ✕ on its card or its row): { id }. The secretary hears with its next message, not now. */
+/** The user ignored it (the ✕ on its card or its row). Tell the secretary without starting a turn. */
 export function closeSec(input: { id: string }, ctx: Ctx) {
-  const a = updateState(ctx, (x) => {
+  const { session, ask, waiting } = updateState(ctx, (x) => {
     const a = findSec(x.asks, String(input?.id ?? ""));
     if (a.status !== "open") throw new Error(`「${a.title}」已经不在等你了`);
-    // Said with the secretary's next message, whoever sends it (noteIgnored); untold only on a Gerdr without notes
     const waiting = (x.items ?? []).filter((y) => y.state === "waiting" && y.ask === a.id).map((y) => y.id);
-    Object.assign(a, { status: "dropped", closedByUser: true, told: noteIgnored(ctx, x.main, a, waiting), doneAt: Date.now() });
-    return a;
+    Object.assign(a, { status: "dropped", closedByUser: true, told: true, doneAt: Date.now() });
+    return { session: x.main, ask: a, waiting };
   });
-  return { closed: a.id };
-}
-
-/**
- * The secretary's turn started without the board (the user typed in its chat) while it hasn't heard of questions the
- * user ignored: said into that turn now. Called with every session event (tasks.list).
- */
-export async function secretaryIgnored(ctx: Ctx) {
-  const s = state(ctx);
-  if (!s.main || !(s.asks ?? []).some((a) => a.closedByUser && !a.told)) return;
-  if (ctx.sessions.get(s.main)?.status !== "running") return;
-  const lead = secIgnoredLead(ctx);
-  if (lead) await ctx.sessions.send(s.main, lead, { now: true, fold: "你忽略了秘书问的问题" } as any).catch(() => {});
+  if (!noteIgnored(ctx, session, ask, waiting)) updateState(ctx, (x) => void (findSec(x.asks, ask.id).told = false));
+  return { closed: ask.id };
 }

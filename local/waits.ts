@@ -22,7 +22,7 @@
 // replaces). The worker running again doesn't end it: until 2026-11-23 it did, and a worker woken by the user lost
 // the colleague it was waiting on; the user wants the agent to cancel, not the board to guess.
 
-import { activity, going, load, memberName, members, note, reqOf, teamOf, update, type Task } from "./_store";
+import { activity, going, load, memberName, members, note, noticeAgent, reqOf, teamOf, update, type Task } from "./_store";
 import { endGroups, isOutside, mrConversation, open, outsideGroups, waitOn, wakeItem, wakeText, type Wait, type WakeOn } from "./_waits";
 
 const sessionTitle = (w: Wait) => w.what.replace(/^它派出的「(.*?)」.*$/, "$1");
@@ -256,9 +256,8 @@ export function cancel_wait(input: { id: string; reason: string }, ctx: Ctx) {
 
 /**
  * The user closes a wait from its card (ui/src/cards.tsx "task-wait", the ✕ by "等了 n 分钟"): { id, waits } or, for
- * old cards, { id, since } — the whole wait_for goes, as with cancel_wait. The worker isn't woken for it (the user
- * closed it because it no longer matters, not to start a turn); it's told with its next message, as one folded line
- * (Gerdr's ctx.sessions.note, as an ignored question is), so it doesn't go on as if still waiting (2026-11-26).
+ * old cards, { id, since } — the whole wait_for goes. Tell the worker in its current turn if possible, or with its
+ * next message.
  */
 export function stop(input: { id: string; waits?: string[]; since?: number }, ctx: Ctx) {
   const ended = update(ctx, (s) => {
@@ -271,14 +270,11 @@ export function stop(input: { id: string; waits?: string[]; since?: number }, ct
     t.updatedAt = Date.now();
     return { session: t.session, id: ws[0].id, what: ws[0].what };
   });
-  const tell = (ctx.sessions as any).note;
-  if (ended.session && typeof tell === "function") {
-    try {
-      tell(ended.session, `wait-stopped:${ended.id}`, `[任务面板] 用户关掉了你的等待「${ended.what}」（${ended.id}）：不用再等它了，它也不会再叫醒你。还要等就按现在的情况重新 wait_for。`, {
-        fold: `用户关掉了等待「${cutLine(ended.what, 40)}」`,
-      });
-    } catch {}
-  }
+  noticeAgent(
+    ctx, ended.session, `wait-stopped:${ended.id}`,
+    `[任务面板] 用户关掉了你的等待「${ended.what}」（${ended.id}）：不用再等它了，它也不会再叫醒你。还要等就按现在的情况重新 wait_for。`,
+    `用户关掉了等待「${cutLine(ended.what, 40)}」`,
+  );
   return status({ id: input.id, waits: input.waits, since: input.since }, ctx);
 }
 

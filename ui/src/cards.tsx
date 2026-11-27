@@ -378,7 +378,7 @@ function TaskWait({ card }: CardProps) {
     return () => clearInterval(timer);
   }, []);
   const on = !st || st.state === "waiting";
-  // ✕: the user closes the wait themselves (local/waits.ts stop), the worker told with its next message
+  // ✕: the user closes the wait themselves (local/waits.ts stop), the worker told in its turn or with its next message
   const [stopping, setStopping] = useState(false);
   const [err, setErr] = useState("");
   const stop = async () => {
@@ -416,7 +416,7 @@ function TaskWait({ card }: CardProps) {
         </span>
         <span className="ml-auto shrink-0">{on ? waited : st?.at ? new Date(st.at).toTimeString().slice(0, 5) : ""}</span>
         {on && st && c.task && (
-          <button className="-my-1 -mr-1.5 shrink-0 rounded-md p-1 hover:bg-accent hover:text-foreground disabled:opacity-50" title="不等了：关掉这个等待，worker 下次收到消息时会知道" disabled={stopping} onClick={stop}>
+          <button className="-my-1 -mr-1.5 shrink-0 rounded-md p-1 hover:bg-accent hover:text-foreground disabled:opacity-50" title="不等了：关掉这个等待，通知 worker，空闲时随下条消息送达" disabled={stopping} onClick={stop}>
             <X className="size-3.5" />
           </button>
         )}
