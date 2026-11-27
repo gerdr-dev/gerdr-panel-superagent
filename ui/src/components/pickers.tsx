@@ -1,13 +1,15 @@
 import { ArrowUp, ChevronRight, Folder, GitBranch } from "lucide-react";
 import clsx from "clsx";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "./Button";
 import { run } from "../lib/gerdr";
 import { Select } from "./ui/select";
 
 // Controls the 设置 page shares: a folder (typed, or browsed from the user's projects down) and an agent / role.
 
-export const input = "h-8 w-full rounded-md border bg-background px-2 text-[13px] outline-none focus:ring-2 focus:ring-ring max-md:text-[16px]";
+// 13px on phones too: the 16px it had there (against iOS zooming in on a focused field) towered over everything around
+// it (the user, 2026-11-27), and the page's viewport has maximum-scale=1 (Gerdr's uisite), which already stops that zoom.
+export const input = "h-8 w-full rounded-md border bg-background px-2 text-[13px] outline-none focus:ring-2 focus:ring-ring";
 
 type Entry = { name: string; path: string; git?: boolean };
 type Here = { path: string; home: string; recent: string[]; entries: Entry[] };
@@ -25,12 +27,30 @@ const tilde = (p: string, home: string) => (inHome(p, home) ? "~" + p.slice(home
  * dropped down, or right after a "/" — is onEnter (the repository list adds the folder typed).
  *
  * The browser opens where the field points (the nearest folder above a half-typed path), and its top row — up a level,
- * the path with each part a way back to it, 选这里 — stays put while the folders scroll under it. It used to be a small
+ * the path with each part a way back to it, 选择 — stays put while the folders scroll under it. Opened on nothing typed,
+ * it starts with the recent projects, and one tap picks one (fills the field and closes). They used to sit under the
+ * folders and only open there: tapping one changed nothing you could see (the user, 2026-11-27, "看不出有变化").
+ * A folder in the list opens; 选择 takes the one you are in. `action` (the list's 添加) sits beside the field, so the
+ * browser below spans the whole width. It used to be a small
  * grey ".." inside the list: in a folder of 60 repositories it scrolled away with the path, and there was no way back
  * up from a wrong turn (user report).
  */
-export function PathPick({ value, onChange, placeholder, onEnter }: { value: string; onChange: (v: string) => void; placeholder?: string; onEnter?: () => void }) {
+export function PathPick({
+  value,
+  onChange,
+  placeholder,
+  onEnter,
+  action,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  onEnter?: () => void;
+  action?: ReactNode;
+}) {
   const [open, setOpen] = useState(false);
+  // Opened on an empty field: recent projects first, until the person goes into a folder
+  const [fresh, setFresh] = useState(false);
   const [here, setHere] = useState<Here | null>(null);
   const go = (path?: string) => run<Here>("settings.browse", { path }).then(setHere, () => {});
 
@@ -78,6 +98,7 @@ export function PathPick({ value, onChange, placeholder, onEnter }: { value: str
     setTyping(false);
     if (open) return setOpen(false);
     setOpen(true);
+    setFresh(!value.trim());
     go(value.trim() || undefined);
   };
 
@@ -141,40 +162,48 @@ export function PathPick({ value, onChange, placeholder, onEnter }: { value: str
         <Button variant="outline" size="icon-sm" className="shrink-0" aria-label="选择文件夹" aria-expanded={open} onClick={toggleBrowser}>
           <Folder className="size-3.5" />
         </Button>
+        {action}
       </div>
       {open && here && (
         <div className="max-h-72 overflow-y-auto rounded-md border bg-background text-[12px]">
           {/* One row on a desktop; on a phone the path gets a row of its own under the two buttons, or it broke mid-word */}
           <div className="sticky top-0 z-10 flex flex-wrap items-center gap-1.5 border-b bg-background p-1.5">
-            <Button variant="ghost" className="shrink-0 px-2" disabled={here.path === "/"} onClick={() => go(parentOf(here.path))}>
+            <Button variant="ghost" className="shrink-0 px-2" disabled={here.path === "/"} onClick={() => (setFresh(false), go(parentOf(here.path)))}>
               <ArrowUp className="size-3.5" />
               上一级
             </Button>
-            <Crumbs path={here.path} home={here.home} go={go} />
+            <Crumbs path={here.path} home={here.home} go={(p) => (setFresh(false), go(p))} />
             <Button className="shrink-0 max-md:ml-auto" onClick={() => (onChange(here.path), setOpen(false))}>
-              选这里
+              选择
             </Button>
           </div>
           <div className="space-y-0.5 p-1.5">
+            {fresh && here.recent.length > 0 && (
+              <>
+                <div className="px-1 pb-0.5 text-[11px] text-muted-foreground">最近的项目：点一下选上</div>
+                {here.recent.map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => (onChange(p), setTyping(false), setOpen(false))}
+                    className="flex w-full items-center gap-1.5 rounded-sm px-1 py-0.5 text-left hover:bg-accent max-md:py-1.5"
+                  >
+                    <Folder className="size-3 shrink-0 text-muted-foreground" />
+                    <span className="shrink-0">{p.replace(/\/+$/, "").split("/").pop()}</span>
+                    <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">{tilde(parentOf(p), here.home)}</span>
+                  </button>
+                ))}
+                <div className="px-1 pt-2 pb-0.5 text-[11px] text-muted-foreground">或者从这里往下找：点文件夹进去，再点「选择」</div>
+              </>
+            )}
             {!here.entries.length && <p className="px-1 py-0.5 text-muted-foreground">这里面没有文件夹</p>}
             {here.entries.map((e) => (
-              <button key={e.path} onClick={() => go(e.path)} className="flex w-full items-center gap-1.5 rounded-sm px-1 py-0.5 text-left hover:bg-accent max-md:py-1.5">
+              <button key={e.path} onClick={() => (setFresh(false), go(e.path))} className="flex w-full items-center gap-1.5 rounded-sm px-1 py-0.5 text-left hover:bg-accent max-md:py-1.5">
                 <Folder className="size-3 shrink-0 text-muted-foreground" />
                 <span className="truncate">{e.name}</span>
                 {e.git && <GitBranch className="size-3 shrink-0 text-muted-foreground" aria-label="git 仓库" />}
+                <ChevronRight className="ml-auto size-3 shrink-0 text-muted-foreground" />
               </button>
             ))}
-            {here.recent.length > 0 && (
-              <>
-                <div className="px-1 pt-1 text-[11px] text-muted-foreground">最近的项目</div>
-                {here.recent.map((p) => (
-                  <button key={p} onClick={() => go(p)} className="flex w-full items-center gap-1.5 rounded-sm px-1 py-0.5 text-left font-mono text-[11px] hover:bg-accent max-md:py-1.5">
-                    <Folder className="size-3 shrink-0 text-muted-foreground" />
-                    <span className="truncate">{tilde(p, here.home)}</span>
-                  </button>
-                ))}
-              </>
-            )}
           </div>
         </div>
       )}

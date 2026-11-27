@@ -304,15 +304,18 @@ function Repos({ repos, onChange }: { repos: Repo[]; onChange: (r: Repo[]) => vo
           </div>
         </div>
       ))}
-      <div className="flex items-start gap-1.5">
-        <div className="min-w-0 flex-1">
-          <PathPick value={add} onChange={setAdd} onEnter={push} placeholder="加一个工作目录的绝对路径，或输入名字找最近用过的项目" />
-        </div>
-        {/* Same height as the field and the folder button beside it (h-8); words only, no icon (the user, 2026-11-27) */}
-        <Button variant="outline" className="shrink-0" disabled={!add.trim()} onClick={push}>
-          添加
-        </Button>
-      </div>
+      {/* Same height as the field and the folder button beside it (h-8); words only, no icon (the user, 2026-11-27) */}
+      <PathPick
+        value={add}
+        onChange={setAdd}
+        onEnter={push}
+        placeholder="加一个工作目录的绝对路径，或输入名字找最近用过的项目"
+        action={
+          <Button variant="outline" className="shrink-0" disabled={!add.trim()} onClick={push}>
+            添加
+          </Button>
+        }
+      />
     </div>
   );
 }
