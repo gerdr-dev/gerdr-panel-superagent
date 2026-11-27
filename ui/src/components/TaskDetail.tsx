@@ -18,6 +18,7 @@ import { run } from "../lib/gerdr";
 import * as core from "@gerdr/core";
 import { isSubmitEnter } from "../lib/utils";
 import { Md } from "../lib/markdown";
+import { newCodeTab } from "../lib/view";
 
 // A task's group is its status and only the user moves it (移到… in its menu, the buttons: 派出去 / 通过 / 打回 / 放弃).
 // Neither the worker nor its session's state moves it (DESIGN.md「状态只由用户改」, 2026-11-17: a /compact sent a
@@ -1144,7 +1145,15 @@ function NewTask({ onClose, act }: { onClose: () => void; act: Act }) {
               </button>
             )}
           </>
-        <div className="flex justify-end gap-2">
+        <div className="flex items-center justify-end gap-2">
+          {/* The way past the secretary, for someone who came here wanting to talk to a worker themselves */}
+          <button
+            className="mr-auto text-[12px] text-muted-foreground hover:text-foreground"
+            title="不写任务，自己开一个对话：选目录和 agent，直接跟它说"
+            onClick={() => (onClose(), newCodeTab())}
+          >
+            自己开对话 ⌘T
+          </button>
           <Button variant="outline" disabled={!ok || !!busy} title="放进待办，先不派出去" onClick={() => submit(false)}>
             只记下
           </Button>

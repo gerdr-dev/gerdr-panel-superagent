@@ -588,7 +588,7 @@ export function Fusion({ children }: { children: React.ReactNode }) {
           <span
             role="button"
             className="flex size-5 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
-            title="新任务：写清楚要做什么，选仓库和 agent；先放在待办，或者直接派出去"
+            title="新任务：写下要做什么，先放进待办，或者交给秘书安排（要自己直接开一个对话用 ⌘T 或「进行中」的 +）"
             onClick={(e) => (e.stopPropagation(), closeCodeDrawer(), setCreating(true))}
           >
             <Plus className="size-3.5" />
@@ -606,6 +606,9 @@ export function Fusion({ children }: { children: React.ReactNode }) {
       </Drop>
 
       <Drop to="running" onMove={onMove}>
+        {/* The two +s differ by place (the person, 2026-11-27): 进行中's starts a conversation now, the same page as ⌘T
+            (a worker spoken to directly), 待办's writes a task down for later or for the secretary. Both opened the task
+            dialog for a while, and ⌘T, the only way to pick the worker yourself, had nothing in the list to click */}
         <FoldTitle open={activeOpen} onClick={foldActive} icon={STATUS_ICON.running} label={`进行中 ${you + activeTasks.length + activeOwn.length}`}>
           {/* What waits on the person is in 进行中, first and in amber, not a group of its own: DESIGN.md, 2026-11-13
               (「不需要 等你 和 进行中。否则就是会跳来跳去…等我的直接提前，黄色」). It was a group here for a day, right under
@@ -615,8 +618,8 @@ export function Fusion({ children }: { children: React.ReactNode }) {
           <span
             role="button"
             className="flex size-5 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
-            title="新任务：写一句要做什么，直接派出去（不经过秘书就选上仓库）；Code 里已有的对话用最下面的「从 Code 导入」"
-            onClick={(e) => (e.stopPropagation(), closeCodeDrawer(), setCreating(true))}
+            title="自己开一个对话（⌘T）：选目录和 agent，直接跟它说，不经过秘书；Code 里已有的对话用最下面的「从 Code 导入」"
+            onClick={(e) => (e.stopPropagation(), closeCodeDrawer(), newCodeTab())}
           >
             <Plus className="size-3.5" />
           </span>
