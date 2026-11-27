@@ -58,7 +58,7 @@ export function ImportDialog({ repos, sessions, onClose, onDone }: { repos: Impo
         <DialogTitle className="text-[15px]">从 Code 导入</DialogTitle>
         <p className="text-[12px] text-muted-foreground">这个面板只列它自己的任务。Code 里已有的东西，选了才带进来，只做这一次；之后在 Code 里新开的，不会自己出现在这里。</p>
         <div className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1">
-          <Section title="仓库" hint="这个项目的工作空间，加进「设置 → 仓库」：秘书从里面挑，新对话页也列它们" none="没有工作空间">
+          <Section title="仓库" hint="这个项目的工作空间，加进「设置 → 仓库」：秘书从里面挑，⌘T 页也列它们" none="没有工作空间">
             {repos.map((r) => (
               <Line key={r.path} on={r.have || pickRepos.has(r.path)} disabled={r.have} onClick={() => toggle(pickRepos, setPickRepos, r.path)} title={r.path}>
                 <Folder className="size-3.5 shrink-0 text-muted-foreground" />

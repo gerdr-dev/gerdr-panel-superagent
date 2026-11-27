@@ -5,7 +5,7 @@
 // (continueFrom, with fork / forkText: Gerdr's fork dialog, which may fork a running conversation). Here it becomes a task whose worker starts with the panel's tools and rules, sends nothing, and
 // waits for the person's first message.
 
-import { add, drop, start } from "./tasks";
+import { add, drop, start, BLANK_TITLE } from "./tasks";
 
 /** { cwd, agent?, mode?, continueFrom?, fork?, forkText? } → { task, session }: the worker Code shows. */
 export async function run(input: { cwd: string; agent?: string; mode?: string; continueFrom?: string; fork?: boolean; forkText?: boolean }, ctx: Ctx) {
@@ -19,7 +19,7 @@ export async function run(input: { cwd: string; agent?: string; mode?: string; c
   const t = await add(
     (from
       ? { title: `${was || "对话"}（分支）`, prompt: `从对话「${was || input.continueFrom}」分出来的：之前的内容都在上面，接下来做什么看你的下一条消息。` }
-      : { title: "新会话", autoTitle: true, blank: true, prompt: "你自己新开的对话：要做什么看你的第一条消息。" }) as any,
+      : { title: BLANK_TITLE, autoTitle: true, blank: true, prompt: "你自己新开的对话：要做什么看你的第一条消息。" }) as any,
     ctx,
   );
   try {

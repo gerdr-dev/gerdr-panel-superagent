@@ -1149,10 +1149,10 @@ function NewTask({ onClose, act }: { onClose: () => void; act: Act }) {
           {/* The way past the secretary, for someone who came here wanting to talk to a worker themselves */}
           <button
             className="mr-auto text-[12px] text-muted-foreground hover:text-foreground"
-            title="不写任务，自己开一个对话：选目录和 agent，直接跟它说"
+            title="不经过秘书：自己选目录和 agent，直接跟它说"
             onClick={() => (onClose(), newCodeTab())}
           >
-            自己开对话 ⌘T
+            直接开始 ⌘T
           </button>
           <Button variant="outline" disabled={!ok || !!busy} title="放进待办，先不派出去" onClick={() => submit(false)}>
             只记下

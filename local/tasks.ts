@@ -16,6 +16,9 @@ import { isMain, mains, rerouteTask, routeTask, sweep, toMain } from "./_main";
 import { textOf } from "./playbooks";
 import { liveTasks, said } from "./_clues";
 
+/** The title of a task the person opened themselves (local/blank.ts) until its first message names it. */
+export const BLANK_TITLE = "新任务";
+
 export type { Task };
 
 // Task board data: user/data/reqs/, a file per part (read and written through _store.ts, _parts.ts). Every task is
@@ -657,9 +660,10 @@ export function folder(input: { id: string }, ctx: Ctx): { path: string; exists:
   const a = (ctx as any).artifacts;
   if (!a) return null;
   const t = find(load(ctx).store, input.id);
-  // A conversation the person opened (local/blank.ts) is "新会话" until its first message names it: its folder waits
-  // under a hidden name meanwhile and takes the title when it comes (edit → rename), never a visible 新会话_3
-  const untitled = !!(t as any).blank && !!t.autoTitle && t.title === "新会话";
+  // A conversation the person opened (local/blank.ts) is BLANK_TITLE until its first message names it: its folder waits
+  // under a hidden name meanwhile and takes the title when it comes (edit → rename), never a visible 新任务_3.
+  // 新会话 is what such tasks were called before 2026-11-27
+  const untitled = !!(t as any).blank && !!t.autoTitle && (t.title === BLANK_TITLE || t.title === "新会话");
   return a.folder({ key: t.id, name: t.title || t.id, under: "任务", untitled });
 }
 

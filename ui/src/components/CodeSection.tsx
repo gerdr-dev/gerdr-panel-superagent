@@ -11,7 +11,7 @@ import { ImportDialog } from "./ImportDialog";
 import { Dialog, DialogContent, DialogTitle } from "./ui/dialog";
 import { RowMenu, type RowMenuItem } from "./RowMenu";
 import { openAsks, type Task, useTasks } from "../lib/tasks";
-import { CodeRow, type CodeRowInfo, closeCodeDrawer, newCodeTab, useCodeDirs, useCodeStart, useCodeOrder, useCodeOverview, useCodeNumber, openSettings, showInCode, useCodeRowDrop, useCodePaneTag, jumpInCode, useCodeRowMenu, codeSessionMenu, useCodeRows, useCodeSession, useCodeCloseFallback, type CodePaneTag } from "../lib/view";
+import { CodeRow, type CodeRowInfo, closeCodeDrawer, newCodeTab, useCodeDirs, useCodeNoun, useCodeStart, useCodeOrder, useCodeOverview, useCodeNumber, openSettings, showInCode, useCodeRowDrop, useCodePaneTag, jumpInCode, useCodeRowMenu, codeSessionMenu, useCodeRows, useCodeSession, useCodeCloseFallback, type CodePaneTag } from "../lib/view";
 import { usePanelChange, usePanelVisible, useRefresh, useSessions } from "../lib/visible";
 
 // Code's whole list, drawn by this panel (lib/view.ts, layout.tsx; core CodeView list="replace"): not Code's
@@ -238,6 +238,8 @@ export function Fusion({ children }: { children: React.ReactNode }) {
   useCodeDirs(repos.map((r) => ({ path: r.path, name: base(r.path), ...(r.color ? { color: r.color } : {}) })));
   // What the person starts themselves (Cmd+T, +, ⌘D, a fork) is a task from the start, like the secretary's (local/blank.ts)
   useCodeStart(async (o) => (await run<{ session: string }>("blank.run", o)).session);
+  // So Code's page and tab for it say so too, not 新会话 (the person, 2026-11-27: 「Super Agent 里不要新对话，叫新任务」)
+  useCodeNoun("新任务");
 
   const [activeOpen, foldActive] = useFold("active", true);
   const [reviewOpen, foldReview] = useFold("review");
@@ -588,7 +590,7 @@ export function Fusion({ children }: { children: React.ReactNode }) {
           <span
             role="button"
             className="flex size-5 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
-            title="新任务：写下要做什么，先放进待办，或者交给秘书安排（要自己直接开一个对话用 ⌘T 或「进行中」的 +）"
+            title="写下要做什么，先放进待办，或者交给秘书安排（要自己选目录和 agent 直接开始，用 ⌘T 或「进行中」的 +）"
             onClick={(e) => (e.stopPropagation(), closeCodeDrawer(), setCreating(true))}
           >
             <Plus className="size-3.5" />
@@ -618,7 +620,7 @@ export function Fusion({ children }: { children: React.ReactNode }) {
           <span
             role="button"
             className="flex size-5 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
-            title="自己开一个对话（⌘T）：选目录和 agent，直接跟它说，不经过秘书；Code 里已有的对话用最下面的「从 Code 导入」"
+            title="新任务（⌘T）：自己选目录和 agent，直接跟它说，不经过秘书；Code 里已有的对话用最下面的「从 Code 导入」"
             onClick={(e) => (e.stopPropagation(), closeCodeDrawer(), newCodeTab())}
           >
             <Plus className="size-3.5" />

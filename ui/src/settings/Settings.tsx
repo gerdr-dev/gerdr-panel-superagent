@@ -144,7 +144,7 @@ export default function SettingsPage({ onFlow }: { onFlow: () => void }) {
 
           <Section
             title="仓库"
-            note="新任务的仓库下拉、新会话页的文件夹和秘书都只看这份。说明写给秘书看（这是哪个服务、哪个产品），它靠这个挑仓库。空着时，拿最近用过的目录当建议。"
+            note="新任务弹窗的仓库下拉、⌘T 页上的文件夹和秘书都只看这份。说明写给秘书看（这是哪个服务、哪个产品），它靠这个挑仓库。空着时，拿最近用过的目录当建议。"
           >
             <Repos repos={s.repos} onChange={(v) => put("repos", v)} />
           </Section>
@@ -335,7 +335,7 @@ function RepoColor({ value, onChange }: { value?: string; onChange: (c: string |
     <div ref={ref} className="relative">
       <button
         type="button"
-        title="颜色：列表里这个仓库的名字、新会话页上它的文件夹按钮用它"
+        title="颜色：列表里这个仓库的名字、⌘T 页上它的文件夹按钮用它"
         className={clsx(dot, "flex items-center justify-center", !value && "border-dashed text-muted-foreground")}
         style={value ? { background: value, borderColor: value } : undefined}
         onClick={() => setOpen((o) => !o)}

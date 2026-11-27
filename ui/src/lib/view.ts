@@ -24,6 +24,7 @@ type Core = {
   useCodePaneTag?: (fn: (row: { pane: string; session?: string }) => CodePaneTag | CodePaneTag[] | null) => void;
   jumpInCode?: (session: string, ref: string) => void;
   useCodeDirs?: (dirs: { path: string; name?: string; color?: string }[]) => void;
+  useCodeNoun?: (noun: string) => void;
   useCodeOrder?: (sessions: string[]) => void;
   useCodeOverview?: (sessions: string[]) => void;
   useCodeNumber?: (session?: string) => number | undefined;
@@ -51,6 +52,8 @@ export const useCodeRowMenu: (fn: (row: { pane: string; session?: string }) => C
 export const codeSessionMenu = (session: string): CodeMenuItem[] => c.codeSessionMenu?.(session) ?? [];
 /** The folders offered on Code's new-conversation page while we show: ours (设置 → 仓库), not Code's workspaces. */
 export const useCodeDirs: (dirs: { path: string; name?: string; color?: string }[]) => void = c.useCodeDirs ?? (() => {});
+/** What Code calls a new one while we show (the new-conversation page's title, an empty pane's tab). An older Gerdr: 新会话. */
+export const useCodeNoun: (noun: string) => void = c.useCodeNoun ?? (() => {});
 /**
  * Conversations started in Code while we show (Cmd+T, 进行中's +, ⌘D, a fork) start as ours: a task's worker. Without
  * it (an older Gerdr) they stay Code's, and show here only once imported.
