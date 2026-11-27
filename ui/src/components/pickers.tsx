@@ -138,7 +138,7 @@ export function PathPick({ value, onChange, placeholder, onEnter }: { value: str
             </div>
           )}
         </div>
-        <Button variant="outline" size="icon" aria-label="选择文件夹" aria-expanded={open} onClick={toggleBrowser}>
+        <Button variant="outline" size="icon-sm" className="shrink-0" aria-label="选择文件夹" aria-expanded={open} onClick={toggleBrowser}>
           <Folder className="size-3.5" />
         </Button>
       </div>
