@@ -98,6 +98,11 @@ export type Task = {
    */
   autoTitle?: boolean;
   /**
+   * The worker's conversation's name when list() last looked: a different name since means it was renamed there
+   * (Code's 重命名会话) and the task takes it. Per session, so a new worker's conversation is only noted, not taken.
+   */
+  sessionTitle?: { session: string; title: string };
+  /**
    * todo → running → done (nothing for the user to judge) | review (the user judges the result); dropped. Only the
    * worker or the user says done: no rule does (a merged MR is news for the worker, not the end).
    */

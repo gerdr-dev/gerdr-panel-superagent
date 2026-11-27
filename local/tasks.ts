@@ -72,11 +72,29 @@ export async function list(input: unknown, ctx: Ctx) {
   // Read sessions outside the write: ctx.sessions.get is cheap, but keep the locked part small
   // Done ones too: the user may give a finished worker more to do in its chat (below)
   for (const t of store.tasks) if (t.session && t.status !== "dropped") live[t.session] = ctx.sessions.get(t.session);
-  // Gerdr named an auto-titled task's conversation (or renamed it as the talk went on): the task takes that name
+  // The conversation's name changed: the task takes it, so the row, the card, the folder and what notifications and
+  // the secretary call the task stay one name. Gerdr named an auto-titled task's conversation (or renamed it as the
+  // talk went on), or the user renamed the conversation (Code's 重命名会话, the chat's title). Only a change from the
+  // name last seen counts (sessionTitle): a task renamed without its conversation (tasks.edit from an agent) is not
+  // put back to the conversation's old name.
+  const seen: { id: string; session: string; title: string }[] = [];
   for (const t of store.tasks) {
-    const name = t.autoTitle && t.session ? String(live[t.session]?.title ?? "").trim() : "";
-    if (name && name !== t.title) edit({ id: t.id, title: name, autoTitle: true }, ctx);
+    if (!t.session || t.status === "dropped") continue;
+    const name = String(live[t.session]?.title ?? "").trim();
+    if (!name) continue; // no name yet, or /clear dropped it: keep the last one seen
+    const last = t.sessionTitle?.session === t.session ? t.sessionTitle.title : undefined;
+    const sessionTitle = { session: t.session, title: name };
+    if (name !== t.title && (t.autoTitle || (last !== undefined && name !== last)))
+      edit({ id: t.id, title: name, sessionTitle, ...(t.autoTitle ? { autoTitle: true } : {}) }, ctx);
+    else if (last !== name) seen.push({ id: t.id, ...sessionTitle });
   }
+  if (seen.length)
+    update(ctx, (s) => {
+      for (const x of seen) {
+        const t = s.tasks.find((t) => t.id === x.id);
+        if (t) t.sessionTitle = { session: x.session, title: x.title };
+      }
+    });
   // Sessions the workers handed work to (reportTo / parent / a task tag), here or on another computer: waits of their
   // task (_waits.ts syncSessions)
   const kidsOf = (t: Task) =>
