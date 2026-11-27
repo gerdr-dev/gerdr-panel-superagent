@@ -599,7 +599,10 @@ export function folder(input: { id: string }, ctx: Ctx): { path: string; exists:
   const a = (ctx as any).artifacts;
   if (!a) return null;
   const t = find(load(ctx).store, input.id);
-  return a.folder({ key: t.id, name: t.title || t.id, under: "任务" });
+  // A conversation the person opened (local/blank.ts) is "新会话" until its first message names it: its folder waits
+  // under a hidden name meanwhile and takes the title when it comes (edit → rename), never a visible 新会话_3
+  const untitled = !!(t as any).blank && !!t.autoTitle && t.title === "新会话";
+  return a.folder({ key: t.id, name: t.title || t.id, under: "任务", untitled });
 }
 
 /** Changes fields of a task: { id, ...fields }. */
