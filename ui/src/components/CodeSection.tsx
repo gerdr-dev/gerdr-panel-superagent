@@ -2,7 +2,7 @@ import * as core from "@gerdr/core";
 import clsx from "clsx";
 import { ArrowRight, Ban, Download, Bot, CheckCircle2, ChevronRight, Circle, CircleDashed, CircleDotDashed, LayoutGrid, MessageSquare, Play, Plus, Settings } from "lucide-react";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { run } from "../lib/gerdr";
+import { project, run } from "../lib/gerdr";
 import { colorOf } from "../lib/repoColor";
 import { WholeWindow } from "../lib/portal";
 import { useSearchItems } from "../lib/search";
@@ -520,6 +520,21 @@ export function Fusion({ children }: { children: React.ReactNode }) {
         };
       }),
     { heading: "任务" },
+  );
+  // A 待办 from outside clicked in Gerdr's inbox, its card or its notification (local/_inbox.ts: the item's id is the
+  // task's): Gerdr brings this panel up and hands us the id, and the task opens as a click on its row would. Before,
+  // Gerdr only showed the panel (and not even the right project's), leaving the person to find the task (2026-11-27).
+  // Through the namespace: a Gerdr from before it has no onShowInboxItem
+  const allRef = useRef(all);
+  allRef.current = all;
+  useEffect(
+    () =>
+      (core as unknown as { onShowInboxItem?: (key: string, fn: (id: string) => void) => () => void }).onShowInboxItem?.(project, (id) => {
+        const t = allRef.current.find((x) => x.id === id);
+        // After the panel's switch has rendered: the panelShown effect below clears what's open while hidden
+        setTimeout(() => (t?.session && t.status !== "todo" ? showInCode(t.session) : openDetail(id)));
+      }),
+    [],
   );
   // Handed out meanwhile (its ▶, or 派出去 in the card): the card gives way to its worker's conversation
   useEffect(() => {
