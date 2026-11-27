@@ -1,6 +1,6 @@
 import { Palette, Plus, X } from "lucide-react";
 import clsx from "clsx";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "../components/Button";
 import { AgentPick, ChoicePick, input, PathPick, useAgents, type AgentChoice } from "../components/pickers";
 import { run } from "../lib/gerdr";
@@ -300,7 +300,7 @@ function Repos({ repos, onChange }: { repos: Repo[]; onChange: (r: Repo[]) => vo
               </Button>
             </div>
             <p className="-mt-1 break-all font-mono text-[11px] text-muted-foreground">{r.path}</p>
-            <input className={input} value={r.note ?? ""} placeholder="说明：比如「行情服务的后端」" onChange={(e) => at(i, { note: e.target.value })} />
+            <NoteField value={r.note ?? ""} onChange={(note) => at(i, { note })} />
           </div>
         </div>
       ))}
@@ -314,6 +314,45 @@ function Repos({ repos, onChange }: { repos: Repo[]; onChange: (r: Repo[]) => vo
         </Button>
       </div>
     </div>
+  );
+}
+
+/**
+ * A working directory's note: read as small wrapped text, edited in a textarea that grows with it. It was a one-line
+ * input, which on a phone (16px there, so iOS doesn't zoom in on focus) towered over the 13px name and cut every note
+ * after a few words (the user, 2026-11-27, a screenshot of 设置 on the phone).
+ */
+function NoteField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [edit, setEdit] = useState(false);
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight + 2}px`;
+  }, [edit, value]);
+  if (!edit)
+    return (
+      <button
+        type="button"
+        title="改说明"
+        className="-mx-1.5 block w-[calc(100%+0.75rem)] rounded-md px-1.5 py-0.5 text-left text-[12px] leading-relaxed break-words whitespace-pre-wrap text-muted-foreground hover:bg-accent/60"
+        onClick={() => setEdit(true)}
+      >
+        {value || <span className="italic opacity-70">加一句说明，写给秘书看：比如「行情服务的后端」</span>}
+      </button>
+    );
+  return (
+    <textarea
+      ref={ref}
+      autoFocus
+      rows={1}
+      className={clsx(input, "h-auto resize-none py-1.5 leading-relaxed")}
+      value={value}
+      placeholder="说明：比如「行情服务的后端」"
+      onChange={(e) => onChange(e.target.value)}
+      onBlur={() => setEdit(false)}
+    />
   );
 }
 
