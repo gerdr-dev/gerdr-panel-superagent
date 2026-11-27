@@ -150,8 +150,12 @@ export function instructions(input: unknown, ctx: Ctx) {
     `with the brief your first message gave you (brief): after /clear or a compaction, read it again there instead of guessing what the task was. ` +
     `Your questions and steps for the user have ids (a5, a5#1) for your tools only: the panel doesn't show them, so to ` +
     `the user name the question itself ("套餐商品配置那个问题"), never "卡片 a5" or "a5#1". ` +
-    `What the user's memory says about this repository and all of them came in your first message; the files are ` +
-    `${ctx.fs.root}/${MEMORY}/${t.repo ? nameOf(t.repo) : "…"}.md and ${GENERAL}.md there — add to them with remember ` +
+    ((ctx as any).repoMemory
+      ? `What the user's memory says about this repository is in your system prompt (Repository memory, kept by Gerdr for every ` +
+        `session there); what holds for all of them came in your first message, file ${ctx.fs.root}/${MEMORY}/${GENERAL}.md. ` +
+        `Add to either with remember `
+      : `What the user's memory says about this repository and all of them came in your first message; the files are ` +
+        `${ctx.fs.root}/${MEMORY}/${t.repo ? nameOf(t.repo) : "…"}.md and ${GENERAL}.md there — add to them with remember `) +
     `(when: ${skillFile(ctx, "superagent-panel/references/memory.md")}). ` +
     `The user may have a policy in effect (Let it go: policies by the clock, set on their panel) that lets you decide instead of asking ` +
     `and messages may go without them looking first. Before asking them or writing to someone as them, my_task's ` +

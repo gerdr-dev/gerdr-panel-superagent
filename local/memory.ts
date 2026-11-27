@@ -2,7 +2,7 @@
 // gets, the 记忆 page's reads and writes, and the text the code puts in a worker's and the router's first message.
 
 import { workflow } from "./_config";
-import { addLine, editMemory, GENERAL, MEMORY, MID, nameOf, pathOf, readMemory } from "./_memory";
+import { addLine, editMemory, GENERAL, MEMORY, memoryOf, MID, nameOf, pathOf, readMemory, repoStore, stamp } from "./_memory";
 import { load } from "./_store";
 import { skillFile } from "./_user";
 import { eventCard } from "./_cards";
@@ -66,15 +66,17 @@ export function remember(input: { text?: string; repo?: string; replaces?: strin
   const repo = (input?.repo ?? "").trim() || (mine ? mine.repo : "");
   if (!repo) throw new Error('说清记在哪个仓库：repo 写仓库的绝对路径，对所有仓库都成立的写 "general"');
   const name = repo === "general" ? GENERAL : nameOf(repo);
+  // A repository's notes are Gerdr's (local/_memory.ts): every session there gets them, not only this panel's workers
+  const mem = memoryOf(ctx, name, repo === "general" ? undefined : repo);
   const where = repo === "general" ? "记在所有仓库通用的记忆里" : `记在 ${nameOf(repo)} 的记忆里`;
   const line = text && `${text}（${today()}${mine ? `，${mine.id}` : ""}）`;
   if (!old) {
-    if (readMemory(ctx, name).split("\n").some((l) => l.replace(/（[^（）]*）\s*$/, "").replace(/^- /, "").trim() === text)) return { ok: true, note: "已经记着这一条了" };
-    addLine(ctx, name, line);
-    return { ok: true, file: `${ctx.fs.root}/${pathOf(name)}`, gerdrCard: eventCard(ctx, mine ? mine.id : undefined, "remember", text, { body: where }) };
+    if (mem.read().split("\n").some((l) => l.replace(/（[^（）]*）\s*$/, "").replace(/^- /, "").trim() === text)) return { ok: true, note: "已经记着这一条了" };
+    mem.add(line);
+    return { ok: true, file: mem.file, gerdrCard: eventCard(ctx, mine ? mine.id : undefined, "remember", text, { body: where }) };
   }
   let found = 0;
-  editMemory(ctx, name, (cur) => {
+  mem.edit((cur) => {
     found = 0;
     const lines = cur.split("\n").flatMap((l) => {
       if (!l.includes(old)) return [l];
@@ -83,10 +85,10 @@ export function remember(input: { text?: string; repo?: string; replaces?: strin
     });
     return lines.join("\n");
   });
-  if (!found) throw new Error(`「${old}」不在 ${name} 的记忆里：先看看原来那条怎么写的（${ctx.fs.root}/${pathOf(name)}）`);
+  if (!found) throw new Error(`「${old}」不在 ${name} 的记忆里：先看看原来那条怎么写的（${mem.file}）`);
   const gerdrCard = eventCard(ctx, mine ? mine.id : undefined, "remember", text || `删掉：${old}`, { body: text ? `${where}，换掉了「${old}」` : where });
-  if (found > 1) return { ok: true, gerdrCard, note: `「${old}」对上了 ${found} 行，都换掉了：去文件里看一眼对不对（${ctx.fs.root}/${pathOf(name)}）` };
-  return { ok: true, file: `${ctx.fs.root}/${pathOf(name)}`, gerdrCard };
+  if (found > 1) return { ok: true, gerdrCard, note: `「${old}」对上了 ${found} 行，都换掉了：去文件里看一眼对不对（${mem.file}）` };
+  return { ok: true, file: mem.file, gerdrCard };
 }
 
 /**
@@ -213,10 +215,21 @@ export function list(input: unknown, ctx: Ctx): Entry[] {
   };
   out.set(GENERAL, { name: GENERAL, label: "通用", ...of(GENERAL) });
   out.set(MID, { name: MID, label: "中期", ...of(MID) });
+  const store = repoStore(ctx);
+  // Gerdr's notes: the settings' working directories, then any other repository that has some
+  const ofRepo = (repo: string) => {
+    const text = store!.read(repo).text;
+    return { text, etag: stamp(text) };
+  };
   for (const r of workflow(ctx).repos) {
     const name = nameOf(r.path);
-    if (!out.has(name)) out.set(name, { name, label: name, repo: r.path, note: r.note, ...of(name) });
+    if (!out.has(name)) out.set(name, { name, label: name, repo: r.path, note: r.note, ...(store ? ofRepo(r.path) : of(name)) });
   }
+  if (store)
+    for (const n of store.list()) {
+      const name = nameOf(n.repo);
+      if (![...out.values()].some((e) => e.repo === n.repo)) out.set(out.has(name) ? n.repo : name, { name: out.has(name) ? n.repo : name, label: name, repo: n.repo, text: n.text, etag: stamp(n.text) });
+    }
   for (const f of ctx.fs.list(MEMORY)) {
     const name = f.path.slice(MEMORY.length + 1).replace(/\.md$/, "");
     if (f.dir || !f.path.endsWith(".md") || name.includes("/") || out.has(name)) continue;
@@ -227,7 +240,14 @@ export function list(input: unknown, ctx: Ctx): Entry[] {
 }
 
 /** { name, text, etag? } → the new etag; an empty text removes the file. */
-export function save(input: { name: string; text: string; etag?: string }, ctx: Ctx) {
+export function save(input: { name: string; repo?: string; text: string; etag?: string }, ctx: Ctx) {
+  const store = input.repo ? repoStore(ctx) : null;
+  if (store && input.repo) {
+    const cur = store.read(input.repo).text;
+    if (input.etag && stamp(cur) !== input.etag) throw new Error("这份记忆在别处被改过了（可能是 agent 刚记了一条）：重新打开再改");
+    const n = store.write(input.repo, input.text.trim());
+    return { etag: n.text ? stamp(n.text) : undefined };
+  }
   const p = pathOf(input.name);
   const st = ctx.fs.stat(p);
   if (st && input.etag && st.etag !== input.etag) throw new Error("这份记忆在别处被改过了（可能是 agent 刚记了一条）：重新打开再改");
@@ -246,7 +266,8 @@ export function save(input: { name: string; text: string; etag?: string }, ctx: 
  */
 export function forWorker(ctx: Ctx, repo: string) {
   const name = nameOf(repo);
-  const own = readMemory(ctx, name);
+  // Gerdr puts the repository's own notes into every session there itself ("Repository memory")
+  const own = repoStore(ctx) ? "" : readMemory(ctx, name);
   const all = readMemory(ctx, GENERAL);
   if (!own && !all) return "";
   return (

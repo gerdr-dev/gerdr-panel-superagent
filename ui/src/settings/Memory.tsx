@@ -64,7 +64,8 @@ export default function MemoryPage() {
     setBusy(true);
     setErr("");
     try {
-      const r = await run<{ etag?: string }>("memory.save", { name, text, etag });
+      const repo = files?.find((x) => x.name === name)?.repo;
+      const r = await run<{ etag?: string }>("memory.save", { name, repo, text, etag });
       setEtag(r.etag);
       setSaved(text);
       void loadList();
