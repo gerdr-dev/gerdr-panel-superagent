@@ -1,6 +1,7 @@
 import { tellInbox } from "./_inbox";
 import { modeFor } from "./_letgo";
 import { tellBadge } from "./_badge";
+import { DIR as PARTS, pathOf, type PartFile } from "./_parts";
 import { DATA, skillFile } from "./_user";
 import { workflow } from "./_config";
 import { forWorker } from "./memory";
@@ -97,18 +98,8 @@ export async function list(input: unknown, ctx: Ctx) {
     });
   // Sessions the workers handed work to (reportTo / parent / a task tag), here or on another computer: waits of their
   // task (_waits.ts syncSessions)
-  const kidsOf = (t: Task) =>
-    helpers(t, all).map((k: any) => ({
-      id: k.id,
-      title: k.title,
-      status: k.status,
-      waiting: k.waiting,
-      waitingKind: k.waitingKind,
-      // Waits on the user: an approval, or a question its worker left unanswered
-      user: k.status === "waiting" && (k.waitingKind !== "ask" || askLeft(k, t.session ? live[t.session] : null)),
-    }));
-  const kids: Record<string, ReturnType<typeof kidsOf>> = {};
-  for (const t of store.tasks) if (t.status !== "done" && t.status !== "dropped") kids[t.id] = kidsOf(t);
+  const kids: Record<string, ReturnType<typeof liveHelpers>> = {};
+  for (const t of store.tasks) if (t.status !== "done" && t.status !== "dropped") kids[t.id] = liveHelpers(t, all, t.session ? live[t.session] : null);
   const nudge: { session: string; id: string; out: string[] }[] = [];
   // Answers to questions the secretary passed on (tasks.message): into its chat, where the user asked
   const answered: { id: string; asked: string; text: string }[] = [];
@@ -195,41 +186,11 @@ export async function list(input: unknown, ctx: Ctx) {
     const kept = new Set(load(ctx).store.tasks.map((t) => t.id));
     s.tasks = s.tasks.filter((t) => kept.has(t.id));
   }
-  let ack: ReturnType<typeof workflow> | undefined;
-  const tasks = s.tasks.map((t) => {
-      const sess = t.session ? live[t.session] : null;
-      const halted = stopped(t, sess);
-      // What it last said, for a card that has it stopped: its last paragraph, without Gerdr's note on how the turn
-      // ended (that's stopWhy)
-      const idle = sess && (sess.status === "idle" || sess.status === "error");
-      const said = idle && halted ? lastWords(String(sess?.reply ?? "")) : "";
-      const ks = kids[t.id] ?? [];
-      // The card's line: the newest paragraph in its worker's conversation, read live (summary is written only by
-      // task_update or when a turn ends, and workers forget the former: the card read hours behind the chat)
-      const now = t.status !== "done" && t.status !== "dropped" && t.session ? newest(ctx, t.session) : "";
-      return {
-        ...t,
-        // The open waits, each with what wakes it in words (the 在等 list, the card); ended ones stay in t.waits
-        waits: open(t).length ? open(t).map((w) => ({ ...w, wake: wakeText(w) })) : undefined,
-        // The sessions it handed work to, for the card's chips (each is a wait as well)
-        helpers: ks.length ? ks.map((k) => ({ id: k.id, title: k.title, status: k.status, waiting: k.waiting, waitingKind: k.waitingKind, left: k.user })) : undefined,
-        // Where each of its chat cards stands (_cardstate.ts): the cards read them from here while the board is loaded
-        cards: cardStates(t),
-        live: sess ? { status: sess.status, waiting: sess.waiting, waitingSince: sess.waitingSince, turnStartedAt: sess.turnStartedAt, updatedAt: sess.updatedAt, error: sess.error, title: sess.title } : null,
-        column: column(s, t, sess),
-        ready: blockersDone(s, t),
-        // Stopped with nothing to wait on (shown under 等你): what it last said, for the card
-        stopped: halted || undefined,
-        stopWhy: halted ? stopWhy(t, sess, s) : undefined,
-        said: said || undefined,
-        latest: now || undefined,
-        // 设置 → 回复对方 is 派出去时, and it's not out yet and came from a chat: the card's 回复对方 box by 派出去, filled
-        // with the 回复对方 words for the user to change
-        ...(t.status === "todo" && t.origin?.reply && !t.assigned && (ack ??= workflow(ctx)).ack === "dispatch"
-          ? { canReply: true, replyDraft: t.replyOnStart ?? ack.ackText.split("{id}").join(t.id).split("{title}").join(t.title) }
-          : {}),
-      };
-    });
+  const replyPolicy = needReplyPolicy(ctx, s.tasks);
+  const tasks = s.tasks.map((t) => ({
+    ...taskRow(ctx, t, t.session ? live[t.session] : null, kids[t.id] ?? [], replyPolicy, s),
+    ready: blockersDone(s, t),
+  }));
   // What waits on the user, in Gerdr's inbox too (_inbox.ts): each member and step on its own, as before
   tellInbox(ctx, tasks as any);
   // Cards that moved (or came) since the last sync: a number on the panel's rail button (_badge.ts)
@@ -252,9 +213,97 @@ export async function list(input: unknown, ctx: Ctx) {
   return { tasks: board.filter((t: any) => t.id === root || t.in === root || t.id === id), at: Date.now(), project: ctx.workspace.project };
 }
 
+type LiveSession = Session & { parent?: string; reportTo?: string };
+
+function liveHelpers(t: Task, all: LiveSession[], sess: any) {
+  return helpers(t, all).map((k) => ({
+    id: k.id,
+    title: k.title,
+    status: k.status,
+    waiting: k.waiting,
+    waitingKind: k.waitingKind,
+    user: k.status === "waiting" && (k.waitingKind !== "ask" || askLeft(k, sess)),
+  }));
+}
+
+function awaitsDispatch(t: Task) {
+  return t.status === "todo" && t.origin?.reply && !t.assigned;
+}
+
+function needReplyPolicy(ctx: Ctx, tasks: Task[]) {
+  return tasks.some(awaitsDispatch) ? workflow(ctx) : undefined;
+}
+
+function taskRow(ctx: Ctx, t: Task, sess: any, kids: ReturnType<typeof liveHelpers>, ack?: ReturnType<typeof workflow>, store?: Store) {
+  const halted = stopped(t, sess);
+  const idle = sess && (sess.status === "idle" || sess.status === "error");
+  return {
+    ...t,
+    waits: open(t).length ? open(t).map((w) => ({ ...w, wake: wakeText(w) })) : undefined,
+    helpers: kids.length ? kids.map(({ user, ...k }) => ({ ...k, left: user })) : undefined,
+    cards: cardStates(t),
+    live: sess ? { status: sess.status, waiting: sess.waiting, waitingSince: sess.waitingSince, turnStartedAt: sess.turnStartedAt, updatedAt: sess.updatedAt, error: sess.error, title: sess.title } : null,
+    column: column(t, sess),
+    stopped: halted || undefined,
+    stopWhy: halted ? stopWhy(t, sess, store) : undefined,
+    said: idle && halted ? lastWords(String(sess.reply ?? "")) || undefined : undefined,
+    latest: t.status !== "done" && t.status !== "dropped" && t.session ? newest(ctx, t.session) || undefined : undefined,
+    ...(awaitsDispatch(t) && ack?.ack === "dispatch"
+      ? { canReply: true, replyDraft: t.replyOnStart ?? ack.ackText.split("{id}").join(t.id).split("{title}").join(t.title) }
+      : {}),
+  };
+}
+
+function isPart(file: string) {
+  return typeof file === "string" && file.startsWith(PARTS + "/") && /^[\w.-]+\.json$/.test(file.slice(PARTS.length + 1));
+}
+
+function readPart(ctx: Ctx, file: string): PartFile | null {
+  if (!ctx.fs.stat(file)) return null;
+  try {
+    return JSON.parse(ctx.fs.read(file));
+  } catch (err) {
+    // An archive/unarchive can move the file between stat and read. The watcher will also see that move.
+    if (!ctx.fs.stat(file)) return null;
+    throw err;
+  }
+}
+
+/** Read-only view for Code's sidebar. A snapshot carries all parts; live changes ask for only the parts that moved. */
+export function view(input: { parts?: string[]; helpers?: LiveSession[] } | null, ctx: Ctx) {
+  const files = input?.parts ?? ctx.fs.list(PARTS).filter((f) => !f.dir).map((f) => f.path);
+  const parts = [...new Set(files)].filter(isPart)
+    .map((f) => [f, readPart(ctx, f)] as const);
+  const ack = needReplyPolicy(ctx, parts.flatMap(([, p]) => p?.tasks ?? []));
+  const candidates = input?.parts ? input.helpers ?? [] : ctx.sessions.list() as LiveSession[];
+  const summary = input?.parts ? undefined : new Map(candidates.map((s) => [s.id, s]));
+  const rows = Object.fromEntries(parts.map(([file, p]) => [file, (p?.tasks ?? []).map((t) => {
+    const sess: any = t.session && t.status !== "dropped"
+      ? t.status === "done" && summary ? summary.get(t.session) : ctx.sessions.get(t.session)
+      : null;
+    const kids = t.status !== "done" && t.status !== "dropped" ? liveHelpers(t, candidates, sess) : [];
+    const newName = String(sess?.title ?? "").trim();
+    const previousName = t.sessionTitle?.session === t.session ? t.sessionTitle?.title : undefined;
+    const shown = newName && (t.autoTitle || (previousName !== undefined && previousName !== newName)) ? { ...t, title: newName } : t;
+    const row = taskRow(ctx, shown, sess, kids, ack);
+    let activityAt = 0;
+    let userActivityAt = 0;
+    let answeredAt = 0;
+    for (const line of p?.activity ?? []) {
+      if (line.by !== t.id && (line.by || p?.id !== t.id)) continue;
+      if (line.kind === "user") userActivityAt = Math.max(userActivityAt, line.at);
+      if (line.at < activityAt) continue;
+      activityAt = line.at;
+      answeredAt = line.kind === "message" && line.by === t.id ? line.at : 0;
+    }
+    return { ...slim(row), activityAt, userActivityAt, answeredAt };
+  })]));
+  return { parts: rows, project: ctx.workspace.project };
+}
+
 /**
- * A task as the whole board gets it: what the cards, the 等你 lines and the search read, without the parts only a
- * task's own view needs. The board runs this on every change it hears of and it came to over 1 MB for 53 tasks
+ * A task as the sidebar gets it: what the cards, the 等你 lines and the search read, without the parts only a
+ * task's own view needs. The old board fetched the list on every change, and it came to over 1 MB for 53 tasks
  * (2026-11-24): notes, asks' answers and the activity feed, mostly on cards long done. Kept in Gerdr's memory until
  * delivered and parsed by the page each time, it held hundreds of MB and stalled the page. A finished card's notes
  * and full brief come from tasks.get when it's opened; tasks.list { id } (an agent asking about one) stays whole.
@@ -280,11 +329,16 @@ function slim<T extends Task>(t: T) {
  * these every 10 s; it used to rerun the whole of tasks.list for that, the board's biggest answer, several times a
  * minute with a few workers going (2026-11-24).
  */
-export function lines(input: { ids?: string[] }, ctx: Ctx) {
+export function lines(input: { ids?: string[]; parts?: Record<string, string> }, ctx: Ctx) {
   const want = new Set(input?.ids ?? []);
   const out: Record<string, string> = {};
-  for (const t of load(ctx).store.tasks)
-    if (want.has(t.id) && t.session && t.status !== "done" && t.status !== "dropped") out[t.id] = newest(ctx, t.session);
+  let legacy: Store | undefined;
+  for (const id of want) {
+    const file = input.parts?.[id] ?? pathOf(id);
+    const t = isPart(file) ? readPart(ctx, file)?.tasks.find((x) => x.id === id) : undefined;
+    const task = t ?? (input.parts ? undefined : (legacy ??= load(ctx).store).tasks.find((x) => x.id === id));
+    if (task?.session && task.status !== "done" && task.status !== "dropped") out[task.id] = newest(ctx, task.session);
+  }
   return out;
 }
 
@@ -412,7 +466,7 @@ function settled(t: Task) {
  * waits on the user right now (an approval in its chat, an error, a question) — the page shows it first and yellow.
  * A worker that stopped with nothing going on just says so on its card.
  */
-function column(s: Store, t: Task, sess: any): "you" | "review" | "active" | "done" {
+function column(t: Task, sess: any): "you" | "review" | "active" | "done" {
   if (t.status === "done" || t.status === "dropped") return "done";
   if (t.status === "review") return "review";
   // Asked of the user by someone: theirs to agree to. Delivered: whoever asked has it now
@@ -700,6 +754,7 @@ export async function start(
   const sess = await ctx.sessions.start({
     cwd,
     ...who,
+    ...(t.blank && input.quiet && !input.continueFrom ? { prepareInBackground: true } : {}),
     // Fixed to the task's name, unless the task waits for Gerdr's auto title (autoTitle)
     ...(t.autoTitle ? {} : { title: t.title }),
     systemFile: `${ctx.workspace.dir}/${sys}`,

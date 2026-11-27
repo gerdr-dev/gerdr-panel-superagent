@@ -149,7 +149,7 @@ export function Fusion({ children }: { children: React.ReactNode }) {
         },
         () => {},
       ),
-    [usePanelChange("user/data")],
+    [usePanelChange("user/data/superagent.json")],
     { poll: 10_000 },
   );
   // The conversations in Code's panes, and the secretary: what each is doing now
@@ -179,7 +179,7 @@ export function Fusion({ children }: { children: React.ReactNode }) {
         (r) => setStanding(r.standing),
         () => {},
       ),
-    [usePanelChange("user/data")],
+    [usePanelChange("user/data/own.json")],
     { poll: 30_000 },
   );
   const moveOwn = (session: string, to: Status) => {
@@ -209,7 +209,7 @@ export function Fusion({ children }: { children: React.ReactNode }) {
         (r) => (setRepos((last.repos = r.settings.repos ?? [])), setAgent((last.agent = r.settings.router.agent ?? ""))),
         () => {},
       ),
-    [usePanelChange("user")],
+    [usePanelChange("user/settings.json")],
     { fallback: 600_000, poll: 600_000 },
   );
   // The list comes from Gerdr's own config (a few commands): once, not with every change of ours

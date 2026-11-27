@@ -97,6 +97,8 @@ export type Task = {
    * that name for the task. Cleared once the task is renamed by anyone else.
    */
   autoTitle?: boolean;
+  /** A conversation the person opened themselves, before their first message. */
+  blank?: boolean;
   /**
    * The worker's conversation's name when list() last looked: a different name since means it was renamed there
    * (Code's 重命名会话) and the task takes it. Per session, so a new worker's conversation is only noted, not taken.

@@ -23,11 +23,10 @@ export default function Layout() {
   useEffect(() => onShowSession(project, (session) => (openSettings(null), showInCode(session))), []);
   // 去向 names tasks: go to the task's conversation
   const toTask = (id: string) =>
-    run<{ tasks: { id: string; session?: string }[] }>("tasks.list").then(
-      (r) => {
-        const s = r.tasks.find((t) => t.id === id)?.session;
+    run<{ session?: string }>("tasks.get", { id }).then(
+      ({ session }) => {
         openSettings(null);
-        if (s) showInCode(s);
+        if (session) showInCode(session);
       },
       () => openSettings(null),
     );

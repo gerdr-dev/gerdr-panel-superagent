@@ -27,7 +27,7 @@ export function usePoll(fn: () => unknown, ms: number) {
 
 // Pushed changes (Gerdr's core usePanelChange / useSessions), through the namespace too: a Gerdr from before them
 // has neither, and the board then polls as it used to. Each is fixed for the page's life, so hooks keep their order.
-type CoreSession = { id: string; status: string; waiting?: string; waitingKind?: string; pending?: number; reportTo?: string; parent?: string; tags?: Record<string, string>; [k: string]: unknown };
+export type CoreSession = { id: string; status: string; title?: string; waitingSince?: number; waiting?: string; waitingKind?: string; pending?: number; reportTo?: string; parent?: string; tags?: Record<string, string>; [k: string]: unknown };
 const coreChange = (core as unknown as { usePanelChange?: (path?: string) => number }).usePanelChange;
 const coreSessions = (core as unknown as { useSessions?: (match?: (s: CoreSession) => boolean) => CoreSession[] }).useSessions;
 const NONE: CoreSession[] = [];
