@@ -513,6 +513,7 @@ export function Fusion({ children }: { children: React.ReactNode }) {
         return {
           id: t.id,
           label: t.title,
+          sessionId: t.status === "todo" ? undefined : t.session,
           detail: you ? "等你" : LABEL[t.status as Status],
           ...(you ? { tone: "warn" as const, pill: true } : t.status === "running" ? { tone: "brand" as const } : t.status === "review" ? { tone: "ok" as const } : {}),
           keywords: [t.id, t.repo, t.origin?.title, t.prompt?.slice(0, 300)].filter(Boolean).join(" "),

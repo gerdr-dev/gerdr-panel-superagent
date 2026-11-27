@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 // its title, id, repo or what was asked. Through the namespace, so a Gerdr from before useSearchItems still runs this
 // panel (⌘K then lists only Gerdr's commands and conversations).
 
-type Item = { id?: string; label: string; detail?: string; tone?: "brand" | "ok" | "warn" | "bad"; pill?: boolean; keywords?: string; icon?: ReactNode; onSelect: () => void };
+type Item = { id?: string; sessionId?: string; label: string; detail?: string; tone?: "brand" | "ok" | "warn" | "bad"; pill?: boolean; keywords?: string; icon?: ReactNode; onSelect: () => void };
 const fromCore = (core as unknown as { useSearchItems?: (items: Item[], opts?: { heading?: string }) => void }).useSearchItems;
 
 export function useSearchItems(items: Item[], opts?: { heading?: string }) {
