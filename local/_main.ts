@@ -81,7 +81,7 @@ export type Item = {
   at: number;
   event: Ev;
   state: "filtered" | "delivered" | "pending" | "accepted" | "attached" | "stopped" | "ignored" | "unavailable" | "observed" | "waiting";
-  /** Retired trigger marker, kept on intake records so they cannot be dispatched. */
+  /** Historical record from the retired proactive-work flow. */
   inferred?: boolean;
   reason?: string;
   tasks?: string[];

@@ -47,7 +47,7 @@ async function one(d: Decision, ctx: Ctx) {
   const settle = (patch: Partial<Item>) =>
     updateState(ctx, (s) => Object.assign(findItem(s, it.id), { decidedAt: Date.now(), ...patch }));
   if (it.inferred) {
-    settle({ state: "filtered", reason: "旧触发器只接已有任务的后续消息" });
+    settle({ state: "filtered", reason: "主动工作已移除，这条旧记录只供查看" });
     return { item: it.id, filtered: true };
   }
   switch (d.decision) {

@@ -11,7 +11,7 @@ import { usePoll } from "../lib/visible";
 // neither. Turning one on writes a Gerdr trigger file (triggers/inbox-*.json, local/inbox.ts); its runs come from
 // /api/work/triggers.
 
-type Source = { on: string; title?: string; description?: string; addon?: string; canReply?: boolean; seen?: number; enabled: boolean; key?: string; allow?: string[]; deny?: string[]; inferred?: boolean; by?: string };
+type Source = { on: string; title?: string; description?: string; addon?: string; canReply?: boolean; seen?: number; enabled: boolean; key?: string; allow?: string[]; deny?: string[]; by?: string };
 /** One of the panel's own triggers (triggers/*.json): always on. */
 type Builtin = { id: string; on: string; name?: string; key?: string; fn?: string; off?: boolean; fixed?: boolean };
 /** A trigger wait_for wrote for a conversation a worker waits on (user/triggers/follow-*.json, waits.followed). */
@@ -211,7 +211,6 @@ function Row({ s, info, onSaved }: { s: Source; info?: TriggerInfo; onSaved: () 
           {s.description && <p className="mt-1 text-[12px] text-muted-foreground">{s.description}</p>}
           {/* Every source picked here goes through inbox.onEvent (local/inbox.ts setSource) */}
           <Dest fn="inbox.onEvent" />
-          {s.inferred && <p className="mt-1 text-[12px] text-muted-foreground">旧触发器只接已有任务的后续消息。</p>}
         </div>
         {s.by ? (
           // Taken by one of the panel's own triggers already: a second one would take each event twice
