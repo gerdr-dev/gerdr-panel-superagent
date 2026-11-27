@@ -336,7 +336,7 @@ function NoteField({ value, onChange }: { value: string; onChange: (v: string) =
       <button
         type="button"
         title="改说明"
-        className="-mx-1.5 block w-[calc(100%+0.75rem)] rounded-md px-1.5 py-0.5 text-left text-[12px] leading-relaxed break-words whitespace-pre-wrap text-muted-foreground hover:bg-accent/60"
+        className="-mx-1.5 block w-[calc(100%+0.75rem)] rounded-md border border-transparent px-1.5 py-0.5 text-left text-[12px] leading-relaxed break-words whitespace-pre-wrap text-muted-foreground hover:bg-accent/60"
         onClick={() => setEdit(true)}
       >
         {value || <span className="italic opacity-70">加一句说明，写给秘书看：比如「行情服务的后端」</span>}
@@ -347,7 +347,9 @@ function NoteField({ value, onChange }: { value: string; onChange: (v: string) =
       ref={ref}
       autoFocus
       rows={1}
-      className={clsx(input, "h-auto resize-none py-1.5 leading-relaxed")}
+      // Not the shared `input`: its 16px on phones (against iOS zooming in on focus) made the note huge while edited.
+      // The page's viewport has maximum-scale=1 (Gerdr's uisite), which already stops that zoom.
+      className="-mx-1.5 block w-[calc(100%+0.75rem)] resize-none rounded-md border bg-background px-1.5 py-0.5 text-[12px] leading-relaxed outline-none focus:ring-2 focus:ring-ring"
       value={value}
       placeholder="说明：比如「行情服务的后端」"
       onChange={(e) => onChange(e.target.value)}
