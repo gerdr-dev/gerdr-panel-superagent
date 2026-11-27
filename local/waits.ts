@@ -46,7 +46,7 @@ export const tools = {
       "wake: what wakes you, a list — whichever comes first wakes you, and ends this wait. Each item is one of: " +
       "{type: message, conversation}: news where a person will answer — a Slack DM id (D09…), a Slack message link or the event id you got (slack-me:C0…:<ts>, for a thread in a channel), a small channel's id (C0…, only when the slack-me add-on takes small channels in full), or an MR URL (its reviews, pipelines, merge come too); " +
       "{type: check, command, every?, cwd?}: a command that tells whether what you wait for has happened (a publish approved, a job finished, a page live) — the board runs it every `every` minutes, exit 0 = it has (you're woken with its output), any other exit = not yet; exit 0 as soon as things leave the step you wait in, not only on the end you hope for ([ \"$s\" != pending_approval ], not [ \"$s\" = success ]) — rejected, stuck halfway or failed must wake you too; waiting on a person (approve, merge), check that act itself, don't assume what should follow it happens by itself; print one line saying where things stand, it shows on your card; " +
-      "{type: time, minutes}: the timeout, required: woken after that long if nothing else came; " +
+      "{type: time, minutes}: required: woken after that long if nothing else came. A reply or a check wakes you first, so this is when silence means you should look and maybe chase, not when you give up: set it by how urgent it is — they said 'in a minute' or it blocks a release: 15–30; a usual reply / approval: ~60; not urgent: half a day or more; " +
       "Every wait needs a time item as its timeout (how long it should take): whoever you wait on may never answer — stuck, offline, forgot; a wait without one is refused. Handed work to a session you started (gerdr session new, here or on another computer)? You are the one who waits for it, the same way: its report wakes you first; past the timeout, go and see where it's stuck. " +
       "Waiting on a person to do something you can see (approve, merge, deploy)? Give both a message and a check. " +
       "Your card stays in progress meanwhile, showing `what`. When the last thing you waited on came and you got something done with it (it went live, a check passed), say that result in your reply first. Then end your turn; when woken and still waiting, call it again. " +
@@ -470,7 +470,7 @@ export async function tick(input: unknown, ctx: Ctx) {
       await wake(ctx, t.id, {
         how: "到点了，回来看",
         fold: `[面板] 到点了，回来看：${cutLine(w.what, 50)}`,
-        text: `[任务面板] 到时间了，回来看一下（任务 ${t.id}）：${w.what}。${late}`,
+        text: `[任务面板] 到时间了，回来看一下（任务 ${t.id}）：${w.what}。先自己查有没有结果；等的人一直没回就在原对话里催一句再等，已经催过还没动静就别再催，ask_human 交给用户（见 task.md「到点了还没动静」）。${late}`,
         // That wait_for ends (all its items): it looks again and waits again if it must. Others stay open
         ends: (x) => x.since === w.since && isOutside(x),
       });
