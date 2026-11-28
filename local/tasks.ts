@@ -13,7 +13,7 @@ import { closeSec, isSecAsk, secStatus } from "./_secask";
 import { allAgents, defaultAgent, mentionsIn } from "./_agents";
 import { archived as archivedGroups, archivedCount, archiveOld, latest, revive, unarchive as bringBack } from "./_archive";
 import { isMain, mains, rerouteTask, routeTask, sweep, toMain } from "./_main";
-import { textOf } from "./playbooks";
+import { compactCommand } from "./_compact";
 import { liveTasks, said } from "./_clues";
 
 /** The title of a task the person opened themselves (local/blank.ts) until its first message names it. */
@@ -514,7 +514,7 @@ export async function compactWorkers(input: { dry?: boolean } | null, ctx: Ctx) 
   const { percent, idleMinutes } = workflow(ctx).workerCompact;
   if (!percent) return "设置里关掉了 worker 自动压缩";
   const { store } = load(ctx);
-  const picked: { id: string; session: string; line: string }[] = [];
+  const picked: { id: string; session: Session; line: string }[] = [];
   for (const t of store.tasks) {
     if (!t.session || t.status === "done" || t.status === "dropped") continue;
     const sess = ctx.sessions.get(t.session);
@@ -523,12 +523,11 @@ export async function compactWorkers(input: { dry?: boolean } | null, ctx: Ctx) 
     if (Date.now() - sess.updatedAt < idleMinutes * 60_000) continue;
     const used = Math.round((c.tokens / c.window) * 100);
     if (used < percent) continue;
-    picked.push({ id: t.id, session: sess.id, line: `${t.id}「${t.title}」上下文 ${used}%（${c.tokens}/${c.window}）` });
+    picked.push({ id: t.id, session: sess, line: `${t.id}「${t.title}」上下文 ${used}%（${c.tokens}/${c.window}）` });
   }
   if (!picked.length) return `没有要压缩的 worker（上下文 ≥ ${percent}%、闲了 ${idleMinutes} 分钟以上）`;
   if (input?.dry) return picked.map((p) => p.line);
-  const how = textOf(ctx, WORKER_COMPACT).replace(/^#.*\n+/, "").trim();
-  const done: string[] = [];
+  const results: string[] = [];
   for (const p of picked) {
     // Marked first: the turn starts as soon as it's sent, and list() runs on that event
     update(ctx, (s) => {
@@ -537,13 +536,13 @@ export async function compactWorkers(input: { dry?: boolean } | null, ctx: Ctx) 
       return s;
     });
     try {
-      await ctx.sessions.send(p.session, `/compact ${how}`.trim());
-      done.push(p.line);
+      await ctx.sessions.send(p.session.id, compactCommand(ctx, p.session, WORKER_COMPACT));
+      results.push(`${p.line}：已发起压缩`);
     } catch (e: any) {
-      done.push(`${p.line}：没压成，${e?.message ?? e}`);
+      results.push(`${p.line}：发起压缩失败，${e?.message ?? e}`);
     }
   }
-  return `压缩了：\n${done.join("\n")}`;
+  return results.join("\n");
 }
 
 /** Its worker isn't running and the task waits on nothing. */

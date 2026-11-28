@@ -18,6 +18,7 @@ import { agentText } from "./_letgo";
 import { workflow } from "./_config";
 import { forRouter } from "./memory";
 import { allAgents } from "./_agents";
+import { compactCommand } from "./_compact";
 import { textOf } from "./playbooks";
 import { DATA } from "./_user";
 import { activity, draftOf, find, ignoredText, load as loadTasks, note, update as updateTasks, type Task } from "./_store";
@@ -635,10 +636,9 @@ export async function compactMain(ctx: Ctx, input?: { force?: boolean }) {
     if (limit > 0 && !(used && used >= limit)) return `上下文 ${used ?? "?"} token，不到 ${limit}，不压缩`;
     if (limit === 0 && s.compactedAt && m.updatedAt <= s.compactedAt) return "上次压缩之后没聊过，不压缩";
   }
-  const how = textOf(ctx, COMPACT).replace(/^#.*\n+/, "").trim();
-  await ctx.sessions.send(m.id, `/compact ${how}`.trim());
+  await ctx.sessions.send(m.id, compactCommand(ctx, m, COMPACT));
   updateState(ctx, (x) => void (x.compactedAt = Date.now()));
-  return `已压缩秘书的对话（压缩前 ${used ?? "?"} token）`;
+  return `已发起秘书对话压缩（压缩前 ${used ?? "?"} token）`;
 }
 
 /**
