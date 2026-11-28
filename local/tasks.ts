@@ -514,7 +514,7 @@ export async function compactWorkers(input: { dry?: boolean } | null, ctx: Ctx) 
   const { percent, idleMinutes } = workflow(ctx).workerCompact;
   if (!percent) return "设置里关掉了 worker 自动压缩";
   const { store } = load(ctx);
-  const picked: { id: string; session: Session; line: string }[] = [];
+  const picked: { id: string; session: string; command: string; line: string }[] = [];
   for (const t of store.tasks) {
     if (!t.session || t.status === "done" || t.status === "dropped") continue;
     const sess = ctx.sessions.get(t.session);
@@ -523,7 +523,9 @@ export async function compactWorkers(input: { dry?: boolean } | null, ctx: Ctx) 
     if (Date.now() - sess.updatedAt < idleMinutes * 60_000) continue;
     const used = Math.round((c.tokens / c.window) * 100);
     if (used < percent) continue;
-    picked.push({ id: t.id, session: sess, line: `${t.id}「${t.title}」上下文 ${used}%（${c.tokens}/${c.window}）` });
+    const command = compactCommand(ctx, sess, WORKER_COMPACT);
+    if (!command) continue;
+    picked.push({ id: t.id, session: sess.id, command, line: `${t.id}「${t.title}」上下文 ${used}%（${c.tokens}/${c.window}）` });
   }
   if (!picked.length) return `没有要压缩的 worker（上下文 ≥ ${percent}%、闲了 ${idleMinutes} 分钟以上）`;
   if (input?.dry) return picked.map((p) => p.line);
@@ -536,7 +538,7 @@ export async function compactWorkers(input: { dry?: boolean } | null, ctx: Ctx) 
       return s;
     });
     try {
-      await ctx.sessions.send(p.session.id, compactCommand(ctx, p.session, WORKER_COMPACT));
+      await ctx.sessions.send(p.session, p.command);
       results.push(`${p.line}：已发起压缩`);
     } catch (e: any) {
       results.push(`${p.line}：发起压缩失败，${e?.message ?? e}`);

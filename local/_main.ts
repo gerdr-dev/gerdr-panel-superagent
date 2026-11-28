@@ -628,6 +628,8 @@ export async function compactMain(ctx: Ctx, input?: { force?: boolean }) {
   const m = s.main ? ctx.sessions.get(s.main) : null;
   if (!m) return "没有秘书的对话";
   if (m.status !== "idle") return `秘书正在${m.status === "running" ? "忙" : "等人"}，下次再看`;
+  const command = compactCommand(ctx, m, COMPACT);
+  if (!command) return "秘书使用的引擎暂未接入面板压缩";
   const force = !!input?.force;
   if (!force && Date.now() - m.updatedAt < COLD) return "一小时内说过话，先不压缩（提示缓存还在）";
   const limit = workflow(ctx).compactTokens;
@@ -636,7 +638,7 @@ export async function compactMain(ctx: Ctx, input?: { force?: boolean }) {
     if (limit > 0 && !(used && used >= limit)) return `上下文 ${used ?? "?"} token，不到 ${limit}，不压缩`;
     if (limit === 0 && s.compactedAt && m.updatedAt <= s.compactedAt) return "上次压缩之后没聊过，不压缩";
   }
-  await ctx.sessions.send(m.id, compactCommand(ctx, m, COMPACT));
+  await ctx.sessions.send(m.id, command);
   updateState(ctx, (x) => void (x.compactedAt = Date.now()));
   return `已发起秘书对话压缩（压缩前 ${used ?? "?"} token）`;
 }
